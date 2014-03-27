@@ -46,6 +46,7 @@ def read_fasta(infa):
 
     return seqdict
 
+
 def align(qryseq, refseq):
     ''' find best alignment with exonerate '''
     rnd = str(uuid4()) 
@@ -81,7 +82,18 @@ def align(qryseq, refseq):
 
 
 def bestalign(qryseq, reflist):
-    pass
+    topscore = 0
+    toprefid = ''
+    for refid, refseq in reflist.iteritems():
+        aln = align(qryseq, refseq)
+        score = 0
+        if aln:
+            score = aln[1]
+        if score > topscore:
+            topscore = score
+            toprefid = refid
+
+    return toprefid #FIXME ... testing currently
 
 
 def bwamem(fq, ref, threads=1, width=150, sortmem=2000000000):
@@ -157,11 +169,11 @@ def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2, refs=None):
                     unmapseq = read.seq[:read.qstart]
 
             if refs is not None:
-                # TODO
-
-                print "read.rlen, read.alen, read.qstart, read.qend, altclip, read.seq, unmapseq" 
-                print read.rlen, read.alen, read.qstart, read.qend, altclip, read.seq, unmapseq 
-                outbam.write(read)
+                topref = bestalign(unmapseq, refs)
+                if topref != '':
+                    print "read.rlen, read.alen, read.qstart, read.qend, altclip, read.seq, unmapseq" 
+                    print read.rlen, read.alen, read.qstart, read.qend, altclip, read.seq, unmapseq 
+                    outbam.write(read)
 
     inbam.close()
     outbam.close()
@@ -181,6 +193,7 @@ def main(args):
 
     # postprocess alignemnts
     filteredbam = fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2, refs=terefs)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Analyse RC-seq data')

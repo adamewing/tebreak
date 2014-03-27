@@ -28,6 +28,24 @@ def rc(dna):
     return dna.translate(complements)[::-1]
 
 
+def read_fasta(infa):
+    seqdict = {}
+
+    with open(infa, 'r') as fa:
+        seqid = ''
+        seq   = ''
+        for line in fa:
+            if line.startswith('>'):
+                if seq != '':
+                    seqdict[seqid] = seq
+                seqid = line.lstrip('>').strip()
+                seq   = ''
+            else:
+                assert seqid != ''
+                seq = seq + line.strip()
+
+    return seqdict
+
 def align(qryseq, refseq):
     ''' find best alignment with exonerate '''
     rnd = str(uuid4()) 
@@ -61,11 +79,10 @@ def align(qryseq, refseq):
 
     return best
 
+
 def bestalign(qryseq, reflist):
     pass
 
-def loadrefs(fa):
-    pass
 
 def bwamem(fq, ref, threads=1, width=150, sortmem=2000000000):
     ''' FIXME: add parameters to commandline '''
@@ -160,10 +177,10 @@ def main(args):
     outbam  = bwamem(mergefq, args.ref, threads=args.threads)
 
     # load references
-    # TODO
+    terefs = read_fasta(args.telib)
 
     # postprocess alignemnts
-    # TODO
+    filteredbam = fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2, refs=terefs)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Analyse RC-seq data')

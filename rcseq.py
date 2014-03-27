@@ -5,17 +5,20 @@ import subprocess
 import gzip
 import os
 import sys
+import pysam
 
 from uuid import uuid4
 from itertools import izip
+from re import sub
 
 '''
 rcseq.py: Analyse RC-seq datasets.
 
 Prereqs:
-exonerate
-bwa
-pysam
+exonerate (pairwise alignments - not sure if we will need this)
+bwa       (sr alignment workhorse)
+pysam     (parsing SAM/BAM formatted alignments)
+FLASH     (for assembling read pairs)
 
 '''
 
@@ -58,9 +61,14 @@ def align(qryseq, refseq):
 
     return best
 
+def bestalign(qryseq, reflist):
+    pass
+
+def loadrefs(fa):
+    pass
 
 def bwamem(fq, ref, threads=1, width=150, sortmem=2000000000):
-    ''' FIXME '''
+    ''' FIXME: add parameters to commandline '''
     rg = '@RG\tID:RCSEQ\tSM:' + fq
 
     sam_out  = fq + '.realign.sam'
@@ -102,11 +110,60 @@ def flash_wrapper(fq1, fq2, max_overlap, threads):
 
     return out + '/' + out + '.extendedFrags.fastq.gz'
 
-def main(args):
-    mergefq = flash_wrapper(args.pair1, args.pair2, args.maxoverlap, args.threads)
-    outbam  = bwamem(mergefq, args.ref, threads=args.threads)
-    
 
+def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2, refs=None):
+    ''' FIXME: ass parameters to commandline '''
+    assert minclip > maxaltclip
+
+    outbamfn = sub('.bam$', '.clipped.bam', inbamfn)
+
+    inbam  = pysam.Samfile(inbamfn, 'rb')
+    outbam = pysam.Samfile(outbamfn, 'wb', template=inbam)
+
+    for read in inbam.fetch():
+        if read.rlen - read.alen >= int(minclip): # clipped?
+
+            # length of 'minor' clip (want this to be small or zero - bad if just the midle part of read is aligned)
+            altclip = min(read.qstart, read.rlen-read.qend)
+
+            if altclip <= maxaltclip:
+                # get unmapped part
+
+                if read.qstart <= maxaltclip:
+                    # (align) AAAAAAAAAAAAAAAAAA
+                    # (read)  RRRRRRRRRRRRRRRRRRRRRRRRRRRR
+                    unmapseq = read.seq[read.qend:]
+
+                else:
+                    # (align)           AAAAAAAAAAAAAAAAAA
+                    # (read)  RRRRRRRRRRRRRRRRRRRRRRRRRRRR
+                    unmapseq = read.seq[:read.qstart]
+
+            if refs is not None:
+                # TODO
+
+                print "read.rlen, read.alen, read.qstart, read.qend, altclip, read.seq, unmapseq" 
+                print read.rlen, read.alen, read.qstart, read.qend, altclip, read.seq, unmapseq 
+                outbam.write(read)
+
+    inbam.close()
+    outbam.close()
+
+    return outbamfn
+
+
+def main(args):
+    # merge paired ends
+    mergefq = flash_wrapper(args.pair1, args.pair2, args.maxoverlap, args.threads)
+
+    # map merged pairs to reference
+    outbam  = bwamem(mergefq, args.ref, threads=args.threads)
+
+    # load references
+    # TODO
+
+    # postprocess alignemnts
+    # TODO
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Analyse RC-seq data')
@@ -115,6 +172,7 @@ if __name__ == '__main__':
     parser.add_argument('-t', dest='threads', default=1, help='number of threads')
     parser.add_argument('-r', dest='ref', required=True, help='reference genome for bwa-mem, also expects .fai index (samtools faidx ref.fa)')
     parser.add_argument('--max-overlap', dest='maxoverlap', default=100, help='Maximum overlap used for joining paired reads with FLASH')
+    parser.add_argument('--telib', dest='telib', required=True, help='TE library (FASTA)')
     args = parser.parse_args()
     main(args)
 

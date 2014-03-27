@@ -83,7 +83,7 @@ def align(qryseq, refseq):
 
 def bestalign(qryseq, reflist):
     topscore = 0
-    toprefid = ''
+    topref   = [] 
     for refid, refseq in reflist.iteritems():
         aln = align(qryseq, refseq)
         score = 0
@@ -91,9 +91,9 @@ def bestalign(qryseq, reflist):
             score = aln[1]
         if score > topscore:
             topscore = score
-            toprefid = refid
+            topref   = aln 
 
-    return toprefid #FIXME ... testing currently
+    return topref #FIXME ... testing currently
 
 
 def bwamem(fq, ref, threads=1, width=150, sortmem=2000000000):
@@ -171,8 +171,8 @@ def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2, refs=None):
             if refs is not None:
                 topref = bestalign(unmapseq, refs)
                 if topref != '':
-                    print "read.rlen, read.alen, read.qstart, read.qend, altclip, read.seq, unmapseq" 
-                    print read.rlen, read.alen, read.qstart, read.qend, altclip, read.seq, unmapseq 
+                    print "read.rlen, read.alen, read.qstart, read.qend, altclip, read.seq, topref" 
+                    print read.rlen, read.alen, read.qstart, read.qend, altclip, read.seq, topref
                     outbam.write(read)
 
     inbam.close()

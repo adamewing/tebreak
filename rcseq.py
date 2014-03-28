@@ -62,7 +62,7 @@ def align(qryseq, refseq):
     tgt.close()
     qry.close()
 
-    cmd = ['exonerate', '--bestn', '1', '-m', 'ungapped', '--showalignment','0', '--ryo', 'SUMMARY\t%s\t%qab\t%qae\t%tab\t%tae\n', qryfa, tgtfa]
+    cmd = ['exonerate', '--bestn', '1', '-m', 'ungapped', '--showalignment','0', '--ryo', 'SUMMARY\t%s\t%qab\t%qae\t%tab\t%tae\t%pi\n', qryfa, tgtfa]
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     best = []
@@ -91,7 +91,8 @@ def bestalign(qryseq, reflist):
             score = aln[1]
         if score > topscore:
             topscore = score
-            topref   = aln 
+            topref   = aln
+            topref.append(refid)
 
     return topref #FIXME ... testing currently
 
@@ -170,7 +171,7 @@ def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2, refs=None):
 
             if refs is not None:
                 topref = bestalign(unmapseq, refs)
-                if topref != '':
+                if len(topref) > 0:
                     print "read.rlen, read.alen, read.qstart, read.qend, altclip, read.seq, topref" 
                     print read.rlen, read.alen, read.qstart, read.qend, altclip, read.seq, topref
                     outbam.write(read)

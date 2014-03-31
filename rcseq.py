@@ -30,12 +30,27 @@ class SplitRead:
 
         self.tname = tname
         self.chrom = chrom
-        self.loc   = loc
+        self.alignloc   = loc
+        self.breakloc   = 0
+
+        # find breakpoint
+        
+        if gread.qstart < gread.rlen - gread.qend:
+            # (align) AAAAAAAAAAAAAAAAAA
+            # (read)  RRRRRRRRRRRRRRRRRRRRRRRRRRRR
+            self.breakloc = gread.positions[-1]
+
+        else:
+            # (align)           AAAAAAAAAAAAAAAAAA
+            # (read)  RRRRRRRRRRRRRRRRRRRRRRRRRRRR
+            self.breakloc = gread.positions[0]
+
+        assert self.breakloc >= 0
 
     def __gt__(self, other):
         ''' enables sorting of SplitRead objects '''
         if self.chrom == other.chrom:
-            return self.loc > other.loc
+            return self.breakloc > other.breakloc
         else:
             return self.chrom > other.chrom
 
@@ -222,8 +237,7 @@ def build_te_clusters(inbamfn, tebamfn):
     tebam.close()
     splitreads.sort()
 
-    for sr in splitreads:
-        
+    return splitreads # FIXME 
 
 
 def main(args):

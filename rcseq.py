@@ -22,6 +22,24 @@ FLASH     (for assembling read pairs)
 
 '''
 
+class SplitRead:
+    ''' gread = genome read, tread = TE read '''
+    def __init__(self, gread, tread, tname, chrom, loc):
+        self.gread = gread
+        self.tread = tread
+
+        self.tname = tname
+        self.chrom = chrom
+        self.loc   = loc
+
+    def __gt__(self, other):
+        ''' enables sorting of SplitRead objects '''
+        if self.chrom == other.chrom:
+            return self.loc > other.loc
+        else:
+            return self.chrom > other.chrom
+
+
 
 def rc(dna):
     complements = string.maketrans('acgtrymkbdhvACGTRYMKBDHV', 'tgcayrkmvhdbTGCAYRKMVHDB')
@@ -141,45 +159,71 @@ def flash_wrapper(fq1, fq2, max_overlap, threads):
     return out + '/' + out + '.extendedFrags.fastq.gz'
 
 
-def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2, refs=None):
-    ''' FIXME: ass parameters to commandline '''
+def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2, minmapq=10):
+    ''' FIXME: add parameters to commandline '''
     assert minclip > maxaltclip
 
-    outbamfn = sub('.bam$', '.clipped.bam', inbamfn)
+    outfqfn = sub('.bam$', '.clipped.fq', inbamfn)
+    inbam   = pysam.Samfile(inbamfn, 'rb')
 
-    inbam  = pysam.Samfile(inbamfn, 'rb')
-    outbam = pysam.Samfile(outbamfn, 'wb', template=inbam)
+    with open(outfqfn, 'w') as outfq:
+        for read in inbam.fetch():
+            unmapseq = None
+            unmapqua = None
 
-    for read in inbam.fetch():
-        if read.rlen - read.alen >= int(minclip): # clipped?
+            if read.rlen - read.alen >= int(minclip): # clipped?
 
-            # length of 'minor' clip (want this to be small or zero - bad if just the midle part of read is aligned)
-            altclip = min(read.qstart, read.rlen-read.qend)
+                # length of 'minor' clip (want this to be small or zero - bad if just the middle part of read is aligned)
+                altclip = min(read.qstart, read.rlen-read.qend)
 
-            if altclip <= maxaltclip:
-                # get unmapped part
+                if altclip <= maxaltclip:
+                    # get unmapped part
+                    if read.qstart <= maxaltclip:
+                        # (align) AAAAAAAAAAAAAAAAAA
+                        # (read)  RRRRRRRRRRRRRRRRRRRRRRRRRRRR
+                        unmapseq = read.seq[read.qend:]
+                        unmapqua = read.qual[read.qend:]
 
-                if read.qstart <= maxaltclip:
-                    # (align) AAAAAAAAAAAAAAAAAA
-                    # (read)  RRRRRRRRRRRRRRRRRRRRRRRRRRRR
-                    unmapseq = read.seq[read.qend:]
+                    else:
+                        # (align)           AAAAAAAAAAAAAAAAAA
+                        # (read)  RRRRRRRRRRRRRRRRRRRRRRRRRRRR
+                        unmapseq = read.seq[:read.qstart]
+                        unmapqua = read.qual[:read.qstart]
 
-                else:
-                    # (align)           AAAAAAAAAAAAAAAAAA
-                    # (read)  RRRRRRRRRRRRRRRRRRRRRRRRRRRR
-                    unmapseq = read.seq[:read.qstart]
+            if not read.is_unmapped and unmapseq is not None and read.mapq > int(minmapq):
+                infoname = ':'.join((read.qname, str(inbam.getrname(read.tid)), str(read.pos))) # help find read again
+                fqstr = "\n".join(("@" + infoname, unmapseq, '+', unmapqua))
+                outfq.write(fqstr + "\n")
 
-            if refs is not None:
-                topref = bestalign(unmapseq, refs)
-                if len(topref) > 0:
-                    print "read.rlen, read.alen, read.qstart, read.qend, altclip, read.seq, topref" 
-                    print read.rlen, read.alen, read.qstart, read.qend, altclip, read.seq, topref
-                    outbam.write(read)
+        inbam.close()
+
+    return outfqfn
+
+
+def build_te_clusters(inbamfn, tebamfn):
+    ''' g* --> locations on genome; t* --> locations on TE '''
+    inbam = pysam.Samfile(inbamfn, 'rb')
+    tebam = pysam.Samfile(tebamfn, 'rb')
+
+    ''' get sorted list of split reads '''
+    splitreads = []
+    for tread in tebam.fetch():
+        if not tread.is_unmapped:
+            tname = tebam.getrname(tread.tid)
+            gname = ':'.join(tread.qname.split(':')[:-2])
+            gchrom, gloc = tread.qname.split(':')[-2:]
+
+            gloc = int(gloc)
+            for gread in inbam.fetch(reference=gchrom, start=gloc, end=gloc+1):
+                if (gread.qname, gread.pos, inbam.getrname(gread.tid)) == (gname, gloc, gchrom):
+                    splitreads.append(SplitRead(gread, tread, tname, gchrom, gloc))
 
     inbam.close()
-    outbam.close()
+    tebam.close()
+    splitreads.sort()
 
-    return outbamfn
+    for sr in splitreads:
+        
 
 
 def main(args):
@@ -187,13 +231,16 @@ def main(args):
     mergefq = flash_wrapper(args.pair1, args.pair2, args.maxoverlap, args.threads)
 
     # map merged pairs to reference
-    outbam  = bwamem(mergefq, args.ref, threads=args.threads)
+    outbam = bwamem(mergefq, args.ref, threads=args.threads)
 
     # load references
     terefs = read_fasta(args.telib)
 
-    # postprocess alignemnts
-    filteredbam = fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2, refs=terefs)
+    # realign clipped sequences to TE library
+    clipfastq = fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2)
+    clipbam   = bwamem(clipfastq, args.telib, threads=args.threads)
+
+    # cluster split reads    
 
 
 if __name__ == '__main__':
@@ -203,7 +250,7 @@ if __name__ == '__main__':
     parser.add_argument('-t', dest='threads', default=1, help='number of threads')
     parser.add_argument('-r', dest='ref', required=True, help='reference genome for bwa-mem, also expects .fai index (samtools faidx ref.fa)')
     parser.add_argument('--max-overlap', dest='maxoverlap', default=100, help='Maximum overlap used for joining paired reads with FLASH')
-    parser.add_argument('--telib', dest='telib', required=True, help='TE library (FASTA)')
+    parser.add_argument('--telib', dest='telib', required=True, help='TE library (BWA indexed FASTA)')
     args = parser.parse_args()
     main(args)
 

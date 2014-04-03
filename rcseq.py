@@ -25,13 +25,15 @@ FLASH     (for assembling read pairs)
 
 class SplitRead:
     ''' gread = genome read, tread = TE read '''
-    def __init__(self, gread, tread, tname, chrom, loc):
+    def __init__(self, gread, tread, tname, chrom, loc, tlen):
         self.gread     = gread
         self.tread     = tread  
-        self.alignloc  = loc
+        self.alignloc  = int(loc)
         self.breakloc  = 0
-        self.breakside = None
+        self.breakside = None # 'L' or 'R' (left/right)
+        self.teside    = None # '5' or '3' (5' or 3')
         self.chrom     = chrom
+        self.tlen      = int(tlen)
 
         self.tclass, self.tname = tname.split(':')
         
@@ -44,8 +46,16 @@ class SplitRead:
             self.breakloc  = gread.positions[0] # breakpoint on left
             self.breakside = 'L'
 
+        self.dist_from_3p = self.tlen - self.tread.positions[-1]
+
+        if self.dist_from_3p < 50:
+            self.teside = '3'
+        else:
+            self.teside = '5'
+
         assert self.breakloc >= 0
         assert self.breakside is not None
+        assert self.teside is not None
 
     def get_tematch(self):
         ''' return number of mismatches / aligned length of TE sub-read '''
@@ -97,6 +107,10 @@ class Cluster:
         ''' return distinct classes of TE in cluster '''
         return list(set([read.tname for read in self._splitreads]))
 
+    def te_sides(self):
+        ''' return distinct classes of TE in cluster '''
+        return list(set([read.teside for read in self._splitreads]))
+
     def breakpoints(self):
         return Counter([read.breakloc for read in self._splitreads])
 
@@ -137,6 +151,9 @@ def read_fasta(infa):
             else:
                 assert seqid != ''
                 seq = seq + line.strip()
+
+    if seqid not in seqdict and seq != '':
+        seqdict[seqid] = seq
 
     return seqdict
 
@@ -265,7 +282,7 @@ def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2, minmapq=10): # TODO P
     return outfqfn
 
 
-def build_te_splitreads(inbamfn, tebamfn, min_te_match = 0.95): # TODO PARAM
+def build_te_splitreads(inbamfn, tebamfn, teref, min_te_match = 0.95): # TODO PARAM
     ''' g* --> locations on genome; t* --> locations on TE '''
     inbam = pysam.Samfile(inbamfn, 'rb')
     tebam = pysam.Samfile(tebamfn, 'rb')
@@ -281,7 +298,8 @@ def build_te_splitreads(inbamfn, tebamfn, min_te_match = 0.95): # TODO PARAM
             gloc = int(gloc)
             for gread in inbam.fetch(reference=gchrom, start=gloc, end=gloc+1):
                 if (gread.qname, gread.pos, inbam.getrname(gread.tid)) == (gname, gloc, gchrom):
-                        sr = SplitRead(gread, tread, tname, gchrom, gloc)
+                        tlen = len(teref[tname])
+                        sr = SplitRead(gread, tread, tname, gchrom, gloc, tlen)
                         if sr.get_tematch() >= min_te_match:
                             splitreads.append(sr)
 
@@ -315,7 +333,7 @@ def build_te_clusters(splitreads, searchdist=100): # TODO PARAM
     return clusters
 
 
-def filter_clusters(clusters, minsize=4, bothends=True): # TODO PARAM
+def filter_clusters(clusters, minsize=4, bothends=False): # TODO PARAM
     ''' return only clusters meeting cutoffs '''
     filtered = []
 
@@ -324,6 +342,8 @@ def filter_clusters(clusters, minsize=4, bothends=True): # TODO PARAM
             subcluster = cluster.subcluster_by_class(teclass)
             reject = False
             if len(subcluster) < minsize:
+                reject = True
+            if bothends and len(cluster.te_sides()) < 2:
                 reject = True
 
             if not reject:

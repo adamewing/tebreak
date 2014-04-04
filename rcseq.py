@@ -7,10 +7,11 @@ import os
 import sys
 import pysam
 
+from string import maketrans
 from collections import Counter
 from uuid import uuid4
 from itertools import izip
-from re import sub
+from re import sub, search
 
 '''
 rcseq.py: Analyse RC-seq datasets.
@@ -85,6 +86,8 @@ class Cluster:
         if firstread is not None:
             self.add_splitread(firstread)
 
+        self._hardclips = []
+
     def add_splitread(self, sr):
         ''' add a SplitRead and update '''
         self._splitreads.append(sr)
@@ -120,9 +123,18 @@ class Cluster:
         [new.add_splitread(read) for read in self._splitreads if read.tclass == teclass]
         return new
 
+    def add_hardclips(self, bamfn):
+        bam = pysam.Samfile(bamfn, 'rb')
+        for read in bam.fetch(reference=self.chrom, start=self._start, end=self._end+1):
+            if search('H', read.cigarstring) and read.is_secondary:
+                self._hardclips.append(read)
+
+        #print "DEBUG:", len(self._hardclips)
+        return len(self._hardclips)
+
     def __str__(self):
         locstr  = self.chrom + ':' + str(self._start) + '-' + str(self._end)
-        infostr = ' '.join(map(str, ('median:', self._median, 'len:', len(self._splitreads))))
+        infostr = ' '.join(map(str, ('median:', self._median, 'len:', len(self._splitreads), len(self._hardclips))))
         return locstr + ' ' + infostr
 
     def __len__(self):
@@ -131,7 +143,7 @@ class Cluster:
 
 def rc(dna):
     ''' reverse complement '''
-    complements = string.maketrans('acgtrymkbdhvACGTRYMKBDHV', 'tgcayrkmvhdbTGCAYRKMVHDB')
+    complements = maketrans('acgtrymkbdhvACGTRYMKBDHV', 'tgcayrkmvhdbTGCAYRKMVHDB')
     return dna.translate(complements)[::-1]
 
 
@@ -158,47 +170,17 @@ def read_fasta(infa):
     return seqdict
 
 
-def align(qryseq, refseq):
-    ''' find best alignment with exonerate '''
-    rnd = str(uuid4()) 
-    tgtfa = 'tmp.' + rnd + '.tgt.fa'
-    qryfa = 'tmp.' + rnd + '.qry.fa'
-
-    tgt = open(tgtfa, 'w')
-    qry = open(qryfa, 'w')
-
-    tgt.write('>ref' + '\n' + refseq + '\n')
-    qry.write('>qry' + '\n' + qryseq + '\n')
-
-    tgt.close()
-    qry.close()
-
-    cmd = ['exonerate', '--bestn', '1', '-m', 'ungapped', '--showalignment','0', '--ryo', 'SUMMARY\t%s\t%qab\t%qae\t%tab\t%tae\t%pi\n', qryfa, tgtfa]
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-    best = []
-    topscore = 0
-
-    for pline in p.stdout.readlines():
-        if pline.startswith('SUMMARY'):
-            c = pline.strip().split()
-            if int(c[1]) > topscore:
-                topscore = int(c[1])
-                best = c
-
-    os.remove(tgtfa)
-    os.remove(qryfa)
-
-    return best
-
-
 def bwamem(fq, ref, threads=1, width=150, sortmem=2000000000):
     ''' FIXME: add parameters to commandline '''
     rg = '@RG\tID:RCSEQ\tSM:' + fq
+    fqroot = sub('.extendedFrags.fastq.gz$', '', fq)
+    fqroot = sub('.fq$', '', fqroot)
 
-    sam_out  = fq + '.realign.sam'
-    bam_out  = fq + '.realign.bam'
-    sort_out = fq + '.realign.sorted'
+    print "DEBUG: fqroot:", fqroot
+
+    sam_out  = fqroot + '.sam'
+    bam_out  = fqroot + '.bam'
+    sort_out = fqroot + '.sorted'
 
     sam_cmd  = ['bwa', 'mem', '-t', str(threads), '-M', '-R', rg, ref, fq]
     bam_cmd  = ['samtools', 'view', '-bt', ref + '.bai', '-o', bam_out, sam_out]
@@ -236,7 +218,44 @@ def flash_wrapper(fq1, fq2, max_overlap, threads):
     return out + '/' + out + '.extendedFrags.fastq.gz'
 
 
-def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2, minmapq=10): # TODO PARAMS
+def bamrec_to_fastq(read, diffseq=None, diffqual=None, diffname=None):
+    ''' convert BAM record to FASTQ record: can substitute name/seq/qual using diffseq/diffqual/diffname '''
+    name = read.qname
+    if diffname is not None:
+        name = diffname
+
+    qual = read.qual
+    if diffqual is not None:
+        qual = diffqual
+
+    seq  = read.seq
+    if diffseq is not None:
+        seq = diffseq
+
+    if read.is_reverse:
+        qual = qual[::-1]
+        seq  = rc(seq)
+
+    return '\n'.join(('@'+name,seq,"+",qual))
+
+
+def filter_full_matches_dups(inbamfn, maxclip=10): # TODO params
+    ''' return a FASTQ file of reads that didn't match the reference end-to-end '''
+    outfqfn = sub('.bam$', '.imperfect.fq', inbamfn)
+    inbam   = pysam.Samfile(inbamfn, 'rb')
+
+    with open(outfqfn, 'w') as outfq:
+        for read in inbam.fetch(until_eof=True):
+            if not read.is_unmapped:
+                if (not read.is_secondary) and read.rlen - read.alen < int(maxclip):
+                    outfq.write(bamrec_to_fastq(read) + '\n')
+            else:
+                outfq.write(bamrec_to_fastq(read) + '\n')
+
+    return outfqfn
+
+
+def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2): # TODO PARAMS
     ''' FIXME: add parameters to commandline '''
     assert minclip > maxaltclip
 
@@ -271,10 +290,9 @@ def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2, minmapq=10): # TODO P
                         unmapseq = read.seq[:read.qstart]
                         unmapqua = read.qual[:read.qstart]
 
-            if not read.is_unmapped and unmapseq is not None and read.mapq > int(minmapq) and uid not in used:
+            if not read.is_unmapped and unmapseq is not None:
                 infoname = ':'.join((read.qname, str(inbam.getrname(read.tid)), str(read.pos))) # help find read again
-                fqstr = "\n".join(("@" + infoname, unmapseq, '+', unmapqua))
-                outfq.write(fqstr + "\n")
+                outfq.write(bamrec_to_fastq(read, diffseq=unmapseq, diffqual=unmapqua, diffname=infoname) + '\n')
                 used[uid] = True
 
         inbam.close()
@@ -282,10 +300,10 @@ def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2, minmapq=10): # TODO P
     return outfqfn
 
 
-def build_te_splitreads(inbamfn, tebamfn, teref, min_te_match = 0.95): # TODO PARAM
+def build_te_splitreads(refbamfn, tebamfn, teref, min_te_match = 0.95): # TODO PARAM
     ''' g* --> locations on genome; t* --> locations on TE '''
-    inbam = pysam.Samfile(inbamfn, 'rb')
-    tebam = pysam.Samfile(tebamfn, 'rb')
+    refbam = pysam.Samfile(refbamfn, 'rb')
+    tebam  = pysam.Samfile(tebamfn, 'rb')
 
     ''' get sorted list of split reads '''
     splitreads = []
@@ -296,21 +314,21 @@ def build_te_splitreads(inbamfn, tebamfn, teref, min_te_match = 0.95): # TODO PA
             gchrom, gloc = tread.qname.split(':')[-2:]
 
             gloc = int(gloc)
-            for gread in inbam.fetch(reference=gchrom, start=gloc, end=gloc+1):
-                if (gread.qname, gread.pos, inbam.getrname(gread.tid)) == (gname, gloc, gchrom):
+            for gread in refbam.fetch(reference=gchrom, start=gloc, end=gloc+1):
+                if (gread.qname, gread.pos, refbam.getrname(gread.tid)) == (gname, gloc, gchrom):
                         tlen = len(teref[tname])
                         sr = SplitRead(gread, tread, tname, gchrom, gloc, tlen)
                         if sr.get_tematch() >= min_te_match:
                             splitreads.append(sr)
 
-    inbam.close()
+    refbam.close()
     tebam.close()
     splitreads.sort()
 
     return splitreads
 
 
-def build_te_clusters(splitreads, searchdist=100): # TODO PARAM
+def build_te_clusters(refbamfn, splitreads, searchdist=100): # TODO PARAM
     ''' cluster SplitRead objects into Cluster objects and return a list of them '''
     clusters  = []
 
@@ -330,24 +348,40 @@ def build_te_clusters(splitreads, searchdist=100): # TODO PARAM
                 #print "DEBUG: adding sr", str(sr), "to cluster", str(clusters[-1])
                 clusters[-1].add_splitread(sr)
 
+    #[cluster.add_hardclips(refbamfn) for cluster in clusters if len(cluster)]
+
     return clusters
 
 
-def filter_clusters(clusters, minsize=4, bothends=False): # TODO PARAM
+def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, rescue=False): # TODO PARAM
     ''' return only clusters meeting cutoffs '''
+    ''' active_elts is a list of active transposable element names (e.g. L1Hs) '''
+    ''' refbamfn is the filename of the reference-aligned BAM '''
     filtered = []
+    active_elts = Counter(active_elts)
 
     for cluster in clusters:
         for teclass in cluster.te_classes(): # can consider peaks with more than one TE class
             subcluster = cluster.subcluster_by_class(teclass)
-            reject = False
-            if len(subcluster) < minsize:
+            reject = True
+            
+            # at least one alignment in a cluster has to be from an active element
+            for tn in subcluster.te_names():
+                if tn in active_elts:
+                    reject = False
+
+            # add hard clipped reads to boost counts and rescue low-cover sites
+            if rescue:
+                subcluster.add_hardclips(refbamfn)
+
+            if len(subcluster) + len(subcluster._hardclips) < minsize:
                 reject = True
+
             if bothends and len(cluster.te_sides()) < 2:
                 reject = True
 
             if not reject:
-                print subcluster, subcluster.te_names(), subcluster.breakpoints()
+                print subcluster, subcluster.te_names(), subcluster.breakpoints(), len(subcluster._hardclips)
                 filtered.append(subcluster)
 
     return filtered
@@ -357,16 +391,19 @@ def main(args):
     # merge paired ends
     mergefq = flash_wrapper(args.pair1, args.pair2, args.maxoverlap, args.threads)
 
+    # filter reads unlikely to contain information about non-reference insertions (TODO: make optional)
+    # optional map to reference followed by filter, not implemented yet
+
     # map merged pairs to reference
-    outbam = bwamem(mergefq, args.ref, threads=args.threads)
+    refamfn = bwamem(mergefq, args.ref, threads=args.threads)
 
     # load references
     terefs = read_fasta(args.telib)
 
     # realign clipped sequences to TE library
-    clipfastq = fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2)
-    clipbam   = bwamem(clipfastq, args.telib, threads=args.threads)
-
+    clipfastq = fetch_clipped_reads(refbamfn, minclip=50)
+    tebamfn = bwamem(clipfastq, args.telib, threads=args.threads)
+ 
     # cluster split reads
 
 

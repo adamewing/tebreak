@@ -26,26 +26,29 @@ FLASH     (for assembling read pairs)
 
 class SplitRead:
     ''' gread = genome read, tread = TE read '''
-    def __init__(self, gread, tread, tname, chrom, loc, tlen):
+    def __init__(self, gread, tread, tname, chrom, loc, tlen, rescue=False, breakloc=None):
+        ''' if read is obtained through hard-clipped rescue, need to set breakloc manually '''
         self.gread     = gread
         self.tread     = tread  
         self.alignloc  = int(loc)
-        self.breakloc  = 0
-        self.breakside = None # 'L' or 'R' (left/right)
+        self.breakloc  = None
         self.teside    = None # '5' or '3' (5' or 3')
         self.chrom     = chrom
         self.tlen      = int(tlen)
+        self.hardclips = [] # keep hardclipped reads for later
+        self.rescued   = False
 
         self.tclass, self.tname = tname.split(':')
         
         # find breakpoint
-        
-        if gread.qstart < gread.rlen - gread.qend:
-            self.breakloc  = gread.positions[-1] # breakpoint on right
-            self.breakside = 'R'
+        if rescue:
+            self.breakloc = breakloc
+            self.rescued  = True
         else:
-            self.breakloc  = gread.positions[0] # breakpoint on left
-            self.breakside = 'L'
+            if gread.qstart < gread.rlen - gread.qend:
+                self.breakloc  = gread.positions[-1] # breakpoint on right
+            else:
+                self.breakloc  = gread.positions[0] # breakpoint on left
 
         self.dist_from_3p = self.tlen - self.tread.positions[-1]
 
@@ -54,8 +57,7 @@ class SplitRead:
         else:
             self.teside = '5'
 
-        assert self.breakloc >= 0
-        assert self.breakside is not None
+        assert self.breakloc is not None
         assert self.teside is not None
 
     def get_tematch(self):
@@ -86,8 +88,6 @@ class Cluster:
         if firstread is not None:
             self.add_splitread(firstread)
 
-        self._hardclips = []
-
     def add_splitread(self, sr):
         ''' add a SplitRead and update '''
         self._splitreads.append(sr)
@@ -95,6 +95,9 @@ class Cluster:
             self.chrom = sr.chrom
 
         assert self.chrom == sr.chrom # clusters can't include > 1 chromosome
+
+        if self._median > 0 and (self._median - sr.breakloc) > 1000:
+            print "WARNING: Splitread", str(sr), "more than 1000 bases from median of cluster."
 
         ''' update statistics '''
         self._splitreads.sort()
@@ -123,18 +126,16 @@ class Cluster:
         [new.add_splitread(read) for read in self._splitreads if read.tclass == teclass]
         return new
 
-    def add_hardclips(self, bamfn):
-        bam = pysam.Samfile(bamfn, 'rb')
-        for read in bam.fetch(reference=self.chrom, start=self._start, end=self._end+1):
-            if search('H', read.cigarstring) and read.is_secondary:
-                self._hardclips.append(read)
-
-        #print "DEBUG:", len(self._hardclips)
-        return len(self._hardclips)
+    def get_hardclips(self):
+        hclist = []
+        for sr in self._splitreads:
+            for hc in sr.hardclips:
+                hclist.append(hc)
+        return hclist
 
     def __str__(self):
         locstr  = self.chrom + ':' + str(self._start) + '-' + str(self._end)
-        infostr = ' '.join(map(str, ('median:', self._median, 'len:', len(self._splitreads), len(self._hardclips))))
+        infostr = ' '.join(map(str, ('median:', self._median, 'len:', len(self._splitreads))))
         return locstr + ' ' + infostr
 
     def __len__(self):
@@ -178,9 +179,9 @@ def bwamem(fq, ref, threads=1, width=150, sortmem=2000000000):
 
     print "DEBUG: fqroot:", fqroot
 
-    sam_out  = fqroot + '.sam'
-    bam_out  = fqroot + '.bam'
-    sort_out = fqroot + '.sorted'
+    sam_out  = '.'.join((fqroot, 'sam'))
+    bam_out  = '.'.join((fqroot, 'bam'))
+    sort_out = '.'.join((fqroot, 'sorted'))
 
     sam_cmd  = ['bwa', 'mem', '-t', str(threads), '-M', '-R', rg, ref, fq]
     bam_cmd  = ['samtools', 'view', '-bt', ref + '.bai', '-o', bam_out, sam_out]
@@ -263,7 +264,7 @@ def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2): # TODO PARAMS
     inbam   = pysam.Samfile(inbamfn, 'rb')
 
     # track tid:pos:length:is_reverse to remove potential PCR dups
-    used = {}
+    used  = {}
 
     with open(outfqfn, 'w') as outfq:
         for read in inbam.fetch():
@@ -271,7 +272,7 @@ def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2): # TODO PARAMS
             unmapseq = None
             unmapqua = None
 
-            if read.rlen - read.alen >= int(minclip): # clipped?
+            if read.rlen - read.alen >= int(minclip): # 'soft' clipped?
 
                 # length of 'minor' clip (want this to be small or zero - bad if just the middle part of read is aligned)
                 altclip = min(read.qstart, read.rlen-read.qend)
@@ -300,7 +301,7 @@ def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2): # TODO PARAMS
     return outfqfn
 
 
-def build_te_splitreads(refbamfn, tebamfn, teref, min_te_match = 0.95): # TODO PARAM
+def build_te_splitreads(refbamfn, tebamfn, teref, min_te_match = 0.9): # TODO PARAM
     ''' g* --> locations on genome; t* --> locations on TE '''
     refbam = pysam.Samfile(refbamfn, 'rb')
     tebam  = pysam.Samfile(tebamfn, 'rb')
@@ -314,12 +315,18 @@ def build_te_splitreads(refbamfn, tebamfn, teref, min_te_match = 0.95): # TODO P
             gchrom, gloc = tread.qname.split(':')[-2:]
 
             gloc = int(gloc)
+            sr = None
+            hcreads = []
             for gread in refbam.fetch(reference=gchrom, start=gloc, end=gloc+1):
                 if (gread.qname, gread.pos, refbam.getrname(gread.tid)) == (gname, gloc, gchrom):
-                        tlen = len(teref[tname])
-                        sr = SplitRead(gread, tread, tname, gchrom, gloc, tlen)
-                        if sr.get_tematch() >= min_te_match:
-                            splitreads.append(sr)
+                    tlen = len(teref[tname])
+                    sr = SplitRead(gread, tread, tname, gchrom, gloc, tlen)
+                    if sr.get_tematch() >= min_te_match:
+                        splitreads.append(sr)
+                if search('H', gread.cigarstring) and gread.is_secondary:
+                    hcreads.append(gread)
+            if sr is not None:
+                [sr.hardclips.append(hc) for hc in hcreads]
 
     refbam.close()
     tebam.close()
@@ -328,7 +335,7 @@ def build_te_splitreads(refbamfn, tebamfn, teref, min_te_match = 0.95): # TODO P
     return splitreads
 
 
-def build_te_clusters(refbamfn, splitreads, searchdist=100): # TODO PARAM
+def build_te_clusters(splitreads, searchdist=100): # TODO PARAM
     ''' cluster SplitRead objects into Cluster objects and return a list of them '''
     clusters  = []
 
@@ -348,12 +355,67 @@ def build_te_clusters(refbamfn, splitreads, searchdist=100): # TODO PARAM
                 #print "DEBUG: adding sr", str(sr), "to cluster", str(clusters[-1])
                 clusters[-1].add_splitread(sr)
 
-    #[cluster.add_hardclips(refbamfn) for cluster in clusters if len(cluster)]
+    return clusters
+
+
+def rescue_hardclips(clusters, refbamfn, telib, threads=1):
+    ''' hard-clipped reads are often mostly TE-derived, hunt down the original read and find breakpoints '''
+    hc_clusters = {}
+    hc_reads    = {}
+    hc_original = {}
+    cn = 0
+
+    for cluster in clusters:
+        for hcread in cluster.get_hardclips():
+            hc_clusters[hcread.qname] = cn
+            hc_reads   [hcread.qname] = hcread
+        cn += 1
+
+    bam  = pysam.Samfile(refbamfn, 'rb')
+    fqfn = sub('.bam$', '.rescue.fq', refbamfn)
+
+    with open(fqfn, 'w') as fqout:
+        for read in bam.fetch(until_eof=True):
+            if not read.is_secondary:
+                if read.qname in hc_clusters:
+                    cliploc = read.seq.find(hc_reads[read.qname].seq)
+
+                    if cliploc < 0:
+                        cliploc = read.seq.find(rc(hc_reads[read.qname].seq))
+
+                    assert cliploc >= 0
+                    hc_original[read.qname] = read
+
+                    fqrec = bamrec_to_fastq(read, diffseq=read.seq[:cliploc], diffqual=read.qual[:cliploc])
+                    fqout.write(fqrec + '\n')
+
+    print "Realigning hardclips to TE library..."
+    bamout = bwamem(fqfn, telib, threads=threads)
+
+    tebam = pysam.Samfile(bamout, 'rb')
+
+    te_length = dict(zip(tebam.references, tebam.lengths))
+
+    for teread in tebam.fetch():
+        if not teread.is_secondary:
+            gread    = hc_reads[teread.qname]
+            breakloc = hc_reads[teread.qname].pos
+            tname    = tebam.getrname(teread.tid)
+            gchrom   = bam.getrname(gread.tid)
+            gloc     = gread.pos
+            tlen     = te_length[tname]
+
+            sr = SplitRead(gread, teread, tname, gchrom, gloc, tlen, rescue=True, breakloc=breakloc)
+            cn = hc_clusters[teread.qname]
+            clusters[cn].add_splitread(sr)
+
+    tebam.close()
+    bam.close()
 
     return clusters
 
 
-def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, rescue=False): # TODO PARAM
+def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False): # TODO PARAM
     ''' return only clusters meeting cutoffs '''
     ''' active_elts is a list of active transposable element names (e.g. L1Hs) '''
     ''' refbamfn is the filename of the reference-aligned BAM '''
@@ -370,18 +432,14 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, 
                 if tn in active_elts:
                     reject = False
 
-            # add hard clipped reads to boost counts and rescue low-cover sites
-            if rescue:
-                subcluster.add_hardclips(refbamfn)
-
-            if len(subcluster) + len(subcluster._hardclips) < minsize:
+            if len(subcluster) < minsize:
                 reject = True
 
             if bothends and len(cluster.te_sides()) < 2:
                 reject = True
 
             if not reject:
-                print subcluster, subcluster.te_names(), subcluster.breakpoints(), len(subcluster._hardclips)
+                print subcluster, subcluster.te_names(), subcluster.breakpoints()
                 filtered.append(subcluster)
 
     return filtered

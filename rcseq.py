@@ -123,7 +123,7 @@ class Cluster:
     def subcluster_by_class(self, teclass):
         ''' return a new cluster contaning only TEs of teclass '''
         new = Cluster()
-        [new.add_splitread(read) for read in self._splitreads if read.tclass == teclass]
+        [new.add_splitread(read) for read in self._splitreads if read.tclass == teclass or read.tclass == 'POLYA']
         return new
 
     def get_hardclips(self):
@@ -291,7 +291,7 @@ def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2): # TODO PARAMS
                         unmapseq = read.seq[:read.qstart]
                         unmapqua = read.qual[:read.qstart]
 
-            if not read.is_unmapped and unmapseq is not None:
+            if not read.is_unmapped and unmapseq is not None and uid not in used:
                 infoname = ':'.join((read.qname, str(inbam.getrname(read.tid)), str(read.pos))) # help find read again
                 outfq.write(bamrec_to_fastq(read, diffseq=unmapseq, diffqual=unmapqua, diffname=infoname) + '\n')
                 used[uid] = True
@@ -398,8 +398,12 @@ def rescue_hardclips(clusters, refbamfn, telib, threads=1):
 
     for teread in tebam.fetch():
         if not teread.is_secondary:
-            gread    = hc_reads[teread.qname]
             breakloc = hc_reads[teread.qname].pos
+            # break location is at right end of read
+            if hc_reads[teread.qname].cigarstring.endswith('H'):
+                breakloc = hc_reads[teread.qname].positions[-1]
+
+            gread    = hc_reads[teread.qname]
             tname    = tebam.getrname(teread.tid)
             gchrom   = bam.getrname(gread.tid)
             gloc     = gread.pos
@@ -415,10 +419,11 @@ def rescue_hardclips(clusters, refbamfn, telib, threads=1):
     return clusters
 
 
-def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False): # TODO PARAM
+def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, mask=None): # TODO PARAM
     ''' return only clusters meeting cutoffs '''
     ''' active_elts is a list of active transposable element names (e.g. L1Hs) '''
     ''' refbamfn is the filename of the reference-aligned BAM '''
+    ''' mask should be a tabix-indexed BED file of intervals to ignore (e.g. L1Hs reference locations) '''
     filtered = []
     active_elts = Counter(active_elts)
 

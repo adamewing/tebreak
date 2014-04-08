@@ -12,6 +12,7 @@ from collections import Counter
 from uuid import uuid4
 from itertools import izip
 from re import sub, search
+from textwrap import dedent
 
 '''
 rcseq.py: Analyse RC-seq datasets.
@@ -90,6 +91,14 @@ class Cluster:
         self._median = 0
         self.chrom   = None
 
+        # data for VCF fields
+        self.INFO   = {}
+        self.FILTER = []
+        self.REF    = '.'
+        self.ID     = '.'
+        self.ALT    = '<INS:ME:FIXME>'
+        self.QUAL   = 100
+
         if firstread is not None:
             self.add_splitread(firstread)
 
@@ -139,13 +148,38 @@ class Cluster:
         return hclist
 
     def __str__(self):
-        locstr  = self.chrom + ':' + str(self._start) + '-' + str(self._end)
-        infostr = ' '.join(map(str, ('median:', self._median, 'len:', len(self._splitreads))))
-        return locstr + ' ' + infostr
+        ''' convert cluster into VCF record '''
+        output = [self.chrom, str(self._median), self.ID, self.REF, self.ALT, str(self.QUAL)]
+        output.append(';'.join(self.FILTER))
+        output.append(';'.join([key + '=' + str(val) for key,val in self.INFO.iteritems()]))
+        output.append('./.')
+        return '\t'.join(output)
 
     def __len__(self):
         return len(self._splitreads)
 
+
+def print_vcfheader(fh):
+    fh.write(dedent("""\
+    ##fileformat=VCFv4.1
+    ##phasing=none
+    ##INDIVIDUAL=FIXME
+    ##SAMPLE=<ID=FIXME,Individual="FIXME",Description="sample... fixme">
+    ##INFO=<ID=CIPOS,Number=2,Type=Integer,Description="Confidence interval around POS for imprecise variants">
+    ##INFO=<ID=IMPRECISE,Number=0,Type=Flag,Description="Imprecise structural variation">
+    ##INFO=<ID=SVTYPE,Number=1,Type=String,Description="Type of structural variant">
+    ##INFO=<ID=SVLEN,Number=.,Type=Integer,Description="Difference in length between REF and ALT alleles">
+    ##INFO=<ID=SOMATIC,Number=0,Type=Flag,Description="Somatic mutation in primary">
+    ##INFO=<ID=RC,Number=1,Type=Float,Description="Read Count">
+    ##INFO=<ID=SUBFAM,Number=1,Type=String,Description="Retroelement Subfamily">
+    ##ALT=<ID=DEL,Description="Deletion">
+    ##ALT=<ID=INS,Description="Insertion">
+    ##ALT=<ID=INS:ME:ALU,Description="Insertion of ALU element">
+    ##ALT=<ID=INS:ME:L1,Description="Insertion of L1 element">
+    ##ALT=<ID=INS:ME:SVA,Description="Insertion of SVA element">
+    ##ALT=<ID=INS:ME:POLYA,Description="Insertion of POLYA sequence">
+    ##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+    #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tFIXME""")+'\n')
 
 def rc(dna):
     ''' reverse complement '''
@@ -430,7 +464,6 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, 
     ''' refbamfn is the filename of the reference-aligned BAM '''
     ''' mask should be a tabix-indexed BED file of intervals to ignore (e.g. L1Hs reference locations) '''
     filtered = []
-    INFO = {} # for INFO line in VCF
     active_elts = Counter(active_elts)
 
     mask = None
@@ -449,60 +482,101 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, 
             for tn in subcluster.te_names():
                 if tn in active_elts:
                     reject = False
+                    
+            if reject:
+                subcluster.FILTER.append('tetype')
 
             # clusters have to be at least some minimum size
             if len(subcluster) < minsize:
                 reject = True
+                subcluster.FILTER.append('csize')
 
             # filter out clusters without both TE ends represented if user wants this
             if bothends and len(cluster.te_sides()) < 2:
                 reject = True
+                subcluster.FILTER.append('bothends')
 
             # apply position-based masking
             if mask is not None and subcluster.chrom in mask.contigs:
                 if len(list(mask.fetch(subcluster.chrom, subcluster._start, subcluster._end))) > 0:
                     reject = True
+                    subcluster.FILTER.append('mask')
 
             # filter out contigs below specified size cutoff
             if chromlen[subcluster.chrom] < minctglen:
                 reject = True
+                subcluster.FILTER.append('ctgsize')
 
             if not reject:
-                print subcluster, subcluster.te_names(), subcluster.breakpoints()
-                filtered.append(subcluster)
+                subcluster.FILTER.append('PASS')
+                #print subcluster, subcluster.te_names(), subcluster.breakpoints()
+            
+            filtered.append(subcluster)
 
     bam.close()
     return filtered
 
 
+def annotate(clusters):
+    ''' populate VCF INFO field with information about the insertion '''
+    for cluster in clusters:
+        cluster.INFO['SVTYPE'] = 'INS'
+
+    # FIXME - add various things and remember to add to header as well
+    return clusters
+
+def vcfoutput(clusters, outfile):
+    with open(outfile, 'w') as out:
+        print_vcfheader(out)
+        for cluster in clusters:
+            out.write(str(cluster) + '\n')
+
 def main(args):
-    # merge paired ends
+    print "INFO: overlapping paired ends" # TODO make optional
     mergefq = flash_wrapper(args.pair1, args.pair2, args.maxoverlap, args.threads)
 
     # filter reads unlikely to contain information about non-reference insertions (TODO: make optional)
     # optional map to reference followed by filter, not implemented yet
 
-    # map merged pairs to reference
-    refamfn = bwamem(mergefq, args.ref, threads=args.threads)
+    print "INFO: mapping fastq", mergefq, "to genome", args.ref, "using", args.threads, "threads"
+    rebamfn = bwamem(mergefq, args.ref, threads=args.threads)
 
-    # load references
-    terefs = read_fasta(args.telib)
-
-    # realign clipped sequences to TE library
+    print "INFO: finding clipped reads from genome alignment"
     clipfastq = fetch_clipped_reads(refbamfn, minclip=50)
+
+    print "INFO: realigning clipped ends to TE reference library"
     tebamfn = bwamem(clipfastq, args.telib, threads=args.threads)
  
-    # cluster split reads
+    print "INFO: identifying usable split reads from alignments"
+    splitreads = rcseq.build_te_splitreads(refbamfn, tebamfn, read_fasta(args.telib))
 
+    print "INFO: clustering split reads on genome coordinates"
+    clusters = rcseq.build_te_clusters(splitreads)
+
+    print "INFO: further investigation of hard-clipped reads in breakend regions"
+    clusters = rcseq.rescue_hardclips(clusters, refbamfn, telib, threads=args.threads)
+
+    print "INFO: filtering clusters"
+    clusters = rcseq.filter_clusters(clusters, ['L1Hs'], refbamfn, minsize=4, maskfile=args.mask)
+
+    print "INFO: annotating clusters"
+    clusters = annotate(clusters)
+
+    vcfoutput(clusters, args.outfile)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Analyse RC-seq data')
     parser.add_argument('-1', dest='pair1', required=True, help='fastq(.gz) containing first end reads')
-    parser.add_argument('-2', dest='pair2', required=True, help='fastq(.gz) containint second end reads')
+    parser.add_argument('-2', dest='pair2', required=True, help='fastq(.gz) containing second end reads')
+    parser.add_argument('-r', '--ref', dest='ref', required=True, help='reference genome for bwa-mem, also expects .fai index (samtools faidx ref.fa)')
+    parser.add_argument('-l', '--telib', dest='telib', required=True, help='TE library (BWA indexed FASTA), seq names must be CLASS:NAME')
+    parser.add_argument('-o', '--outfile', dest='outfile', required=True, help='output VCF file')
+
+    parser.add_argument('-m', '--mask', dest='mask', default=None, help='genome coordinate mask (recommended!!)')
     parser.add_argument('-t', dest='threads', default=1, help='number of threads')
-    parser.add_argument('-r', dest='ref', required=True, help='reference genome for bwa-mem, also expects .fai index (samtools faidx ref.fa)')
+
     parser.add_argument('--max-overlap', dest='maxoverlap', default=100, help='Maximum overlap used for joining paired reads with FLASH')
-    parser.add_argument('--telib', dest='telib', required=True, help='TE library (BWA indexed FASTA), seq names must be CLASS:NAME')
+    
     args = parser.parse_args()
     main(args)
 

@@ -65,6 +65,11 @@ class SplitRead:
         nm = [value for (tag, value) in self.tread.tags if tag == 'NM'][0]
         return 1.0 - (float(nm)/float(self.tread.alen))
 
+    def get_gematch(self):
+        ''' return number of mismatches / aligned length of TE sub-read '''
+        nm = [value for (tag, value) in self.gread.tags if tag == 'NM'][0]
+        return 1.0 - (float(nm)/float(self.gread.alen))
+
     def __gt__(self, other):
         ''' enables sorting of SplitRead objects '''
         if self.chrom == other.chrom:
@@ -301,7 +306,7 @@ def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2): # TODO PARAMS
     return outfqfn
 
 
-def build_te_splitreads(refbamfn, tebamfn, teref, min_te_match = 0.9): # TODO PARAM
+def build_te_splitreads(refbamfn, tebamfn, teref, min_te_match = 0.9, min_ge_match = 0.98): # TODO PARAM
     ''' g* --> locations on genome; t* --> locations on TE '''
     refbam = pysam.Samfile(refbamfn, 'rb')
     tebam  = pysam.Samfile(tebamfn, 'rb')
@@ -309,7 +314,7 @@ def build_te_splitreads(refbamfn, tebamfn, teref, min_te_match = 0.9): # TODO PA
     ''' get sorted list of split reads '''
     splitreads = []
     for tread in tebam.fetch():
-        if not tread.is_unmapped:
+        if not tread.is_unmapped and not tread.is_secondary:
             tname = tebam.getrname(tread.tid)
             gname = ':'.join(tread.qname.split(':')[:-2])
             gchrom, gloc = tread.qname.split(':')[-2:]
@@ -321,7 +326,7 @@ def build_te_splitreads(refbamfn, tebamfn, teref, min_te_match = 0.9): # TODO PA
                 if (gread.qname, gread.pos, refbam.getrname(gread.tid)) == (gname, gloc, gchrom):
                     tlen = len(teref[tname])
                     sr = SplitRead(gread, tread, tname, gchrom, gloc, tlen)
-                    if sr.get_tematch() >= min_te_match:
+                    if sr.get_tematch() >= min_te_match and sr.get_gematch() >= min_ge_match:
                         splitreads.append(sr)
                 if search('H', gread.cigarstring) and gread.is_secondary:
                     hcreads.append(gread)
@@ -419,13 +424,21 @@ def rescue_hardclips(clusters, refbamfn, telib, threads=1):
     return clusters
 
 
-def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, mask=None): # TODO PARAM
+def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, maskfile=None, minctglen=1e7): # TODO PARAM
     ''' return only clusters meeting cutoffs '''
     ''' active_elts is a list of active transposable element names (e.g. L1Hs) '''
     ''' refbamfn is the filename of the reference-aligned BAM '''
     ''' mask should be a tabix-indexed BED file of intervals to ignore (e.g. L1Hs reference locations) '''
     filtered = []
+    INFO = {} # for INFO line in VCF
     active_elts = Counter(active_elts)
+
+    mask = None
+    if maskfile is not None:
+        mask = pysam.Tabixfile(maskfile)
+
+    bam = pysam.Samfile(refbamfn, 'rb')
+    chromlen = dict(zip(bam.references, bam.lengths))
 
     for cluster in clusters:
         for teclass in cluster.te_classes(): # can consider peaks with more than one TE class
@@ -437,16 +450,28 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, 
                 if tn in active_elts:
                     reject = False
 
+            # clusters have to be at least some minimum size
             if len(subcluster) < minsize:
                 reject = True
 
+            # filter out clusters without both TE ends represented if user wants this
             if bothends and len(cluster.te_sides()) < 2:
+                reject = True
+
+            # apply position-based masking
+            if mask is not None and subcluster.chrom in mask.contigs:
+                if len(list(mask.fetch(subcluster.chrom, subcluster._start, subcluster._end))) > 0:
+                    reject = True
+
+            # filter out contigs below specified size cutoff
+            if chromlen[subcluster.chrom] < minctglen:
                 reject = True
 
             if not reject:
                 print subcluster, subcluster.te_names(), subcluster.breakpoints()
                 filtered.append(subcluster)
 
+    bam.close()
     return filtered
 
 

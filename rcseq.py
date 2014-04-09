@@ -18,7 +18,6 @@ from textwrap import dedent
 rcseq.py: Analyse RC-seq datasets.
 
 Prereqs:
-exonerate (pairwise alignments - not sure if we will need this)
 bwa       (sr alignment workhorse)
 pysam     (parsing SAM/BAM formatted alignments)
 FLASH     (for assembling read pairs)
@@ -99,6 +98,10 @@ class Cluster:
         self.ALT    = '<INS:ME:FIXME>'
         self.QUAL   = 100
 
+        # data about insertion point
+        self.tsd = None
+        self.deletion = None
+
         if firstread is not None:
             self.add_splitread(firstread)
 
@@ -124,21 +127,33 @@ class Cluster:
         return list(set([read.tclass for read in self._splitreads]))
 
     def te_names(self):
-        ''' return distinct classes of TE in cluster '''
-        return list(set([read.tname for read in self._splitreads]))
+        ''' return distinct classes of TE in cluster as Counter '''
+        return Counter([read.tname for read in self._splitreads])
 
     def te_sides(self):
         ''' return distinct classes of TE in cluster '''
         return list(set([read.teside for read in self._splitreads]))
 
-    def breakpoints(self):
+    def all_breakpoints(self):
         return Counter([read.breakloc for read in self._splitreads])
+
+    def best_breakpoints(self):
+        ''' Return the most supported breakends. If tied, choose the pair that results in the smallest TSD '''
+        pass
+
+    def examine_breakpoints(self, ref):
+        ''' check depth by pileup, decide whether it's likely a TSD, Deletion, or other '''
+        pass
 
     def subcluster_by_class(self, teclass):
         ''' return a new cluster contaning only TEs of teclass '''
         new = Cluster()
         [new.add_splitread(read) for read in self._splitreads if read.tclass == teclass or read.tclass == 'POLYA']
         return new
+
+    def mean_genome_qual(self):
+        quals = [sr.gread.mapq for sr in self._splitreads]
+        return float(sum(quals))/float(len(quals))
 
     def get_hardclips(self):
         hclist = []
@@ -277,22 +292,6 @@ def bamrec_to_fastq(read, diffseq=None, diffqual=None, diffname=None):
         seq  = rc(seq)
 
     return '\n'.join(('@'+name,seq,"+",qual))
-
-
-def filter_full_matches_dups(inbamfn, maxclip=10): # TODO params
-    ''' return a FASTQ file of reads that didn't match the reference end-to-end '''
-    outfqfn = sub('.bam$', '.imperfect.fq', inbamfn)
-    inbam   = pysam.Samfile(inbamfn, 'rb')
-
-    with open(outfqfn, 'w') as outfq:
-        for read in inbam.fetch(until_eof=True):
-            if not read.is_unmapped:
-                if (not read.is_secondary) and read.rlen - read.alen < int(maxclip):
-                    outfq.write(bamrec_to_fastq(read) + '\n')
-            else:
-                outfq.write(bamrec_to_fastq(read) + '\n')
-
-    return outfqfn
 
 
 def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2): # TODO PARAMS
@@ -476,6 +475,11 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, 
     for cluster in clusters:
         for teclass in cluster.te_classes(): # can consider peaks with more than one TE class
             subcluster = cluster.subcluster_by_class(teclass)
+            tclass     = Counter([read.tclass for read in subcluster._splitreads]).most_common(1)[0]
+
+            subcluster.ALT  = sub('FIXME', tclass, subcluster.ALT)
+            subcluster.QUAL = int(subcluster.mean_genome_qual())
+
             reject = True
             
             # at least one alignment in a cluster has to be from an active element
@@ -510,26 +514,39 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, 
             if not reject:
                 subcluster.FILTER.append('PASS')
                 #print subcluster, subcluster.te_names(), subcluster.breakpoints()
-            
+
             filtered.append(subcluster)
 
     bam.close()
     return filtered
 
 
-def annotate(clusters):
+def annotate(clusters, ref):
     ''' populate VCF INFO field with information about the insertion '''
     for cluster in clusters:
         cluster.INFO['SVTYPE'] = 'INS'
 
+        breaklocs = []
+        for breakloc, count in cluster.all_breakpoints().iteritems():
+            breaklocs.append(str(breakloc) + ':' + str(count))
+        cluster.INFO['BREAKS'] = ','.join(breaklocs)
+
+        tetypes = []
+        for tetype, count in cluster.te_names().iteritems():
+            tetypes.append(tetype + ':' + str(count))
+        cluster.INFO['TEALIGN'] = ','.join(tetypes)
+
     # FIXME - add various things and remember to add to header as well
     return clusters
 
+
 def vcfoutput(clusters, outfile):
+    ''' output results in VCF format '''
     with open(outfile, 'w') as out:
         print_vcfheader(out)
         for cluster in clusters:
             out.write(str(cluster) + '\n')
+
 
 def main(args):
     print "INFO: overlapping paired ends" # TODO make optional
@@ -563,6 +580,7 @@ def main(args):
     clusters = annotate(clusters)
 
     vcfoutput(clusters, args.outfile)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Analyse RC-seq data')

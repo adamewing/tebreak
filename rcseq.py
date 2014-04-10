@@ -91,6 +91,7 @@ class Cluster:
         self.chrom   = None
 
         # data for VCF fields
+        self.POS    = self._median
         self.INFO   = {}
         self.FILTER = []
         self.REF    = '.'
@@ -121,6 +122,7 @@ class Cluster:
         self._start  = self._splitreads[0].breakloc
         self._end    = self._splitreads[-1].breakloc
         self._median = self._splitreads[len(self)/2].breakloc
+        self.POS     = self._median
 
     def te_classes(self):
         ''' return distinct classes of TE in cluster '''
@@ -137,9 +139,17 @@ class Cluster:
     def all_breakpoints(self):
         return Counter([read.breakloc for read in self._splitreads])
 
-    def best_breakpoints(self):
+    def best_breakpoints(self): #TODO left-shift
         ''' Return the most supported breakends. If tied, choose the pair that results in the smallest TSD '''
-        pass
+        be = []
+        for breakend, count in self.all_breakpoints().most_common():
+            if len(be) < 2:
+                be.append([breakend, count])
+            else:
+                if count == be[-1][1] and abs(be[-1][0] - be[0][0]) > abs(breakend - be[0][0]):
+                    be[-1] = [breakend, count]
+
+        return sorted([loc for loc, count in be])
 
     def examine_breakpoints(self, ref):
         ''' check depth by pileup, decide whether it's likely a TSD, Deletion, or other '''
@@ -164,7 +174,7 @@ class Cluster:
 
     def __str__(self):
         ''' convert cluster into VCF record '''
-        output = [self.chrom, str(self._median), self.ID, self.REF, self.ALT, str(self.QUAL)]
+        output = [self.chrom, str(self.POS), self.ID, self.REF, self.ALT, str(self.QUAL)]
         output.append(';'.join(self.FILTER))
         output.append(';'.join([key + '=' + str(val) for key,val in self.INFO.iteritems()]))
         output.append('./.')
@@ -385,12 +395,10 @@ def build_te_clusters(splitreads, searchdist=100): # TODO PARAM
             clusters.append(Cluster(sr))
 
         else:
-            #print "DEBUG: cluster median:", clusters[-1]._median, "breakloc:", sr.breakloc, "searchdist:", searchdist
             if abs(clusters[-1]._median - sr.breakloc) > searchdist:
                 clusters.append(Cluster(sr))
 
             else:
-                #print "DEBUG: adding sr", str(sr), "to cluster", str(clusters[-1])
                 clusters[-1].add_splitread(sr)
 
     return clusters
@@ -457,7 +465,7 @@ def rescue_hardclips(clusters, refbamfn, telib, threads=1):
     return clusters
 
 
-def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, maskfile=None, minctglen=1e7): # TODO PARAM
+def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, maskfile=None, minctglen=1e7, minq=1): # TODO PARAM
     ''' return only clusters meeting cutoffs '''
     ''' active_elts is a list of active transposable element names (e.g. L1Hs) '''
     ''' refbamfn is the filename of the reference-aligned BAM '''
@@ -475,7 +483,12 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, 
     for cluster in clusters:
         for teclass in cluster.te_classes(): # can consider peaks with more than one TE class
             subcluster = cluster.subcluster_by_class(teclass)
-            tclass     = Counter([read.tclass for read in subcluster._splitreads]).most_common(1)[0]
+            tclasses   = Counter([read.tclass for read in subcluster._splitreads]).most_common()
+
+            # prefer to report element type even if POLYA is the dominant annotation
+            tclass = tclasses[0][0]
+            if tclass == 'POLYA' and len(tclasses) > 1:
+                tclass = tclasses[1][0]
 
             subcluster.ALT  = sub('FIXME', tclass, subcluster.ALT)
             subcluster.QUAL = int(subcluster.mean_genome_qual())
@@ -489,6 +502,10 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, 
                     
             if reject:
                 subcluster.FILTER.append('tetype')
+
+            if subcluster.QUAL <= minq:
+                reject = True
+                subcluster.FILTER.append('avgmapq')
 
             # clusters have to be at least some minimum size
             if len(subcluster) < minsize:
@@ -521,8 +538,11 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, 
     return filtered
 
 
-def annotate(clusters, ref):
+def annotate(clusters, reffa):
     ''' populate VCF INFO field with information about the insertion '''
+
+    ref = pysam.Fastafile(reffa)
+
     for cluster in clusters:
         cluster.INFO['SVTYPE'] = 'INS'
 
@@ -535,6 +555,19 @@ def annotate(clusters, ref):
         for tetype, count in cluster.te_names().iteritems():
             tetypes.append(tetype + ':' + str(count))
         cluster.INFO['TEALIGN'] = ','.join(tetypes)
+
+        bestbreaks = cluster.best_breakpoints()
+        cluster.POS = int(bestbreaks[0])
+        cluster.INFO['END'] = cluster.POS
+
+        if len(bestbreaks) > 1:
+            cluster.INFO['END'] = int(bestbreaks[1])
+
+        refbase = ref.fetch(cluster.chrom, cluster.POS, cluster.POS+1)
+        if refbase != '':
+            cluster.REF = refbase
+        else:
+            cluster.REF = '.'
 
     # FIXME - add various things and remember to add to header as well
     return clusters

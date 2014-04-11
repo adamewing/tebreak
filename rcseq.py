@@ -9,6 +9,7 @@ import pysam
 
 from string import maketrans
 from collections import Counter
+from collections import OrderedDict as od
 from uuid import uuid4
 from itertools import izip
 from re import sub, search
@@ -56,6 +57,9 @@ class SplitRead:
             self.teside = '3'
         else:
             self.teside = '5'
+
+        if self.tclass == 'POLYA':
+            self.teside = '3'
 
         assert self.breakloc is not None
         assert self.teside is not None
@@ -139,21 +143,76 @@ class Cluster:
     def all_breakpoints(self):
         return Counter([read.breakloc for read in self._splitreads])
 
-    def best_breakpoints(self): #TODO left-shift
+    def best_breakpoints(self, refbamfn): #TODO left-shift
         ''' Return the most supported breakends. If tied, choose the pair that results in the smallest TSD '''
-        be = []
+        be   = []
+        mech = 'SingleEnd'
+
+        if len(self.te_sides()) == 1:
+            return self.all_breakpoints().most_common(1)[0][0], None, mech
+
+        n = 0
         for breakend, count in self.all_breakpoints().most_common():
+            n += 1
             if len(be) < 2:
                 be.append([breakend, count])
+                if n == 2:
+                    mech = self.guess_mechanism(refbamfn, be[0][0], breakend)
             else:
-                if count == be[-1][1] and abs(be[-1][0] - be[0][0]) > abs(breakend - be[0][0]):
-                    be[-1] = [breakend, count]
+                if count == be[-1][1]: # next best breakend is tied for occurance count
+                    newmech = self.guess_mechanism(refbamfn, be[0][0], breakend)
+                    # prefer TSD annotations over all others
+                    if mech != 'TSD' and newmech == 'TSD':
+                        be[-1] = [breakend, count]
+                        mech = 'TSD'
+                    
+                    # ... but if neither or both are TSD, choose the smallest
+                    if (newmech == mech == 'TSD') or (mech != 'TSD' and newmech != 'TSD'): 
+                        if abs(be[-1][0] - be[0][0]) > abs(breakend - be[0][0]):
+                            be[-1] = [breakend, count]
+                            mech = newmech
 
-        return sorted([loc for loc, count in be])
+        if len(be) == 1:
+            return be[0][0], None, mech
 
-    def examine_breakpoints(self, ref):
-        ''' check depth by pileup, decide whether it's likely a TSD, Deletion, or other '''
-        pass
+        if len(be) == 2:
+            return be[0][0], be[1][0], mech
+
+        raise ValueError('Cluster.best_breakpoints returned more than two breakends, panic!\n')
+
+    def guess_mechanism(self, refbamfn, bstart, bend):
+        ''' check depth manually (only way to get ALL reads), decide whether it's likely a TSD, Deletion, or other '''
+        if bstart > bend:
+            bstart, bend = bend, bstart
+
+        if len(self.te_sides()) == 1:
+            return "SingleEnd"
+
+        if bstart == bend:
+            return "EndoMinus"
+
+        window = 10
+        bam    = pysam.Samfile(refbamfn, 'rb')
+        depth  = od([(pos, 0) for pos in range(bstart-window, bend+window)])
+
+        for read in bam.fetch(self.chrom, bstart-window, bend+window):
+            for pos in read.positions:
+                if pos in depth:
+                    depth[pos] += 1
+
+        cov = depth.values()
+
+        meancov_left  = float(sum(cov[:window]))/float(window)
+        meancov_right = float(sum(cov[-window:]))/float(window)
+        meancov_break = float(sum(cov[window:-window]))/float(len(cov[window:-window]))
+
+        if meancov_break > meancov_left and meancov_break > meancov_right:
+            return "TSD"
+
+        if meancov_break < meancov_left and meancov_break < meancov_right:
+            return "Deletion"
+
+        return "Unknown"
 
     def subcluster_by_class(self, teclass):
         ''' return a new cluster contaning only TEs of teclass '''
@@ -538,7 +597,7 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, 
     return filtered
 
 
-def annotate(clusters, reffa):
+def annotate(clusters, reffa, refbamfn):
     ''' populate VCF INFO field with information about the insertion '''
 
     ref = pysam.Fastafile(reffa)
@@ -549,25 +608,36 @@ def annotate(clusters, reffa):
         breaklocs = []
         for breakloc, count in cluster.all_breakpoints().iteritems():
             breaklocs.append(str(breakloc) + ':' + str(count))
-        cluster.INFO['BREAKS'] = ','.join(breaklocs)
+
+        cluster.INFO['BREAKS']  = ','.join(breaklocs)
+        cluster.INFO['TESIDES'] = ','.join(cluster.te_sides())
 
         tetypes = []
         for tetype, count in cluster.te_names().iteritems():
             tetypes.append(tetype + ':' + str(count))
         cluster.INFO['TEALIGN'] = ','.join(tetypes)
 
-        bestbreaks = cluster.best_breakpoints()
-        cluster.POS = int(bestbreaks[0])
-        cluster.INFO['END'] = cluster.POS
+        
+        if cluster.FILTER[0] == 'PASS': # DEBUG - dedent this stuff eventually
+            leftbreak, rightbreak, mech = cluster.best_breakpoints(refbamfn)
+            if rightbreak is not None and leftbreak > rightbreak:
+                leftbreak, rightbreak = rightbreak, leftbreak
 
-        if len(bestbreaks) > 1:
-            cluster.INFO['END'] = int(bestbreaks[1])
+            cluster.POS = leftbreak
+            cluster.INFO['END'] = leftbreak
+
+            if rightbreak is not None:
+                cluster.INFO['END']  = rightbreak
+                cluster.INFO['MECH'] = mech
 
         refbase = ref.fetch(cluster.chrom, cluster.POS, cluster.POS+1)
         if refbase != '':
             cluster.REF = refbase
         else:
             cluster.REF = '.'
+
+        if cluster.FILTER[0] == 'PASS': #debug
+            print cluster
 
     # FIXME - add various things and remember to add to header as well
     return clusters

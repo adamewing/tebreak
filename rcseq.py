@@ -1,5 +1,18 @@
 #!/usr/bin/env python
 
+'''
+rcseq.py: Analyse RC-seq datasets.
+
+Prereqs:
+bwa       (sr alignment workhorse)
+pysam     (parsing SAM/BAM formatted alignments)
+FLASH     (not needed if not using overlapped libraries, used for assembling read pairs)
+
+contact: Adam Ewing (adam.ewing@mater.uq.edu.au)
+
+'''
+
+
 import argparse
 import subprocess
 import gzip
@@ -15,15 +28,7 @@ from itertools import izip
 from re import sub, search
 from textwrap import dedent
 
-'''
-rcseq.py: Analyse RC-seq datasets.
 
-Prereqs:
-bwa       (sr alignment workhorse)
-pysam     (parsing SAM/BAM formatted alignments)
-FLASH     (for assembling read pairs)
-
-'''
 
 class SplitRead:
     ''' gread = genome read, tread = TE read '''
@@ -97,6 +102,7 @@ class Cluster:
         # data for VCF fields
         self.POS    = self._median
         self.INFO   = {}
+        self.FORMAT = {}
         self.FILTER = []
         self.REF    = '.'
         self.ID     = '.'
@@ -127,6 +133,14 @@ class Cluster:
         self._end    = self._splitreads[-1].breakloc
         self._median = self._splitreads[len(self)/2].breakloc
         self.POS     = self._median
+
+    def greads(self):
+        ''' return list of genome-aligned pysam.AlignedRead objects '''
+        return [sr.gread for sr in self._splitreads]
+
+    def treads(self):
+        ''' return list of genome-aligned pysam.AlignedRead objects '''
+        return [sr.tread for sr in self._splitreads]
 
     def te_classes(self):
         ''' return distinct classes of TE in cluster '''
@@ -220,6 +234,12 @@ class Cluster:
         [new.add_splitread(read) for read in self._splitreads if read.tclass == teclass or read.tclass == 'POLYA']
         return new
 
+    def subcluster_by_breakend(self, breakends):
+        ''' return a new cluster containing only reads with breakpoints in passed list '''
+        new = Cluster()
+        [new.add_splitread(read) for read in self._splitreads if read.breakloc in breakends]
+        return new
+
     def mean_genome_qual(self):
         quals = [sr.gread.mapq for sr in self._splitreads]
         return float(sum(quals))/float(len(quals))
@@ -236,26 +256,31 @@ class Cluster:
         output = [self.chrom, str(self.POS), self.ID, self.REF, self.ALT, str(self.QUAL)]
         output.append(';'.join(self.FILTER))
         output.append(';'.join([key + '=' + str(val) for key,val in self.INFO.iteritems()]))
-        output.append('./.')
+        output.append(';'.join([key for key,val in self.FORMAT.iteritems()]))
+        output.append(';'.join([str(val) for key,val in self.FORMAT.iteritems()]))
         return '\t'.join(output)
 
     def __len__(self):
         return len(self._splitreads)
 
 
-def print_vcfheader(fh):
-    fh.write(dedent("""\
+def print_vcfheader(fh, samplename):
+    fh.write(sub('FIXME',samplename,dedent("""\
     ##fileformat=VCFv4.1
     ##phasing=none
     ##INDIVIDUAL=FIXME
-    ##SAMPLE=<ID=FIXME,Individual="FIXME",Description="sample... fixme">
+    ##SAMPLE=<ID=FIXME,Individual="FIXME",Description="sample name">
     ##INFO=<ID=CIPOS,Number=2,Type=Integer,Description="Confidence interval around POS for imprecise variants">
     ##INFO=<ID=IMPRECISE,Number=0,Type=Flag,Description="Imprecise structural variation">
     ##INFO=<ID=SVTYPE,Number=1,Type=String,Description="Type of structural variant">
     ##INFO=<ID=SVLEN,Number=.,Type=Integer,Description="Difference in length between REF and ALT alleles">
     ##INFO=<ID=SOMATIC,Number=0,Type=Flag,Description="Somatic mutation in primary">
-    ##INFO=<ID=RC,Number=1,Type=Float,Description="Read Count">
-    ##INFO=<ID=SUBFAM,Number=1,Type=String,Description="Retroelement Subfamily">
+    ##INFO=<ID=END,Number=1,Type=Integer,Description="Position of second breakend (same as first if not known)">
+    ##INFO=<ID=TESIDES,Number=.,Type=Integer,Description="Note if 3prime and 5prime ends are detected">
+    ##INFO=<ID=MECH,Number=1,Type=String,Description="Hints about the insertion mechanism (TSD, Deletion, EndoMinus, etc.)">
+    ##FORMAT=<ID=BREAKS,Number=.,Type=String,Description="Positions:Counts of all breakends detected">
+    ##FORMAT=<ID=TEALIGN,Number=.,Type=String,Description="Retroelement subfamilies (or POLYA) with alignments">
+    ##FORMAT=<ID=RC,Number=1,Type=Float,Description="Read Count">
     ##ALT=<ID=DEL,Description="Deletion">
     ##ALT=<ID=INS,Description="Insertion">
     ##ALT=<ID=INS:ME:ALU,Description="Insertion of ALU element">
@@ -263,7 +288,7 @@ def print_vcfheader(fh):
     ##ALT=<ID=INS:ME:SVA,Description="Insertion of SVA element">
     ##ALT=<ID=INS:ME:POLYA,Description="Insertion of POLYA sequence">
     ##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
-    #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tFIXME""")+'\n')
+    #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tFIXME"""))+'\n')
 
 def rc(dna):
     ''' reverse complement '''
@@ -294,11 +319,13 @@ def read_fasta(infa):
     return seqdict
 
 
-def bwamem(fq, ref, threads=1, width=150, sortmem=2000000000):
+def bwamem(fq, ref, threads=1, width=150, sortmem=2000000000, uid=None):
     ''' FIXME: add parameters to commandline '''
     rg = '@RG\tID:RCSEQ\tSM:' + fq
     fqroot = sub('.extendedFrags.fastq.gz$', '', fq)
     fqroot = sub('.fq$', '', fqroot)
+    if uid is not None:
+        fqroot = uid
 
     print "DEBUG: fqroot:", fqroot
 
@@ -330,9 +357,12 @@ def bwamem(fq, ref, threads=1, width=150, sortmem=2000000000):
     return sort_out + '.bam'
 
 
-def flash_wrapper(fq1, fq2, max_overlap, threads):
+def flash_wrapper(fq1, fq2, max_overlap, threads, uid=None):
     ''' wrapper for FLASH (http://ccb.jhu.edu/software/FLASH/) '''
     out = 'RCTMP-' + str(uuid4())
+    if uid is not None:
+         out = uid
+
     os.mkdir(out)
     args = ['flash', '-d', out, '-o', out, '-M', str(max_overlap), '-z', '-t', str(threads), fq1, fq2]
     print "calling FLASH:", args
@@ -508,11 +538,11 @@ def rescue_hardclips(clusters, refbamfn, telib, threads=1):
             if hc_reads[teread.qname].cigarstring.endswith('H'):
                 breakloc = hc_reads[teread.qname].positions[-1]
 
-            gread    = hc_reads[teread.qname]
-            tname    = tebam.getrname(teread.tid)
-            gchrom   = bam.getrname(gread.tid)
-            gloc     = gread.pos
-            tlen     = te_length[tname]
+            gread  = hc_reads[teread.qname]
+            tname  = tebam.getrname(teread.tid)
+            gchrom = bam.getrname(gread.tid)
+            gloc   = gread.pos
+            tlen   = te_length[tname]
 
             sr = SplitRead(gread, teread, tname, gchrom, gloc, tlen, rescue=True, breakloc=breakloc)
             cn = hc_clusters[teread.qname]
@@ -609,15 +639,14 @@ def annotate(clusters, reffa, refbamfn):
         for breakloc, count in cluster.all_breakpoints().iteritems():
             breaklocs.append(str(breakloc) + ':' + str(count))
 
-        cluster.INFO['BREAKS']  = ','.join(breaklocs)
-        cluster.INFO['TESIDES'] = ','.join(cluster.te_sides())
+        cluster.FORMAT['BREAKS']  = ','.join(breaklocs)
+        cluster.FORMAT['TESIDES'] = ','.join(cluster.te_sides())
 
         tetypes = []
         for tetype, count in cluster.te_names().iteritems():
             tetypes.append(tetype + ':' + str(count))
-        cluster.INFO['TEALIGN'] = ','.join(tetypes)
+        cluster.FORMAT['TEALIGN'] = ','.join(tetypes)
 
-        
         if cluster.FILTER[0] == 'PASS': # DEBUG - dedent this stuff eventually
             leftbreak, rightbreak, mech = cluster.best_breakpoints(refbamfn)
             if rightbreak is not None and leftbreak > rightbreak:
@@ -636,6 +665,8 @@ def annotate(clusters, reffa, refbamfn):
         else:
             cluster.REF = '.'
 
+        cluster.FORMAT['RC'] = len(cluster)
+
         if cluster.FILTER[0] == 'PASS': #debug
             print cluster
 
@@ -643,23 +674,39 @@ def annotate(clusters, reffa, refbamfn):
     return clusters
 
 
-def vcfoutput(clusters, outfile):
+def vcfoutput(clusters, outfile, samplename):
     ''' output results in VCF format '''
     with open(outfile, 'w') as out:
-        print_vcfheader(out)
+        print_vcfheader(out, samplename)
         for cluster in clusters:
             out.write(str(cluster) + '\n')
 
 
-def main(args):
-    print "INFO: overlapping paired ends" # TODO make optional
-    mergefq = flash_wrapper(args.pair1, args.pair2, args.maxoverlap, args.threads)
+def bamoutput(clusters, refbamfn, tebamfn, prefix):
+    refbam = pysam.Samfile(refbamfn, 'rb')
+    tebam  = pysam.Samfile(tebamfn, 'rb')
+    refout = pysam.Samfile(prefix + ".ref.bam", 'wb', template=refbam)
+    teout  = pysam.Samfile(prefix + ".te.bam", 'wb', template=tebam)
 
-    # filter reads unlikely to contain information about non-reference insertions (TODO: make optional)
-    # optional map to reference followed by filter, not implemented yet
+    for cluster in clusters:
+        [refout.write(read) for read in cluster.greads()]
+        [teout.write(read) for read in cluster.treads()]
+
+    refbam.close()
+    tebam.close()
+    refout.close()
+    teout.close()
+
+
+def main(args):
+    if args.pair2 is not None:
+        print "INFO: overlapping paired ends"
+        mergefq = flash_wrapper(args.pair1, args.pair2, args.maxoverlap, args.threads, uid=self.samplename)
+    else:
+        mergefq = args.pair1
 
     print "INFO: mapping fastq", mergefq, "to genome", args.ref, "using", args.threads, "threads"
-    rebamfn = bwamem(mergefq, args.ref, threads=args.threads)
+    refbamfn = bwamem(mergefq, args.ref, threads=args.threads, uid=self.samplename)
 
     print "INFO: finding clipped reads from genome alignment"
     clipfastq = fetch_clipped_reads(refbamfn, minclip=50)
@@ -677,27 +724,38 @@ def main(args):
     clusters = rcseq.rescue_hardclips(clusters, refbamfn, telib, threads=args.threads)
 
     print "INFO: filtering clusters"
-    clusters = rcseq.filter_clusters(clusters, ['L1Hs'], refbamfn, minsize=4, maskfile=args.mask)
+    clusters = rcseq.filter_clusters(clusters, args.active.split(','), refbamfn, minsize=int(args.mincluster), maskfile=args.mask)
 
     print "INFO: annotating clusters"
     clusters = annotate(clusters)
 
-    vcfoutput(clusters, args.outfile)
+    print "INFO: writing VCF"
+    vcfoutput(clusters, args.outfile, args.samplename)
 
+    if args.clusterbam is not None:
+        print "INFO: writing BAMs"
+        bamoutput(clusters, refbamfn, tebamfn, args.clusterbam)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Analyse RC-seq data')
     parser.add_argument('-1', dest='pair1', required=True, help='fastq(.gz) containing first end reads')
-    parser.add_argument('-2', dest='pair2', required=True, help='fastq(.gz) containing second end reads')
+    parser.add_argument('-2', dest='pair2', default=None,
+                         help='fastq(.gz) containing second end reads (optional, if present the second read is assumed to overlap the first and will be joined to first via FLASH)')
     parser.add_argument('-r', '--ref', dest='ref', required=True, help='reference genome for bwa-mem, also expects .fai index (samtools faidx ref.fa)')
     parser.add_argument('-l', '--telib', dest='telib', required=True, help='TE library (BWA indexed FASTA), seq names must be CLASS:NAME')
     parser.add_argument('-o', '--outfile', dest='outfile', required=True, help='output VCF file')
 
+    parser.add_argument('-a', '--active', dest='active', default='L1Hs',
+                        help='Comma-delimited list of relevant (i.e. active) subfamilies to target (default=L1Hs)')
+    parser.add_argument('-n', '--samplename', dest='samplename', default=str(uuid4()), help='unique sample name (default = generated UUID4)')
     parser.add_argument('-m', '--mask', dest='mask', default=None, help='genome coordinate mask (recommended!!)')
     parser.add_argument('-t', dest='threads', default=1, help='number of threads')
 
     parser.add_argument('--max-overlap', dest='maxoverlap', default=100, help='Maximum overlap used for joining paired reads with FLASH')
-    
+    parser.add_argument('--mincluster', dest='mincluster', default=4, help='minimum number of reads in a cluster')
+    parser.add_argument('--minq', dest='minq', default=1, help='minimum mean mapping quality per cluster')
+    parser.add_argument('--clusterbam', dest='clusterbam', default=None, help='output genome and TE clusters to BAMs with specified prefix') #FIXME implement
+
     args = parser.parse_args()
     main(args)
 

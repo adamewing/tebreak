@@ -321,7 +321,6 @@ def read_fasta(infa):
 
 def bwamem(fq, ref, threads=1, width=150, sortmem=2000000000, uid=None):
     ''' FIXME: add parameters to commandline '''
-    rg = '@RG\tID:RCSEQ\tSM:' + fq
     fqroot = sub('.extendedFrags.fastq.gz$', '', fq)
     fqroot = sub('.fq$', '', fqroot)
     if uid is not None:
@@ -333,7 +332,7 @@ def bwamem(fq, ref, threads=1, width=150, sortmem=2000000000, uid=None):
     bam_out  = '.'.join((fqroot, 'bam'))
     sort_out = '.'.join((fqroot, 'sorted'))
 
-    sam_cmd  = ['bwa', 'mem', '-t', str(threads), '-M', '-R', rg, ref, fq]
+    sam_cmd  = ['bwa', 'mem', '-t', str(threads), '-M', ref, fq]
     bam_cmd  = ['samtools', 'view', '-bt', ref + '.bai', '-o', bam_out, sam_out]
     sort_cmd = ['samtools', 'sort', '-@', str(threads), '-m', str(sortmem), bam_out, sort_out]
     idx_cmd  = ['samtools', 'index', sort_out + '.bam']
@@ -347,9 +346,11 @@ def bwamem(fq, ref, threads=1, width=150, sortmem=2000000000, uid=None):
 
     sys.stderr.write("writing " + sam_out + " to BAM...\n")
     subprocess.call(bam_cmd)
+    os.remove(sam_out)
 
     sys.stderr.write("sorting output: " + ' '.join(sort_cmd) + "\n")
     subprocess.call(sort_cmd)
+    os.remove(bam_out)
 
     sys.stderr.write("indexing: " + ' '.join(idx_cmd) + "\n")
     subprocess.call(idx_cmd)
@@ -363,13 +364,12 @@ def flash_wrapper(fq1, fq2, max_overlap, threads, uid=None):
     if uid is not None:
          out = uid
 
-    os.mkdir(out)
-    args = ['flash', '-d', out, '-o', out, '-M', str(max_overlap), '-z', '-t', str(threads), fq1, fq2]
+    args = ['flash', '-d', os.path.dirname(out), '-o', os.path.basename(out), '-M', str(max_overlap), '-z', '-t', str(threads), fq1, fq2]
     print "calling FLASH:", args
 
     subprocess.call(args)
 
-    return out + '/' + out + '.extendedFrags.fastq.gz'
+    return out + '.extendedFrags.fastq.gz'
 
 
 def bamrec_to_fastq(read, diffseq=None, diffqual=None, diffname=None):
@@ -674,6 +674,24 @@ def annotate(clusters, reffa, refbamfn):
     return clusters
 
 
+def bamtofq(inbam, outfq):
+    assert inbam.endswith('.bam')
+    with gzip.open(outfq, 'wb') as fq:
+        bam = pysam.Samfile(inbam, 'rb')
+        for read in bam.fetch(until_eof=True):
+            seq  = read.seq
+            qual = read.qual
+
+            if read.is_reverse:
+                seq  = rc(seq)
+                qual = qual[::-1]
+
+            fq.write('\n'.join(('@' + read.qname, seq, '+', qual)) + '\n')
+    
+    bam.close()
+    return outfq
+
+
 def vcfoutput(clusters, outfile, samplename):
     ''' output results in VCF format '''
     with open(outfile, 'w') as out:
@@ -699,14 +717,31 @@ def bamoutput(clusters, refbamfn, tebamfn, prefix):
 
 
 def main(args):
+    mergefq = None
+    basename = args.samplename
+    
+    if args.outdir is not None:
+        if not os.path.exists(args.outdir):
+            try:
+                os.mkdir(args.outdir)
+            except:
+                sys.stderr.write("Failed to create output directory: " + args.outdir + ", exiting.\n")
+
+        basename = args.outdir + '/' + basename
+
     if args.pair2 is not None:
         print "INFO: overlapping paired ends"
-        mergefq = flash_wrapper(args.pair1, args.pair2, args.maxoverlap, args.threads, uid=self.samplename)
+        mergefq = flash_wrapper(args.pair1, args.pair2, args.maxoverlap, args.threads, uid=basename)
+
     else:
-        mergefq = args.pair1
+        if args.pair1.endswith('.bam'):
+            print "INFO: converting BAM", args.pair1, "to FASTQ", basename + '.fq.gz'
+            mergefq = bamtofq(args.pair1, basename + '.fq.gz')
+        else: # assume fastq
+            mergefq = args.pair1
 
     print "INFO: mapping fastq", mergefq, "to genome", args.ref, "using", args.threads, "threads"
-    refbamfn = bwamem(mergefq, args.ref, threads=args.threads, uid=self.samplename)
+    refbamfn = bwamem(mergefq, args.ref, threads=args.threads, uid=basename)
 
     print "INFO: finding clipped reads from genome alignment"
     clipfastq = fetch_clipped_reads(refbamfn, minclip=50)
@@ -715,26 +750,28 @@ def main(args):
     tebamfn = bwamem(clipfastq, args.telib, threads=args.threads)
  
     print "INFO: identifying usable split reads from alignments"
-    splitreads = rcseq.build_te_splitreads(refbamfn, tebamfn, read_fasta(args.telib))
+    splitreads = build_te_splitreads(refbamfn, tebamfn, read_fasta(args.telib))
 
     print "INFO: clustering split reads on genome coordinates"
-    clusters = rcseq.build_te_clusters(splitreads)
+    clusters = build_te_clusters(splitreads)
+    print "INFO: cluster count:", len(clusters)
 
     print "INFO: further investigation of hard-clipped reads in breakend regions"
-    clusters = rcseq.rescue_hardclips(clusters, refbamfn, telib, threads=args.threads)
+    clusters = rescue_hardclips(clusters, refbamfn, args.telib, threads=args.threads)
 
     print "INFO: filtering clusters"
-    clusters = rcseq.filter_clusters(clusters, args.active.split(','), refbamfn, minsize=int(args.mincluster), maskfile=args.mask)
+    clusters = filter_clusters(clusters, args.active.split(','), refbamfn, minsize=int(args.mincluster), maskfile=args.mask)
+    print "INFO: passing cluster count:", len([c for c in clusters if c.FILTER[0] == 'PASS'])
 
     print "INFO: annotating clusters"
-    clusters = annotate(clusters)
+    clusters = annotate(clusters, args.ref, refbamfn)
 
     print "INFO: writing VCF"
     vcfoutput(clusters, args.outfile, args.samplename)
 
-    if args.clusterbam is not None:
+    if args.clusterbam:
         print "INFO: writing BAMs"
-        bamoutput(clusters, refbamfn, tebamfn, args.clusterbam)
+        bamoutput(clusters, refbamfn, tebamfn, basename)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Analyse RC-seq data')
@@ -744,6 +781,7 @@ if __name__ == '__main__':
     parser.add_argument('-r', '--ref', dest='ref', required=True, help='reference genome for bwa-mem, also expects .fai index (samtools faidx ref.fa)')
     parser.add_argument('-l', '--telib', dest='telib', required=True, help='TE library (BWA indexed FASTA), seq names must be CLASS:NAME')
     parser.add_argument('-o', '--outfile', dest='outfile', required=True, help='output VCF file')
+    parser.add_argument('-d', '--outdir', dest='outdir', default=None, help='output directory')
 
     parser.add_argument('-a', '--active', dest='active', default='L1Hs',
                         help='Comma-delimited list of relevant (i.e. active) subfamilies to target (default=L1Hs)')
@@ -754,7 +792,7 @@ if __name__ == '__main__':
     parser.add_argument('--max-overlap', dest='maxoverlap', default=100, help='Maximum overlap used for joining paired reads with FLASH')
     parser.add_argument('--mincluster', dest='mincluster', default=4, help='minimum number of reads in a cluster')
     parser.add_argument('--minq', dest='minq', default=1, help='minimum mean mapping quality per cluster')
-    parser.add_argument('--clusterbam', dest='clusterbam', default=None, help='output genome and TE clusters to BAMs with specified prefix') #FIXME implement
+    parser.add_argument('--clusterbam',  action='store_true', default=False, help='output genome and TE clusters to BAMs')
 
     args = parser.parse_args()
     main(args)

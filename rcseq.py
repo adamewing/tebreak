@@ -725,7 +725,7 @@ def main(args):
             try:
                 os.mkdir(args.outdir)
             except:
-                sys.stderr.write("Failed to create output directory: " + args.outdir + ", exiting.\n")
+                sys.stderr.write("ERROR: failed to create output directory: " + args.outdir + ", exiting.\n")
 
         basename = args.outdir + '/' + basename
 
@@ -740,17 +740,31 @@ def main(args):
         else: # assume fastq
             mergefq = args.pair1
 
-    print "INFO: mapping fastq", mergefq, "to genome", args.ref, "using", args.threads, "threads"
-    refbamfn = bwamem(mergefq, args.ref, threads=args.threads, uid=basename)
+    refbamfn = None
+    if args.premapped:
+        if args.pair1.endswith('.bam'):
+            print "INFO: using pre-mapped BAM:", args.pair1
+            refbamfn = args.pair1
+        else:
+            sys.stderr.write("ERROR: flag to use premapped bam (--premapped) called but " + args.pair1 + " is not a .bam file\n")
+            sys.exit(1)
+    else:
+        print "INFO: mapping fastq", mergefq, "to genome", args.ref, "using", args.threads, "threads"
+        refbamfn = bwamem(mergefq, args.ref, threads=args.threads, uid=basename)
+
+    assert refbamfn is not None
 
     print "INFO: finding clipped reads from genome alignment"
     clipfastq = fetch_clipped_reads(refbamfn, minclip=50)
+    assert clipfastq
 
     print "INFO: realigning clipped ends to TE reference library"
     tebamfn = bwamem(clipfastq, args.telib, threads=args.threads)
- 
+    assert tebamfn 
+
     print "INFO: identifying usable split reads from alignments"
     splitreads = build_te_splitreads(refbamfn, tebamfn, read_fasta(args.telib))
+    assert splitreads
 
     print "INFO: clustering split reads on genome coordinates"
     clusters = build_te_clusters(splitreads)
@@ -765,6 +779,7 @@ def main(args):
 
     print "INFO: annotating clusters"
     clusters = annotate(clusters, args.ref, refbamfn)
+    assert clusters
 
     print "INFO: writing VCF"
     vcfoutput(clusters, args.outfile, args.samplename)
@@ -773,11 +788,13 @@ def main(args):
         print "INFO: writing BAMs"
         bamoutput(clusters, refbamfn, tebamfn, basename)
 
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Analyse RC-seq data')
-    parser.add_argument('-1', dest='pair1', required=True, help='fastq(.gz) containing first end reads')
+    parser.add_argument('-1', dest='pair1', required=True, help='fastq(.gz) containing first end reads or BAM to process and re-map')
     parser.add_argument('-2', dest='pair2', default=None,
                          help='fastq(.gz) containing second end reads (optional, if present the second read is assumed to overlap the first and will be joined to first via FLASH)')
+
     parser.add_argument('-r', '--ref', dest='ref', required=True, help='reference genome for bwa-mem, also expects .fai index (samtools faidx ref.fa)')
     parser.add_argument('-l', '--telib', dest='telib', required=True, help='TE library (BWA indexed FASTA), seq names must be CLASS:NAME')
     parser.add_argument('-o', '--outfile', dest='outfile', required=True, help='output VCF file')
@@ -785,6 +802,7 @@ if __name__ == '__main__':
 
     parser.add_argument('-a', '--active', dest='active', default='L1Hs',
                         help='Comma-delimited list of relevant (i.e. active) subfamilies to target (default=L1Hs)')
+
     parser.add_argument('-n', '--samplename', dest='samplename', default=str(uuid4()), help='unique sample name (default = generated UUID4)')
     parser.add_argument('-m', '--mask', dest='mask', default=None, help='genome coordinate mask (recommended!!)')
     parser.add_argument('-t', dest='threads', default=1, help='number of threads')
@@ -792,6 +810,7 @@ if __name__ == '__main__':
     parser.add_argument('--max-overlap', dest='maxoverlap', default=100, help='Maximum overlap used for joining paired reads with FLASH')
     parser.add_argument('--mincluster', dest='mincluster', default=4, help='minimum number of reads in a cluster')
     parser.add_argument('--minq', dest='minq', default=1, help='minimum mean mapping quality per cluster')
+    parser.add_argument('--premapped',  action='store_true', default=False, help='use BAM specified by -1 (must be .bam) directly instead of remapping')
     parser.add_argument('--clusterbam',  action='store_true', default=False, help='output genome and TE clusters to BAMs')
 
     args = parser.parse_args()

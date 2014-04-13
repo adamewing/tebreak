@@ -1,10 +1,16 @@
+## RCSeq
 
 Contact: adam.ewing@mater.uq.edu.au
 
-Analyse RC-seq data, or in principle any sequence data, for transposable element insertions.
+*Analyse RC-seq data, or in principle any sequence data, for transposable element insertions.*
 
-Prerequisites:
+# Prerequisites:
 
-bwa       (sr alignment workhorse)
-pysam     (parsing SAM/BAM formatted alignments)
-FLASH     (not needed if not using overlapped libraries, used for assembling read pairs)
+|what     | where | why |
+|---------|-------|-----|
+|bwa      | http://bio-bwa.sourceforge.net/  | sequence alignments |
+|samtools | http://samtools.sourceforge.net/ | BAM manipulation |
+|pysam    | https://github.com/pysam-developers/pysam | parsing SAM/BAM formatted alignments |
+|FLASH    | http://ccb.jhu.edu/software/FLASH/ | not needed if not using overlapped libraries, used for assembling read pairs |
+
+(latest versions unless otherwise specified)

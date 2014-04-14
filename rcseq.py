@@ -101,8 +101,8 @@ class Cluster:
 
         # data for VCF fields
         self.POS    = self._median
-        self.INFO   = {}
-        self.FORMAT = {}
+        self.INFO   = od()
+        self.FORMAT = od()
         self.FILTER = []
         self.REF    = '.'
         self.ID     = '.'
@@ -112,6 +112,7 @@ class Cluster:
         # data about insertion point
         self.tsd = None
         self.deletion = None
+        self.fraction = None
 
         if firstread is not None:
             self.add_splitread(firstread)
@@ -251,6 +252,23 @@ class Cluster:
                 hclist.append(hc)
         return hclist
 
+    def unclipfrac(self, refbamfn):
+        ''' track fraction of reads over cluster region that are unclipped '''
+        used   = {}
+        unclip = 0
+        total  = 0
+
+        bam = pysam.Samfile(refbamfn, 'rb')
+        for read in bam.fetch(self.chrom, self._start, self._end+1):
+            uid = ':'.join(map(str, (read.tid,read.pos,read.rlen,read.is_reverse)))
+            if uid not in used:
+                if read.alen == read.rlen and not search('H', read.cigarstring):
+                    unclip += 1
+                total += 1
+            used[uid] = True
+
+        return float(unclip)/float(total)
+
     def __str__(self):
         ''' convert cluster into VCF record '''
         output = [self.chrom, str(self.POS), self.ID, self.REF, self.ALT, str(self.QUAL)]
@@ -281,6 +299,7 @@ def print_vcfheader(fh, samplename):
     ##FORMAT=<ID=BREAKS,Number=.,Type=String,Description="Positions:Counts of all breakends detected">
     ##FORMAT=<ID=TEALIGN,Number=.,Type=String,Description="Retroelement subfamilies (or POLYA) with alignments">
     ##FORMAT=<ID=RC,Number=1,Type=Float,Description="Read Count">
+    ##FORMAT=<ID=UCF,Number=1,Type=Float,Description="Unclipped Fraction">
     ##ALT=<ID=DEL,Description="Deletion">
     ##ALT=<ID=INS,Description="Insertion">
     ##ALT=<ID=INS:ME:ALU,Description="Insertion of ALU element">
@@ -289,6 +308,7 @@ def print_vcfheader(fh, samplename):
     ##ALT=<ID=INS:ME:POLYA,Description="Insertion of POLYA sequence">
     ##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
     #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tFIXME"""))+'\n')
+
 
 def rc(dna):
     ''' reverse complement '''
@@ -554,7 +574,7 @@ def rescue_hardclips(clusters, refbamfn, telib, threads=1):
     return clusters
 
 
-def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, maskfile=None, minctglen=1e7, minq=1): # TODO PARAM
+def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, maskfile=None, minctglen=1e7, minq=1, unclip=1.0): # TODO PARAM
     ''' return only clusters meeting cutoffs '''
     ''' active_elts is a list of active transposable element names (e.g. L1Hs) '''
     ''' refbamfn is the filename of the reference-aligned BAM '''
@@ -610,16 +630,22 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, 
             if mask is not None and subcluster.chrom in mask.contigs:
                 if len(list(mask.fetch(subcluster.chrom, subcluster._start, subcluster._end))) > 0:
                     reject = True
-                    subcluster.FILTER.append('mask')
+                    subcluster.FILTER.append('masked')
 
             # filter out contigs below specified size cutoff
             if chromlen[subcluster.chrom] < minctglen:
                 reject = True
                 subcluster.FILTER.append('ctgsize')
 
+            # save the more time-consuming cutoffs for last... check unclipped read mappings:
+            if not reject and unclip < 1.0:
+                subcluster.FORMAT['UCF'] = cluster.unclipfrac(refbamfn)
+                if subcluster.FORMAT['UCF'] > unclip:
+                    reject = True
+                    subcluster.FILTER.append('unclipfrac')
+
             if not reject:
                 subcluster.FILTER.append('PASS')
-                #print subcluster, subcluster.te_names(), subcluster.breakpoints()
 
             filtered.append(subcluster)
 
@@ -627,7 +653,7 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, 
     return filtered
 
 
-def annotate(clusters, reffa, refbamfn):
+def annotate(clusters, reffa, refbamfn, allclusters=False):
     ''' populate VCF INFO field with information about the insertion '''
 
     ref = pysam.Fastafile(reffa)
@@ -647,7 +673,7 @@ def annotate(clusters, reffa, refbamfn):
             tetypes.append(tetype + ':' + str(count))
         cluster.FORMAT['TEALIGN'] = ','.join(tetypes)
 
-        if cluster.FILTER[0] == 'PASS': # DEBUG - dedent this stuff eventually
+        if cluster.FILTER[0] == 'PASS' or allclusters: 
             leftbreak, rightbreak, mech = cluster.best_breakpoints(refbamfn)
             if rightbreak is not None and leftbreak > rightbreak:
                 leftbreak, rightbreak = rightbreak, leftbreak
@@ -667,10 +693,6 @@ def annotate(clusters, reffa, refbamfn):
 
         cluster.FORMAT['RC'] = len(cluster)
 
-        if cluster.FILTER[0] == 'PASS': #debug
-            print cluster
-
-    # FIXME - add various things and remember to add to header as well
     return clusters
 
 
@@ -734,7 +756,7 @@ def main(args):
         mergefq = flash_wrapper(args.pair1, args.pair2, args.maxoverlap, args.threads, uid=basename)
 
     else:
-        if args.pair1.endswith('.bam'):
+        if args.pair1.endswith('.bam') and not args.premapped:
             print "INFO: converting BAM", args.pair1, "to FASTQ", basename + '.fq.gz'
             mergefq = bamtofq(args.pair1, basename + '.fq.gz')
         else: # assume fastq
@@ -755,7 +777,7 @@ def main(args):
     assert refbamfn is not None
 
     print "INFO: finding clipped reads from genome alignment"
-    clipfastq = fetch_clipped_reads(refbamfn, minclip=50)
+    clipfastq = fetch_clipped_reads(refbamfn, minclip=int(args.minclip))
     assert clipfastq
 
     print "INFO: realigning clipped ends to TE reference library"
@@ -774,11 +796,13 @@ def main(args):
     clusters = rescue_hardclips(clusters, refbamfn, args.telib, threads=args.threads)
 
     print "INFO: filtering clusters"
-    clusters = filter_clusters(clusters, args.active.split(','), refbamfn, minsize=int(args.mincluster), maskfile=args.mask)
+    clusters = filter_clusters(clusters, args.active.split(','), refbamfn, 
+                               minsize=int(args.mincluster), maskfile=args.mask,
+                               unclip=args.unclip)
     print "INFO: passing cluster count:", len([c for c in clusters if c.FILTER[0] == 'PASS'])
 
     print "INFO: annotating clusters"
-    clusters = annotate(clusters, args.ref, refbamfn)
+    clusters = annotate(clusters, args.ref, refbamfn, allclusters=args.processfiltered)
     assert clusters
 
     print "INFO: writing VCF"
@@ -791,27 +815,47 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Analyse RC-seq data')
-    parser.add_argument('-1', dest='pair1', required=True, help='fastq(.gz) containing first end reads or BAM to process and re-map')
+    parser.add_argument('-1', dest='pair1', required=True, 
+                        help='fastq(.gz) containing first end reads or BAM to process and re-map')
     parser.add_argument('-2', dest='pair2', default=None,
-                         help='fastq(.gz) containing second end reads (optional, if present the second read is assumed to overlap the first and will be joined to first via FLASH)')
+                         help='fastq(.gz) containing second end reads (optional, second read is assumed to overlap the first and will be joined via FLASH)')
 
-    parser.add_argument('-r', '--ref', dest='ref', required=True, help='reference genome for bwa-mem, also expects .fai index (samtools faidx ref.fa)')
-    parser.add_argument('-l', '--telib', dest='telib', required=True, help='TE library (BWA indexed FASTA), seq names must be CLASS:NAME')
-    parser.add_argument('-o', '--outfile', dest='outfile', required=True, help='output VCF file')
-    parser.add_argument('-d', '--outdir', dest='outdir', default=None, help='output directory')
+    parser.add_argument('-r', '--ref', dest='ref', required=True, 
+                        help='reference genome for bwa-mem, also expects .fai index (samtools faidx ref.fa)')
+    parser.add_argument('-l', '--telib', dest='telib', required=True, 
+                        help='TE library (BWA indexed FASTA), seq names must be CLASS:NAME')
+    parser.add_argument('-o', '--outfile', dest='outfile', required=True, 
+                        help='output VCF file')
+    parser.add_argument('-d', '--outdir', dest='outdir', default=None, 
+                        help='output directory')
 
     parser.add_argument('-a', '--active', dest='active', default='L1Hs',
                         help='Comma-delimited list of relevant (i.e. active) subfamilies to target (default=L1Hs)')
 
-    parser.add_argument('-n', '--samplename', dest='samplename', default=str(uuid4()), help='unique sample name (default = generated UUID4)')
-    parser.add_argument('-m', '--mask', dest='mask', default=None, help='genome coordinate mask (recommended!!)')
-    parser.add_argument('-t', dest='threads', default=1, help='number of threads')
+    parser.add_argument('-n', '--samplename', dest='samplename', default=str(uuid4()), 
+                        help='unique sample name (default = generated UUID4)')
+    parser.add_argument('-m', '--mask', dest='mask', default=None, 
+                        help='genome coordinate mask (recommended!!)')
+    parser.add_argument('-t', dest='threads', default=1, 
+                        help='number of threads')
 
-    parser.add_argument('--max-overlap', dest='maxoverlap', default=100, help='Maximum overlap used for joining paired reads with FLASH')
-    parser.add_argument('--mincluster', dest='mincluster', default=4, help='minimum number of reads in a cluster')
-    parser.add_argument('--minq', dest='minq', default=1, help='minimum mean mapping quality per cluster')
-    parser.add_argument('--premapped',  action='store_true', default=False, help='use BAM specified by -1 (must be .bam) directly instead of remapping')
-    parser.add_argument('--clusterbam',  action='store_true', default=False, help='output genome and TE clusters to BAMs')
+    parser.add_argument('--max-overlap', dest='maxoverlap', default=100, 
+                        help='Maximum overlap used for joining paired reads with FLASH')
+    parser.add_argument('--mincluster', dest='mincluster', default=4, 
+                        help='minimum number of reads in a cluster')
+    parser.add_argument('--minclip', dest='minclip', default=50, 
+                        help='minimum clipped bases for adding a read to a cluster (default = 50)')
+    parser.add_argument('--minq', dest='minq', default=1, 
+                        help='minimum mean mapping quality per cluster (default = 1)')
+    parser.add_argument('--unclipfrac', dest='unclip', default=1.0, 
+                        help='maximum fraction of unclipped reads in cluster region (default = 1.0)')
+
+    parser.add_argument('--processfiltered', action='store_true', default=False, 
+                        help='perform post-processing steps on all clusters, even filtered ones')
+    parser.add_argument('--premapped',  action='store_true', default=False, 
+                        help='use BAM specified by -1 (must be .bam) directly instead of remapping')
+    parser.add_argument('--clusterbam',  action='store_true', default=False, 
+                        help='output genome and TE clusters to BAMs')
 
     args = parser.parse_args()
     main(args)

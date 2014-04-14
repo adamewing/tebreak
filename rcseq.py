@@ -448,6 +448,12 @@ def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2): # TODO PARAMS
                         unmapseq = read.seq[:read.qstart]
                         unmapqua = read.qual[:read.qstart]
 
+                else:
+                    #TODO, consider this case, important for ALU insertions w/ read length > 300 bp and very short L1s
+                    # (align)           AAAAAAAAAAAAAAA
+                    # (read)   RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR
+                    pass
+
             if not read.is_unmapped and unmapseq is not None and uid not in used:
                 infoname = ':'.join((read.qname, str(inbam.getrname(read.tid)), str(read.pos))) # help find read again
                 outfq.write(bamrec_to_fastq(read, diffseq=unmapseq, diffqual=unmapqua, diffname=infoname) + '\n')
@@ -513,7 +519,7 @@ def build_te_clusters(splitreads, searchdist=100): # TODO PARAM
     return clusters
 
 
-def rescue_hardclips(clusters, refbamfn, telib, threads=1):
+def rescue_hardclips(clusters, refbamfn, telib, width=150, threads=1):
     ''' hard-clipped reads are often mostly TE-derived, hunt down the original read and find breakpoints '''
     hc_clusters = {}
     hc_reads    = {}
@@ -545,7 +551,7 @@ def rescue_hardclips(clusters, refbamfn, telib, threads=1):
                     fqout.write(fqrec + '\n')
 
     print "Realigning hardclips to TE library..."
-    bamout = bwamem(fqfn, telib, threads=threads)
+    bamout = bwamem(fqfn, telib, width=width, threads=threads)
 
     tebam = pysam.Samfile(bamout, 'rb')
 
@@ -772,7 +778,7 @@ def main(args):
             sys.exit(1)
     else:
         print "INFO: mapping fastq", mergefq, "to genome", args.ref, "using", args.threads, "threads"
-        refbamfn = bwamem(mergefq, args.ref, threads=args.threads, uid=basename)
+        refbamfn = bwamem(mergefq, args.ref, width=int(args.width), threads=args.threads, uid=basename)
 
     assert refbamfn is not None
 
@@ -781,7 +787,7 @@ def main(args):
     assert clipfastq
 
     print "INFO: realigning clipped ends to TE reference library"
-    tebamfn = bwamem(clipfastq, args.telib, threads=args.threads)
+    tebamfn = bwamem(clipfastq, args.telib, width=int(args.width), threads=args.threads)
     assert tebamfn 
 
     print "INFO: identifying usable split reads from alignments"
@@ -793,12 +799,12 @@ def main(args):
     print "INFO: cluster count:", len(clusters)
 
     print "INFO: further investigation of hard-clipped reads in breakend regions"
-    clusters = rescue_hardclips(clusters, refbamfn, args.telib, threads=args.threads)
+    clusters = rescue_hardclips(clusters, refbamfn, args.telib, width=int(args.width), threads=args.threads)
 
     print "INFO: filtering clusters"
     clusters = filter_clusters(clusters, args.active.split(','), refbamfn, 
                                minsize=int(args.mincluster), maskfile=args.mask,
-                               unclip=args.unclip)
+                               unclip=float(args.unclip))
     print "INFO: passing cluster count:", len([c for c in clusters if c.FILTER[0] == 'PASS'])
 
     print "INFO: annotating clusters"
@@ -839,6 +845,8 @@ if __name__ == '__main__':
     parser.add_argument('-t', dest='threads', default=1, 
                         help='number of threads')
 
+    parser.add_argument('-w', '--width', dest='width', default=150,
+                         help='bandwidth parameter for bwa-mem: determines max size of indels in reads (see bwa docs, default=150)')
     parser.add_argument('--max-overlap', dest='maxoverlap', default=100, 
                         help='Maximum overlap used for joining paired reads with FLASH')
     parser.add_argument('--mincluster', dest='mincluster', default=4, 

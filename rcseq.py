@@ -269,6 +269,32 @@ class Cluster:
 
         return float(unclip)/float(total)
 
+    def checksnps(self, dbsnpfn):
+        ''' dbsnpfn should be a tabix-indexed version of a dbSNP VCF '''
+        dbsnp = pysam.Tabixfile(dbsnpfn)
+
+        foundsnps  = []
+        start, end = self.find_extrema() # test me!
+        
+        snps = od()
+        for rec in dbsnp.fetch(str(self.chrom), int(start), int(end)):
+            snps[int(rec.strip().split()[1])] = rec
+
+        for read in bam.fetch(self.chrom, start, end):
+            for rpos, gpos in read.aligned_pairs:
+                if int(gpos) in snps:
+                    snp_chrom, snp_pos, snp_id, snp_ref, snp_alt = snps[int(gpos)][:4]
+                    clusterbase = read.seq[rpos].upper()
+                    if clusterbase == snp_alt.upper():
+                        foundsnps.append(snp_id)
+        return foundsnps
+
+    def find_extrema(self):
+        ''' return leftmost and rightmost aligned positions in cluster vs. reference '''
+        positions = []
+        positions += [sr.gread.positions for sr in self._splitreads]            
+        return min(positions), max(positions)
+
     def __str__(self):
         ''' convert cluster into VCF record '''
         output = [self.chrom, str(self.POS), self.ID, self.REF, self.ALT, str(self.QUAL)]
@@ -659,7 +685,7 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, 
     return filtered
 
 
-def annotate(clusters, reffa, refbamfn, allclusters=False):
+def annotate(clusters, reffa, refbamfn, allclusters=False, dbsnp=None):
     ''' populate VCF INFO field with information about the insertion '''
 
     ref = pysam.Fastafile(reffa)
@@ -690,6 +716,9 @@ def annotate(clusters, reffa, refbamfn, allclusters=False):
             if rightbreak is not None:
                 cluster.INFO['END']  = rightbreak
                 cluster.INFO['MECH'] = mech
+
+            if dbsnp is not None:
+                cluster.INFO['SNPS'] = ','.join(cluster.checksnps(dbsnp))
 
         refbase = ref.fetch(cluster.chrom, cluster.POS, cluster.POS+1)
         if refbase != '':
@@ -728,7 +757,7 @@ def vcfoutput(clusters, outfile, samplename):
             out.write(str(cluster) + '\n')
 
 
-def bamoutput(clusters, refbamfn, tebamfn, prefix):
+def bamoutput(clusters, refbamfn, tebamfn, prefix, by_breakend=True):
     refbam = pysam.Samfile(refbamfn, 'rb')
     tebam  = pysam.Samfile(tebamfn, 'rb')
     refout = pysam.Samfile(prefix + ".ref.bam", 'wb', template=refbam)
@@ -808,7 +837,7 @@ def main(args):
     print "INFO: passing cluster count:", len([c for c in clusters if c.FILTER[0] == 'PASS'])
 
     print "INFO: annotating clusters"
-    clusters = annotate(clusters, args.ref, refbamfn, allclusters=args.processfiltered)
+    clusters = annotate(clusters, args.ref, refbamfn, allclusters=args.processfiltered, dbsnp=args.snps)
     assert clusters
 
     print "INFO: writing VCF"
@@ -842,6 +871,8 @@ if __name__ == '__main__':
                         help='unique sample name (default = generated UUID4)')
     parser.add_argument('-m', '--mask', dest='mask', default=None, 
                         help='genome coordinate mask (recommended!!)')
+    parser.add_argument('-s', '--snps', default=None,
+                        help='dbSNP VCF (tabix-indexed) to link SNPs with insertions')
     parser.add_argument('-t', dest='threads', default=1, 
                         help='number of threads')
 

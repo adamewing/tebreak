@@ -983,6 +983,10 @@ def main(args):
         print "INFO: writing BAMs"
         bamoutput(clusters, refbamfn, tebamfn, basename)
 
+    if args.consensus is not None:
+        print "INFO: compiling consensus sequences for breakends and outputting to", args.consensus
+        consensus_fasta(clusters, args.consensus)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Analyse RC-seq data')
@@ -1024,6 +1028,8 @@ if __name__ == '__main__':
                         help='minimum mean mapping quality per cluster (default = 1)')
     parser.add_argument('--unclipfrac', dest='unclip', default=1.0, 
                         help='maximum fraction of unclipped reads in cluster region (default = 1.0)')
+    parser.add_argument('--consensus', dest='consensus', default=None,
+                        help='build consensus sequences from breakends and output as FASTA to specified file')
 
     parser.add_argument('--processfiltered', action='store_true', default=False, 
                         help='perform post-processing steps on all clusters, even filtered ones')

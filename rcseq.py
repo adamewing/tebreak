@@ -269,9 +269,10 @@ class Cluster:
 
         return float(unclip)/float(total)
 
-    def checksnps(self, dbsnpfn):
+    def checksnps(self, dbsnpfn, refbamfn):
         ''' dbsnpfn should be a tabix-indexed version of a dbSNP VCF '''
         dbsnp = pysam.Tabixfile(dbsnpfn)
+        bam   = pysam.Samfile(refbamfn, 'rb')
 
         foundsnps  = []
         start, end = self.find_extrema() # test me!
@@ -282,17 +283,24 @@ class Cluster:
 
         for read in bam.fetch(self.chrom, start, end):
             for rpos, gpos in read.aligned_pairs:
-                if int(gpos) in snps:
-                    snp_chrom, snp_pos, snp_id, snp_ref, snp_alt = snps[int(gpos)][:4]
-                    clusterbase = read.seq[rpos].upper()
-                    if clusterbase == snp_alt.upper():
-                        foundsnps.append(snp_id)
-        return foundsnps
+                if gpos is not None and rpos is not None and int(gpos+1) in snps:
+                    snp_chrom, snp_pos, snp_id, snp_ref, snp_alt = snps[int(gpos+1)].split()[:5]
+                    if rpos is None:
+                        print "DEBUG: rpos is None somewhere:", read.aligned_pairs
+                    clusterbase = read.seq[rpos+read.qstart].upper() # rpos offsets to first _aligned_ base
+                    if len(snp_ref) == len(snp_alt) == 1 and clusterbase == snp_alt.upper():
+                        foundsnps.append(':'.join((snp_id, clusterbase, 'ALT')))
+                    if len(snp_ref) == len(snp_alt) == 1 and clusterbase == snp_ref.upper():
+                        foundsnps.append(':'.join((snp_id, clusterbase, 'REF')))
+
+        bam.close()
+        reportsnps = [snp for snp, count in Counter(foundsnps).iteritems() if count > 1]
+        return reportsnps
 
     def find_extrema(self):
         ''' return leftmost and rightmost aligned positions in cluster vs. reference '''
         positions = []
-        positions += [sr.gread.positions for sr in self._splitreads]            
+        positions += [pos for sr in self._splitreads for pos in sr.gread.positions]            
         return min(positions), max(positions)
 
     def __str__(self):
@@ -306,6 +314,89 @@ class Cluster:
 
     def __len__(self):
         return len(self._splitreads)
+
+
+class AlignedColumn:
+    ''' used by MSA class to store aligned bases '''
+    def __init__(self):
+        self.bases = od() # species name --> base
+        self.annotations = od() # metadata
+
+    def gap(self):
+        if '-' in self.bases.values():
+            return True
+        return False
+
+    def subst(self):
+        if self.gap():
+            return False
+
+        if len(set(self.bases.values())) > 1:
+            return True
+        return False
+
+    def cons(self):
+        ''' consensus prefers bases over gaps '''
+        for base, count in Counter(map(str.upper, self.bases.values())).most_common():
+            if base != '-':
+                return base
+
+    def __str__(self):
+        return str(self.bases)
+
+
+class MSA:
+    ''' multiple sequence alignment class '''
+    def __init__(self, infile=None):
+        self.columns = []
+        self.ids     = []
+        self.seqs    = od()
+
+        if infile is not None:
+            self.readFastaMSA(infile)
+
+    def __len__(self):
+        return len(self.columns)
+
+    def readFastaMSA(self, infile):
+        id   = None
+        seq  = ''
+
+        with open(infile, 'r') as fasta:
+            for line in fasta:
+                line = line.strip()
+                if line.startswith('>'):
+                    if id is not None:
+                        self.seqs[id] = seq
+                    seq = ''
+                    id = line.lstrip('>')
+                    self.ids.append(id)
+                else:
+                    seq += line
+            self.seqs[id] = seq
+
+        first = True
+        colen = 0
+        for ID, seq in self.seqs.iteritems():
+            if first:
+                colen = len(seq)
+                for base in list(seq):
+                    ac = AlignedColumn()
+                    ac.bases[ID] = base
+                    self.columns.append(ac)
+                first = False
+            else:
+                assert len(seq) == colen
+                pos = 0
+                for base in list(seq):
+                    ac = self.columns[pos]
+                    ac.bases[ID] = base
+                    pos += 1
+
+    def consensus(self):
+        ''' compute consensus '''
+        bases = [column.cons() for column in self.columns]
+        return ''.join(bases)
 
 
 def print_vcfheader(fh, samplename):
@@ -718,7 +809,9 @@ def annotate(clusters, reffa, refbamfn, allclusters=False, dbsnp=None):
                 cluster.INFO['MECH'] = mech
 
             if dbsnp is not None:
-                cluster.INFO['SNPS'] = ','.join(cluster.checksnps(dbsnp))
+                snps = cluster.checksnps(dbsnp, refbamfn)
+                if snps:
+                    cluster.INFO['SNPS'] = ','.join(snps)
 
         refbase = ref.fetch(cluster.chrom, cluster.POS, cluster.POS+1)
         if refbase != '':
@@ -729,6 +822,41 @@ def annotate(clusters, reffa, refbamfn, allclusters=False, dbsnp=None):
         cluster.FORMAT['RC'] = len(cluster)
 
     return clusters
+
+
+def consensus(cluster, breakend):
+    ''' create consensus sequence for a breakend '''
+    subcluster = cluster.subcluster_by_breakend([breakend])
+    greads = [sr.gread for sr in subcluster._splitreads]
+
+    tmpfa = str(uuid4()) + '.fa'
+    with open(tmpfa, 'w') as fa:
+        [fa.write('>' + gread.qname + '\n' + gread.seq + '\n') for gread in greads]
+
+    alnfa = mafft(tmpfa)
+    msa = MSA(alnfa)
+
+    os.remove(tmpfa)
+    os.remove(alnfa)
+
+    return msa.consensus()
+
+
+def mafft(infafn, iterations=100, threads=1):
+    ''' use MAFFT to create MSA '''
+
+    outfafn = str(uuid4()) + '.aln.fa'
+
+    args = ['mafft', '--localpair', '--maxiterate', str(iterations), '--thread', str(threads), infafn]
+
+    FNULL = open(os.devnull, 'w')
+
+    with open(outfafn, 'w') as outfa:
+        p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=FNULL)
+        for line in p.stdout:
+            outfa.write(line)
+
+    return outfafn
 
 
 def bamtofq(inbam, outfq):
@@ -757,7 +885,7 @@ def vcfoutput(clusters, outfile, samplename):
             out.write(str(cluster) + '\n')
 
 
-def bamoutput(clusters, refbamfn, tebamfn, prefix, by_breakend=True):
+def bamoutput(clusters, refbamfn, tebamfn, prefix):
     refbam = pysam.Samfile(refbamfn, 'rb')
     tebam  = pysam.Samfile(tebamfn, 'rb')
     refout = pysam.Samfile(prefix + ".ref.bam", 'wb', template=refbam)
@@ -772,6 +900,14 @@ def bamoutput(clusters, refbamfn, tebamfn, prefix, by_breakend=True):
     refout.close()
     teout.close()
 
+def consensus_fasta(clusters, outfile, passonly=True):
+    with open(outfile, 'w') as cons:
+        for cluster in clusters:
+            if passonly and cluster.FILTER[0] == 'PASS':
+                outname = cluster.chrom + ':' + str(cluster.POS)
+                cons.write('>' + outname + ':1\n' + consensus(cluster, cluster.POS) + '\n')
+                if cluster.INFO.get('END') and cluster.POS != cluster.INFO['END']:
+                    cons.write('>' + outname + ':2\n' + consensus(cluster, cluster.INFO['END']) + '\n')
 
 def main(args):
     mergefq = None
@@ -853,7 +989,7 @@ if __name__ == '__main__':
     parser.add_argument('-1', dest='pair1', required=True, 
                         help='fastq(.gz) containing first end reads or BAM to process and re-map')
     parser.add_argument('-2', dest='pair2', default=None,
-                         help='fastq(.gz) containing second end reads (optional, second read is assumed to overlap the first and will be joined via FLASH)')
+                        help='fastq(.gz) containing second end reads (optional, second read is assumed to overlap the first and will be joined via FLASH)')
 
     parser.add_argument('-r', '--ref', dest='ref', required=True, 
                         help='reference genome for bwa-mem, also expects .fai index (samtools faidx ref.fa)')

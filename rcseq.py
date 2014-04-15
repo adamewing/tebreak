@@ -1011,7 +1011,7 @@ if __name__ == '__main__':
                         help='unique sample name (default = generated UUID4)')
     parser.add_argument('-m', '--mask', dest='mask', default=None, 
                         help='genome coordinate mask (recommended!!)')
-    parser.add_argument('-s', '--snps', default=None,
+    parser.add_argument('-s', '--snps', dest='snps', default=None,
                         help='dbSNP VCF (tabix-indexed) to link SNPs with insertions')
     parser.add_argument('-t', dest='threads', default=1, 
                         help='number of threads')

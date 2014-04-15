@@ -3,10 +3,6 @@
 '''
 rcseq.py: Analyse RC-seq datasets.
 
-Prereqs:
-bwa       (sr alignment workhorse)
-pysam     (parsing SAM/BAM formatted alignments)
-FLASH     (not needed if not using overlapped libraries, used for assembling read pairs)
 
 contact: Adam Ewing (adam.ewing@mater.uq.edu.au)
 

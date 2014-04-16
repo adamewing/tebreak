@@ -65,6 +65,10 @@ class SplitRead:
         assert self.breakloc is not None
         assert self.teside is not None
 
+    def get_teloc(self):
+        ''' return location and orientation of alignment within TE '''
+
+
     def get_tematch(self):
         ''' return number of mismatches / aligned length of TE sub-read '''
         nm = [value for (tag, value) in self.tread.tags if tag == 'NM'][0]
@@ -824,6 +828,10 @@ def consensus(cluster, breakend):
     ''' create consensus sequence for a breakend '''
     subcluster = cluster.subcluster_by_breakend([breakend])
     greads = [sr.gread for sr in subcluster._splitreads]
+
+    # don't try to make a consensus of just one read...
+    if len(greads) == 1:
+        return greads[0].seq
 
     tmpfa = str(uuid4()) + '.fa'
     with open(tmpfa, 'w') as fa:

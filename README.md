@@ -1,8 +1,8 @@
-## RCSeq
+## retrosplit
 
 Contact: adam.ewing@mater.uq.edu.au
 
-*Analyse RC-seq data, or in principle any sequence data, for transposable element insertions.*
+*Analyse sequence data for transposable element insertions.*
 
 # Prerequisites:
 

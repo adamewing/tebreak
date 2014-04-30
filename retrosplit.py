@@ -559,6 +559,12 @@ def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2): # TODO PARAMS
             unmapseq = None
             unmapqua = None
 
+            if read.qual is None:
+                sys.stderr.write("read with no quality score:\n")
+                sys.stderr.write(str(read) + "\n")
+                sys.stderr.write("possible FASTA alignment instead of FASTQ - please re-do alignments from FASTQ\n")
+                sys.exit(1)
+
             if read.rlen - read.alen >= int(minclip): # 'soft' clipped?
 
                 # length of 'minor' clip (want this to be small or zero - bad if just the middle part of read is aligned)

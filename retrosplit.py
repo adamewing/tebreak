@@ -567,7 +567,7 @@ def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2): # TODO PARAMS
 
             if read.rlen - read.alen >= int(minclip): # 'soft' clipped?
 
-                # length of 'minor' clip (want this to be small or zero - bad if just the middle part of read is aligned)
+                # length of 'minor' clip
                 altclip = min(read.qstart, read.rlen-read.qend)
 
                 if altclip <= maxaltclip:
@@ -591,7 +591,7 @@ def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2): # TODO PARAMS
                     pass
 
             #if not read.is_unmapped and unmapseq is not None and uid not in used:
-            if not read.is_unmapped and not read.is_duplicate:
+            if not read.is_unmapped and unmapseq is not None and not read.is_duplicate:
                 infoname = ':'.join((read.qname, str(inbam.getrname(read.tid)), str(read.pos))) # help find read again
                 outfq.write(bamrec_to_fastq(read, diffseq=unmapseq, diffqual=unmapqua, diffname=infoname) + '\n')
                 #used[uid] = True
@@ -793,8 +793,6 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, 
 
             if 'masked' not in subcluster.FILTER and whitelist is not None:
                 tclasses = [wl.strip().split()[-1] for wl in whitelist.fetch(subcluster.chrom, subcluster._start, subcluster._end+1)]
-                if len(tclasses) > 0:
-                    print "DEBUG: classes from wl:", tclasses
                 if tclass in tclasses:
                     reject = False
                     subcluster.FILTER = []

@@ -124,6 +124,8 @@ class Cluster:
         if firstread is not None:
             self.add_splitread(firstread)
 
+        self.INFO['KNOWN'] = '0'
+
     def add_splitread(self, sr):
         ''' add a SplitRead and update '''
         self._splitreads.append(sr)
@@ -426,6 +428,7 @@ def print_vcfheader(fh, samplename):
     ##INFO=<ID=END,Number=1,Type=Integer,Description="Position of second breakend (same as first if not known)">
     ##INFO=<ID=TESIDES,Number=.,Type=Integer,Description="Note if 3prime and 5prime ends are detected">
     ##INFO=<ID=MECH,Number=1,Type=String,Description="Hints about the insertion mechanism (TSD, Deletion, EndoMinus, etc.)">
+    ##INFO=<ID=KNOWN,Number=1,Type=Integer,Description="1=Known from a previous study (in whitelist)">
     ##FORMAT=<ID=BREAKS,Number=.,Type=String,Description="Positions:Counts of all breakends detected">
     ##FORMAT=<ID=TEALIGN,Number=.,Type=String,Description="Retroelement subfamilies (or POLYA) with alignments">
     ##FORMAT=<ID=RC,Number=1,Type=Float,Description="Read Count">
@@ -550,9 +553,6 @@ def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2): # TODO PARAMS
     outfqfn = sub('.bam$', '.clipped.fq', inbamfn)
     inbam   = pysam.Samfile(inbamfn, 'rb')
 
-    # track tid:pos:length:is_reverse to remove potential PCR dups
-    #used  = {}
-
     with open(outfqfn, 'w') as outfq:
         for read in inbam.fetch():
             uid = ':'.join(map(str, (read.tid,read.pos,read.rlen,read.is_reverse)))
@@ -590,11 +590,9 @@ def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2): # TODO PARAMS
                     # (read)   RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR
                     pass
 
-            #if not read.is_unmapped and unmapseq is not None and uid not in used:
             if not read.is_unmapped and unmapseq is not None and not read.is_duplicate:
                 infoname = ':'.join((read.qname, str(inbam.getrname(read.tid)), str(read.pos))) # help find read again
                 outfq.write(bamrec_to_fastq(read, diffseq=unmapseq, diffqual=unmapqua, diffname=infoname) + '\n')
-                #used[uid] = True
 
         inbam.close()
 
@@ -795,6 +793,7 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, 
                 tclasses = [wl.strip().split()[-1] for wl in whitelist.fetch(subcluster.chrom, subcluster._start, subcluster._end+1)]
                 if tclass in tclasses:
                     reject = False
+                    subcluster.INFO['KNOWN'] = '1'
                     subcluster.FILTER = []
 
             if not reject:

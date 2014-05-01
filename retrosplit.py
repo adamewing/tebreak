@@ -716,17 +716,21 @@ def rescue_hardclips(clusters, refbamfn, telib, width=150, threads=1):
     return clusters
 
 
-def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, maskfile=None, minctglen=1e7, minq=1, unclip=1.0): # TODO PARAM
+def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, maskfile=None, whitelistfile=None, minctglen=1e7, minq=1, unclip=1.0):
     ''' return only clusters meeting cutoffs '''
     ''' active_elts is a list of active transposable element names (e.g. L1Hs) '''
     ''' refbamfn is the filename of the reference-aligned BAM '''
-    ''' mask should be a tabix-indexed BED file of intervals to ignore (e.g. L1Hs reference locations) '''
+    ''' maskfile / whitelist should be a tabix-indexed BED file of intervals to ignore (e.g. L1Hs reference locations) '''
     filtered = []
     active_elts = Counter(active_elts)
 
     mask = None
     if maskfile is not None:
         mask = pysam.Tabixfile(maskfile)
+
+    whitelist = None
+    if whitelistfile is not None:
+        whitelist = pysam.Tabixfile(whitelistfile)
 
     bam = pysam.Samfile(refbamfn, 'rb')
     chromlen = dict(zip(bam.references, bam.lengths))
@@ -770,7 +774,7 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, 
 
             # apply position-based masking
             if mask is not None and subcluster.chrom in mask.contigs:
-                if len(list(mask.fetch(subcluster.chrom, subcluster._start, subcluster._end))) > 0:
+                if len(list(mask.fetch(subcluster.chrom, subcluster._start, subcluster._end+1))) > 0:
                     reject = True
                     subcluster.FILTER.append('masked')
 
@@ -785,6 +789,14 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, 
                 if subcluster.FORMAT['UCF'] > unclip:
                     reject = True
                     subcluster.FILTER.append('unclipfrac')
+
+            if 'masked' not in subcluster.FILTER and whitelist is not None:
+                tclasses = [wl.strip().split()[-1] for wl in whitelist.fetch(subcluster.chrom, subcluster._start, subcluster._end+1)]
+                if len(tclasses) > 0:
+                    print "DEBUG: classes from wl:", tclasses
+                if tclass in tclasses:
+                    reject = False
+                    subcluster.FILTER = []
 
             if not reject:
                 subcluster.FILTER.append('PASS')
@@ -993,7 +1005,7 @@ def main(args):
     print "INFO: filtering clusters"
     clusters = filter_clusters(clusters, args.active.split(','), refbamfn, 
                                minsize=int(args.mincluster), maskfile=args.mask,
-                               unclip=float(args.unclip))
+                               whitelistfile=args.whitelist, unclip=float(args.unclip))
     print "INFO: passing cluster count:", len([c for c in clusters if c.FILTER[0] == 'PASS'])
 
     print "INFO: annotating clusters"
@@ -1034,7 +1046,9 @@ if __name__ == '__main__':
     parser.add_argument('-n', '--samplename', dest='samplename', default=str(uuid4()), 
                         help='unique sample name (default = generated UUID4)')
     parser.add_argument('-m', '--mask', dest='mask', default=None, 
-                        help='genome coordinate mask (recommended!!)')
+                        help='genome coordinate mask (recommended!!) - expects tabix-indexed BED-3')
+    parser.add_argument('-w', '--whitelist', dest='whitelist', default=None,
+                        help='PASS any non-mask insertions found tabix-indexed BED-3 plus a fourth column corresponding to L1/ALU/SVA')
     parser.add_argument('-s', '--snps', dest='snps', default=None,
                         help='dbSNP VCF (tabix-indexed) to link SNPs with insertions')
     parser.add_argument('-t', dest='threads', default=1, 

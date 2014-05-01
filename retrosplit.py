@@ -551,7 +551,7 @@ def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2): # TODO PARAMS
     inbam   = pysam.Samfile(inbamfn, 'rb')
 
     # track tid:pos:length:is_reverse to remove potential PCR dups
-    used  = {}
+    #used  = {}
 
     with open(outfqfn, 'w') as outfq:
         for read in inbam.fetch():
@@ -590,10 +590,11 @@ def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2): # TODO PARAMS
                     # (read)   RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR
                     pass
 
-            if not read.is_unmapped and unmapseq is not None and uid not in used:
+            #if not read.is_unmapped and unmapseq is not None and uid not in used:
+            if not read.is_unmapped and not read.is_duplicate:
                 infoname = ':'.join((read.qname, str(inbam.getrname(read.tid)), str(read.pos))) # help find read again
                 outfq.write(bamrec_to_fastq(read, diffseq=unmapseq, diffqual=unmapqua, diffname=infoname) + '\n')
-                used[uid] = True
+                #used[uid] = True
 
         inbam.close()
 
@@ -936,6 +937,7 @@ def bamoutput(clusters, refbamfn, tebamfn, prefix):
     refout.close()
     teout.close()
 
+
 def consensus_fasta(clusters, outfile, passonly=True):
     with open(outfile, 'w') as cons:
         for cluster in clusters:
@@ -945,10 +947,32 @@ def consensus_fasta(clusters, outfile, passonly=True):
                 if cluster.INFO.get('END') and cluster.POS != cluster.INFO['END']:
                     cons.write('>' + outname + ':2\n' + consensus(cluster, cluster.INFO['END']) + '\n')
 
+
+def markdups(inbam, picard):
+    ''' call MarkDuplicates.jar from Picard (requires java) '''
+    md = picard + '/MarkDuplicates.jar'
+    assert os.path.exists(md)
+
+    outtmp  = str(uuid4()) + '.mdtmp.bam'
+    metrics = inbam + '.markdups.metrics.txt'
+    args    = ['java', '-Xmx4g', '-jar', md, 'I=' + inbam, 'O=' + outtmp, 'M=' + metrics]
+    subprocess.call(args)
+
+    assert os.path.exists(metrics)
+
+    os.remove(inbam)
+    os.rename(outtmp, inbam)
+
+    print "INFO: rebuilding index for", inbam
+    subprocess.call(['samtools', 'index', inbam])
+
+    return inbam
+
+
 def main(args):
     mergefq = None
     basename = args.samplename
-    
+
     if args.outdir is not None:
         if not os.path.exists(args.outdir):
             try:
@@ -982,6 +1006,9 @@ def main(args):
         refbamfn = bwamem(mergefq, args.ref, width=int(args.width), threads=args.threads, uid=basename)
 
     assert refbamfn is not None
+
+    print "INFO: marking likely PCR duplicates"
+    markdups(refbamfn, args.picard)
 
     print "INFO: finding clipped reads from genome alignment"
     clipfastq = fetch_clipped_reads(refbamfn, minclip=int(args.minclip))
@@ -1039,6 +1066,8 @@ if __name__ == '__main__':
                         help='output VCF file')
     parser.add_argument('-d', '--outdir', dest='outdir', default=None, 
                         help='output directory')
+    parser.add_argument('-p', '--picard', dest='picard', required=True,
+                        help='Picard install directory, needed for MarkDuplicates.jar')
 
     parser.add_argument('-a', '--active', dest='active', default='L1Hs',
                         help='Comma-delimited list of relevant (i.e. active) subfamilies to target (default=L1Hs)')
@@ -1054,7 +1083,7 @@ if __name__ == '__main__':
     parser.add_argument('-t', dest='threads', default=1, 
                         help='number of threads')
 
-    parser.add_argument('-w', '--width', dest='width', default=150,
+    parser.add_argument('--width', dest='width', default=150,
                          help='bandwidth parameter for bwa-mem: determines max size of indels in reads (see bwa docs, default=150)')
     parser.add_argument('--max-overlap', dest='maxoverlap', default=100, 
                         help='Maximum overlap used for joining paired reads with FLASH')

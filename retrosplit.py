@@ -15,6 +15,7 @@ import gzip
 import os
 import sys
 import pysam
+import datetime
 
 from string import maketrans
 from collections import Counter
@@ -39,6 +40,7 @@ class SplitRead:
         self.tlen      = int(tlen)
         self.hardclips = [] # keep hardclipped reads for later
         self.rescued   = False
+        self.embedded  = False # nonref TE is completely embedded in read
 
         self.tclass, self.tname = tname.split(':')
         
@@ -86,6 +88,20 @@ class SplitRead:
         nm = [value for (tag, value) in self.gread.tags if tag == 'NM'][0]
         return 1.0 - (float(nm)/float(self.gread.alen))
 
+    def getbreakseq(self, flank=5):
+        leftseq  = ''
+        rightseq = ''
+
+        if self.gread.qstart < self.gread.rlen - self.gread.qend: # right
+            leftseq  = self.gread.seq[self.gread.qend-flank:self.gread.qend].upper()
+            rightseq = self.gread.seq[self.gread.qend:self.gread.qend+flank].lower()
+
+        else: # left
+            leftseq  = self.gread.seq[self.gread.qstart-flank:self.gread.qstart].lower()
+            rightseq = self.gread.seq[self.gread.qstart:self.gread.qstart+flank].upper()
+
+        return leftseq + rightseq
+
     def __gt__(self, other):
         ''' enables sorting of SplitRead objects '''
         if self.chrom == other.chrom:
@@ -95,6 +111,8 @@ class SplitRead:
 
     def __str__(self):
         return ','.join(map(str, ('SplitRead',self.chrom, self.breakloc, self.tname, self.tread.pos)))
+
+
 
 
 class Cluster:
@@ -209,6 +227,11 @@ class Cluster:
             return be[0][0], be[1][0], mech
 
         raise ValueError('Cluster.best_breakpoints returned more than two breakends, panic!\n')
+
+    def majorbreakseq(self, breakloc, flank=5):
+        ''' return most common breakend sequence '''
+        return Counter([sr.getbreakseq(flank=flank) for sr in self._splitreads if sr.breakloc == breakloc]).most_common(1)[0][0]
+
 
     def guess_mechanism(self, refbamfn, bstart, bend):
         ''' check depth manually (only way to get ALL reads), decide whether it's likely a TSD, Deletion, or other '''
@@ -414,6 +437,10 @@ class MSA:
         return ''.join(bases)
 
 
+def now():
+    return str(datetime.datetime.now())
+
+
 def print_vcfheader(fh, samplename):
     fh.write(sub('FIXME',samplename,dedent("""\
     ##fileformat=VCFv4.1
@@ -430,6 +457,8 @@ def print_vcfheader(fh, samplename):
     ##INFO=<ID=MECH,Number=1,Type=String,Description="Hints about the insertion mechanism (TSD, Deletion, EndoMinus, etc.)">
     ##INFO=<ID=KNOWN,Number=1,Type=Integer,Description="1=Known from a previous study (in whitelist)">
     ##FORMAT=<ID=BREAKS,Number=.,Type=String,Description="Positions:Counts of all breakends detected">
+    ##FORMAT=<ID=POSBREAKSEQ,Number=1,Type=String,Description="Sequence of the POS breakend">
+    ##FORMAT=<ID=ENDBREAKSEQ,Number=1,Type=String,Description="Sequence of the INFO.END breakend">
     ##FORMAT=<ID=TEALIGN,Number=.,Type=String,Description="Retroelement subfamilies (or POLYA) with alignments">
     ##FORMAT=<ID=RC,Number=1,Type=Float,Description="Read Count">
     ##FORMAT=<ID=UCF,Number=1,Type=Float,Description="Unclipped Fraction">
@@ -805,7 +834,7 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, 
     return filtered
 
 
-def annotate(clusters, reffa, refbamfn, allclusters=False, dbsnp=None):
+def annotate(clusters, reffa, refbamfn, allclusters=False, dbsnp=None, minclip=10):
     ''' populate VCF INFO field with information about the insertion '''
 
     ref = pysam.Fastafile(reffa)
@@ -834,8 +863,8 @@ def annotate(clusters, reffa, refbamfn, allclusters=False, dbsnp=None):
             cluster.INFO['END'] = leftbreak
 
             if rightbreak is not None:
-                cluster.INFO['END']  = rightbreak
-                cluster.INFO['MECH'] = mech
+                cluster.INFO['END']   = rightbreak
+                cluster.INFO['MECH']  = mech
                 cluster.INFO['TELEN'] = cluster.guess_telen()
 
             if dbsnp is not None:
@@ -848,6 +877,11 @@ def annotate(clusters, reffa, refbamfn, allclusters=False, dbsnp=None):
             cluster.REF = refbase
         else:
             cluster.REF = '.'
+
+        cluster.FORMAT['POSBREAKSEQ'] = cluster.majorbreakseq(cluster.POS, flank=int(minclip))
+
+        if 'END' in cluster.INFO and cluster.INFO['END'] != cluster.POS:
+            cluster.FORMAT['ENDBREAKSEQ'] = cluster.majorbreakseq(cluster.INFO['END'], flank=int(minclip))
 
         cluster.FORMAT['RC'] = len(cluster)
 
@@ -975,17 +1009,17 @@ def main(args):
             try:
                 os.mkdir(args.outdir)
             except:
-                sys.stderr.write("ERROR: failed to create output directory: " + args.outdir + ", exiting.\n")
+                sys.stderr.write("ERROR: " + now() + " failed to create output directory: " + args.outdir + ", exiting.\n")
 
         basename = args.outdir + '/' + basename
 
     if args.pair2 is not None:
-        print "INFO: overlapping paired ends"
+        print "INFO: " + now() + " overlapping paired ends"
         mergefq = flash_wrapper(args.pair1, args.pair2, args.maxoverlap, args.threads, uid=basename)
 
     else:
         if args.pair1.endswith('.bam') and not args.premapped:
-            print "INFO: converting BAM", args.pair1, "to FASTQ", basename + '.fq.gz'
+            print "INFO: " + now() + " converting BAM", args.pair1, "to FASTQ", basename + '.fq.gz'
             mergefq = bamtofq(args.pair1, basename + '.fq.gz')
         else: # assume fastq
             mergefq = args.pair1
@@ -993,58 +1027,58 @@ def main(args):
     refbamfn = None
     if args.premapped:
         if args.pair1.endswith('.bam'):
-            print "INFO: using pre-mapped BAM:", args.pair1
+            print "INFO: " + now() + " using pre-mapped BAM:", args.pair1
             refbamfn = args.pair1
         else:
-            sys.stderr.write("ERROR: flag to use premapped bam (--premapped) called but " + args.pair1 + " is not a .bam file\n")
+            sys.stderr.write("ERROR: " + now() + " flag to use premapped bam (--premapped) called but " + args.pair1 + " is not a .bam file\n")
             sys.exit(1)
     else:
-        print "INFO: mapping fastq", mergefq, "to genome", args.ref, "using", args.threads, "threads"
+        print "INFO: " + now() + " mapping fastq", mergefq, "to genome", args.ref, "using", args.threads, "threads"
         refbamfn = bwamem(mergefq, args.ref, width=int(args.width), threads=args.threads, uid=basename)
 
     assert refbamfn is not None
 
-    print "INFO: marking likely PCR duplicates"
+    print "INFO: " + now() + " marking likely PCR duplicates"
     markdups(refbamfn, args.picard)
 
-    print "INFO: finding clipped reads from genome alignment"
+    print "INFO: " + now() + " finding clipped reads from genome alignment"
     clipfastq = fetch_clipped_reads(refbamfn, minclip=int(args.minclip))
     assert clipfastq
 
-    print "INFO: realigning clipped ends to TE reference library"
+    print "INFO: " + now() + " realigning clipped ends to TE reference library"
     tebamfn = bwamem(clipfastq, args.telib, width=int(args.width), threads=args.threads)
     assert tebamfn 
 
-    print "INFO: identifying usable split reads from alignments"
+    print "INFO: " + now() + " identifying usable split reads from alignments"
     splitreads = build_te_splitreads(refbamfn, tebamfn, read_fasta(args.telib))
     assert splitreads
 
-    print "INFO: clustering split reads on genome coordinates"
+    print "INFO: " + now() + " clustering split reads on genome coordinates"
     clusters = build_te_clusters(splitreads)
-    print "INFO: cluster count:", len(clusters)
+    print "INFO: " + now() + " cluster count:", len(clusters)
 
-    print "INFO: further investigation of hard-clipped reads in breakend regions"
+    print "INFO: " + now() + " further investigation of hard-clipped reads in breakend regions"
     clusters = rescue_hardclips(clusters, refbamfn, args.telib, width=int(args.width), threads=args.threads)
 
-    print "INFO: filtering clusters"
+    print "INFO: " + now() + " filtering clusters"
     clusters = filter_clusters(clusters, args.active.split(','), refbamfn, 
                                minsize=int(args.mincluster), maskfile=args.mask,
                                whitelistfile=args.whitelist, unclip=float(args.unclip))
-    print "INFO: passing cluster count:", len([c for c in clusters if c.FILTER[0] == 'PASS'])
+    print "INFO: " + now() + " passing cluster count:", len([c for c in clusters if c.FILTER[0] == 'PASS'])
 
-    print "INFO: annotating clusters"
-    clusters = annotate(clusters, args.ref, refbamfn, allclusters=args.processfiltered, dbsnp=args.snps)
+    print "INFO: " + now() + " annotating clusters"
+    clusters = annotate(clusters, args.ref, refbamfn, allclusters=args.processfiltered, dbsnp=args.snps, minclip=args.minclip)
     assert clusters
 
-    print "INFO: writing VCF"
+    print "INFO: " + now() + " writing VCF"
     vcfoutput(clusters, args.outfile, args.samplename)
 
     if args.clusterbam:
-        print "INFO: writing BAMs"
+        print "INFO: " + now() + " writing BAMs"
         bamoutput(clusters, refbamfn, tebamfn, basename)
 
     if args.consensus is not None:
-        print "INFO: compiling consensus sequences for breakends and outputting to", args.consensus
+        print "INFO: " + now() + " compiling consensus sequences for breakends and outputting to", args.consensus
         consensus_fasta(clusters, args.consensus)
 
 

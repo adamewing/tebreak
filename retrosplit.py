@@ -24,7 +24,7 @@ from uuid import uuid4
 from itertools import izip
 from re import sub, search
 from textwrap import dedent
-
+from shutil import move
 
 
 class SplitRead:
@@ -315,11 +315,12 @@ class Cluster:
         bam   = pysam.Samfile(refbamfn, 'rb')
 
         foundsnps  = []
-        start, end = self.find_extrema() # test me!
+        start, end = self.find_extrema() 
         
         snps = od()
-        for rec in dbsnp.fetch(str(self.chrom), int(start), int(end)):
-            snps[int(rec.strip().split()[1])] = rec
+        if self.chrom in dbsnp.contigs:
+            for rec in dbsnp.fetch(self.chrom, start, end):
+                snps[int(rec.strip().split()[1])] = rec
 
         for read in bam.fetch(self.chrom, start, end):
             for rpos, gpos in read.aligned_pairs:
@@ -828,7 +829,7 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, 
                     reject = True
                     subcluster.FILTER.append('unclipfrac')
 
-            if 'masked' not in subcluster.FILTER and whitelist is not None:
+            if 'masked' not in subcluster.FILTER and whitelist is not None and subcluster.chrom in whitelist.contigs:
                 tclasses = [wl.strip().split()[-1] for wl in whitelist.fetch(subcluster.chrom, subcluster._start, subcluster._end+1)]
                 if tclass in tclasses:
                     reject = False
@@ -1003,7 +1004,7 @@ def markdups(inbam, picard):
     assert os.path.exists(metrics)
 
     os.remove(inbam)
-    os.rename(outtmp, inbam)
+    move(outtmp, inbam)
 
     print "INFO: rebuilding index for", inbam
     subprocess.call(['samtools', 'index', inbam])

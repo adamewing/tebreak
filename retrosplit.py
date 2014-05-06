@@ -510,11 +510,11 @@ def bwamem(fq, ref, threads=1, width=150, sortmem=2000000000, uid=None):
     if uid is not None:
         fqroot = uid
 
-    if sortmem.rstrip('Gg') != sortmem:
-        sortmem = int(sortmem.rstrip('Gg')) * 1000000000
+    if str(sortmem).rstrip('Gg') != str(sortmem):
+        sortmem = int(str(sortmem).rstrip('Gg')) * 1000000000
 
-    if sortmem.rstrip('Mm') != sortmem:
-        sortmem = int(sortmem.rstrip('Gg')) * 1000000
+    if str(sortmem).rstrip('Mm') != str(sortmem):
+        sortmem = int(str(sortmem).rstrip('Gg')) * 1000000
 
     sortmem = sortmem/int(threads) # avoid PBS killing my jobs
 

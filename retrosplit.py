@@ -184,9 +184,13 @@ class Cluster:
 
     def guess_telen(self):
         ''' approximate TE length based on TE alignments'''
+        extrema = self.te_extrema()
+        return max(extrema) - min(extrema)
+
+    def te_extrema(self):
         te_positions = []
         [[te_positions.append(tepos) for tepos in sr.tread.positions] for sr in self._splitreads]
-        return max(te_positions) - min(te_positions)
+        return min(te_positions), max(te_positions)
 
     def all_breakpoints(self):
         return Counter([read.breakloc for read in self._splitreads])
@@ -853,6 +857,7 @@ def annotate(clusters, reffa, refbamfn, allclusters=False, dbsnp=None, minclip=1
         for tetype, count in cluster.te_names().iteritems():
             tetypes.append(tetype + ':' + str(count))
         cluster.FORMAT['TEALIGN'] = ','.join(tetypes)
+        cluster.FORMAT['TEMINPOS'], cluster.FORMAT['TEMAXPOS'] = map(str, cluster.te_extrema())
 
         if cluster.FILTER[0] == 'PASS' or allclusters: 
             leftbreak, rightbreak, mech = cluster.best_breakpoints(refbamfn)

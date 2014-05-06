@@ -511,10 +511,10 @@ def bwamem(fq, ref, threads=1, width=150, sortmem=2000000000, uid=None):
         fqroot = uid
 
     if sortmem.rstrip('Gg') != sortmem:
-        sortmem = int(sortmem.rstrip('Gg') * 1000000000
+        sortmem = int(sortmem.rstrip('Gg')) * 1000000000
 
     if sortmem.rstrip('Mm') != sortmem:
-        sortmem = int(sortmem.rstrip('Gg') * 1000000
+        sortmem = int(sortmem.rstrip('Gg')) * 1000000
 
     sortmem = sortmem/int(threads) # avoid PBS killing my jobs
 
@@ -1124,7 +1124,7 @@ if __name__ == '__main__':
                         help='dbSNP VCF (tabix-indexed) to link SNPs with insertions')
     parser.add_argument('-t', '--threads', dest='threads', default=1, 
                         help='number of threads (default = 1)')
-    parser.add_argument('-m', '--sortmem', dest='sortmem', default='8G',
+    parser.add_argument('--sortmem', dest='sortmem', default='8G',
                         help='amount of memory for sorting (default = 8G)')
 
     parser.add_argument('--width', dest='width', default=150,

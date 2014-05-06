@@ -113,8 +113,6 @@ class SplitRead:
         return ','.join(map(str, ('SplitRead',self.chrom, self.breakloc, self.tname, self.tread.pos)))
 
 
-
-
 class Cluster:
     ''' store and manipulate groups of SplitRead objects '''
     def __init__(self, firstread=None):
@@ -511,6 +509,14 @@ def bwamem(fq, ref, threads=1, width=150, sortmem=2000000000, uid=None):
     fqroot = sub('.fq$', '', fqroot)
     if uid is not None:
         fqroot = uid
+
+    if sortmem.rstrip('Gg') != sortmem:
+        sortmem = int(sortmem.rstrip('Gg') * 1000000000
+
+    if sortmem.rstrip('Mm') != sortmem:
+        sortmem = int(sortmem.rstrip('Gg') * 1000000
+
+    sortmem = sortmem/int(threads) # avoid PBS killing my jobs
 
     print "DEBUG: fqroot:", fqroot
 
@@ -1039,7 +1045,7 @@ def main(args):
             sys.exit(1)
     else:
         print "INFO: " + now() + " mapping fastq", mergefq, "to genome", args.ref, "using", args.threads, "threads"
-        refbamfn = bwamem(mergefq, args.ref, width=int(args.width), threads=args.threads, uid=basename)
+        refbamfn = bwamem(mergefq, args.ref, width=int(args.width), threads=args.threads, uid=basename, sortmem=args.sortmem)
 
     assert refbamfn is not None
 
@@ -1051,7 +1057,7 @@ def main(args):
     assert clipfastq
 
     print "INFO: " + now() + " realigning clipped ends to TE reference library"
-    tebamfn = bwamem(clipfastq, args.telib, width=int(args.width), threads=args.threads)
+    tebamfn = bwamem(clipfastq, args.telib, width=int(args.width), threads=args.threads, sortmem=args.sortmem)
     assert tebamfn 
 
     print "INFO: " + now() + " identifying usable split reads from alignments"
@@ -1116,8 +1122,10 @@ if __name__ == '__main__':
                         help='PASS any non-mask insertions found tabix-indexed BED-3 plus a fourth column corresponding to L1/ALU/SVA')
     parser.add_argument('-s', '--snps', dest='snps', default=None,
                         help='dbSNP VCF (tabix-indexed) to link SNPs with insertions')
-    parser.add_argument('-t', dest='threads', default=1, 
-                        help='number of threads')
+    parser.add_argument('-t', '--threads', dest='threads', default=1, 
+                        help='number of threads (default = 1)')
+    parser.add_argument('-m', '--sortmem', dest='sortmem', default='8G',
+                        help='amount of memory for sorting (default = 8G)')
 
     parser.add_argument('--width', dest='width', default=150,
                          help='bandwidth parameter for bwa-mem: determines max size of indels in reads (see bwa docs, default=150)')

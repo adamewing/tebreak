@@ -315,11 +315,12 @@ class Cluster:
         bam   = pysam.Samfile(refbamfn, 'rb')
 
         foundsnps  = []
-        start, end = self.find_extrema() # test me!
+        start, end = self.find_extrema() 
         
         snps = od()
-        for rec in dbsnp.fetch(str(self.chrom), int(start), int(end)):
-            snps[int(rec.strip().split()[1])] = rec
+        if self.chrom in dbsnp.contigs:
+            for rec in dbsnp.fetch(self.chrom, start, end):
+                snps[int(rec.strip().split()[1])] = rec
 
         for read in bam.fetch(self.chrom, start, end):
             for rpos, gpos in read.aligned_pairs:

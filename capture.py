@@ -9,32 +9,34 @@ from re import sub
 from uuid import uuid4
 
 
-def bamtofastq(bam, picard, threads=1):
-	assert os.path.exists(picard + '/SamToFastq.jar')
+def bamtofastq(bam, samtofastq, threads=1):
+	assert os.path.exists(samtofastq)
 	assert bam.endswith('.bam')
 
 	outfq = sub('bam$', 'fastq', bam)
 
-	cmd = ['java', '-XX:ParallelGCThreads=' + str(threads), '-Xmx4g', '-jar', picard + '/SamToFastq.jar', 'INPUT=' + args.bam, 'INTERLEAVE=true', 'FASTQ=' + outfq]
-
-    sys.stderr.write("DEBUG\t" + now() + "\tsplit cmd: " + ' '.join(cmd) + "\n")
-
-    sys.stderr.write("INFO\t" + now() + "\tsplitting BAM " + args.bam + " into FASTQ files by readgroup\n")
+	cmd = ['java', '-XX:ParallelGCThreads=' + str(threads), '-Xmx4g', '-jar', samtofastq + '/SamToFastq.jar', 'INPUT=' + bam, 'INTERLEAVE=true', 'FASTQ=' + outfq]
+    sys.stderr.write("INFO\t" + now() + "\tconverting BAM " + bam + " to FASTQ\n")
     subprocess.call(cmd)
 
     return outfq
 
 
-def crambam(cramjar, cramfn, chrom, start, end, ref, threads=1, outbam=str(uuid4())+'.bam'):
-    ''' make local BAM '''
+def cramtofastq(cram, cramjar, ref, threads=1):
     assert os.path.exists(cramjar)
+    assert cram.endswith('.cram')
 
-    region = str(chrom) + ':' + str(start) + '-' + str(end)
+    outfq = sub('cram$', 'fastq', cram)
 
-    args = ['java', '-XX:ParallelGCThreads=' + str(threads), '-Xmx4g', '-jar', cramjar, 'bam', '-I', cramfn, '-O', outbam, '-R', ref, '--skip-md5-check', region]
-    subprocess.call(args)
+    cmd = ['java', '-XX:ParallelGCThreads=' + str(threads), '-Xmx4g', '-jar', cramjar, 'fastq', '-I', cram, '-R', ref, '--enumerate', '--skip-md5-check']
+    sys.stderr.write("INFO\t" + now() + "\tconverting CRAM " + cram + " to FASTQ\n")
 
-    return outbam
+    with open(outfq, 'w') as fq:
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+        for line in p.stdout:
+            fq.write(line)
+
+    return outfq
 
 
 def bwamem(fq, ref, threads=1, width=150, uid=None, removefq=False):
@@ -71,13 +73,21 @@ def bwamem(fq, ref, threads=1, width=150, uid=None, removefq=False):
 def main(args):
 	for seq in seqs:
 		sys.stderr.write("INFO\t" + now() + "\tprocessing " + seq "\n")
+        if seq.endswith('.bam'):
+            fastq = bamtofastq(seq, args.samtofastq, threads=int(args.threads))
+        elif seq.endswith('.cram'):
+            fastq = cramtofastq(seq, args.cramjar, threads=int(args.threads))
+        elif seq.endswith('.fastq') or seq.endswith('.fastq.gz'):
+        else:
+            sys.stderr.write("ERROR\t" + now() + "\tunrecognized file format (extension != .bam or .cram or .fastq\n")
+            sys.exit(1)
 
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser(description='find relevant reads from sequence data')
 	parser.add_argument(metavar='<input file(s) (bam or fastq)>', dest='seqs', nargs='+', help='input files')
-	parser.add_argument('--picard', required=True, help='path to picard JARs')
-	parser.add_argument('--cramjar', required=True, help='path to cramtools .jar')
+	parser.add_argument('--samtofastq', default=None, help='path to picard SamToFastq.jar')
+	parser.add_argument('--cramjar', default=None, help='path to cramtools .jar')
 	parser.add_argument('-r', '--ref', required=True, help='reference fasta (needs bwa index and samtools faidx')
 	parser.add_argument('-t', '--threads', default=1, help='threads for alignment')
 	args = parser.parse_args()

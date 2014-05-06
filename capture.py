@@ -10,12 +10,12 @@ from uuid import uuid4
 
 
 def bamtofastq(bam, samtofastq, threads=1):
-	assert os.path.exists(samtofastq)
-	assert bam.endswith('.bam')
+    assert os.path.exists(samtofastq)
+    assert bam.endswith('.bam')
 
-	outfq = sub('bam$', 'fastq', bam)
+    outfq = sub('bam$', 'fastq', bam)
 
-	cmd = ['java', '-XX:ParallelGCThreads=' + str(threads), '-Xmx4g', '-jar', samtofastq + '/SamToFastq.jar', 'INPUT=' + bam, 'INTERLEAVE=true', 'FASTQ=' + outfq]
+    cmd = ['java', '-XX:ParallelGCThreads=' + str(threads), '-Xmx4g', '-jar', samtofastq + '/SamToFastq.jar', 'INPUT=' + bam, 'INTERLEAVE=true', 'FASTQ=' + outfq]
     sys.stderr.write("INFO\t" + now() + "\tconverting BAM " + bam + " to FASTQ\n")
     subprocess.call(cmd)
 
@@ -71,13 +71,14 @@ def bwamem(fq, ref, threads=1, width=150, uid=None, removefq=False):
 
 
 def main(args):
-	for seq in seqs:
-		sys.stderr.write("INFO\t" + now() + "\tprocessing " + seq "\n")
+    for seq in args.seqs:
+        sys.stderr.write("INFO\t" + now() + "\tprocessing " + seq + "\n")
         if seq.endswith('.bam'):
             fastq = bamtofastq(seq, args.samtofastq, threads=int(args.threads))
         elif seq.endswith('.cram'):
             fastq = cramtofastq(seq, args.cramjar, threads=int(args.threads))
         elif seq.endswith('.fastq') or seq.endswith('.fastq.gz'):
+            fastq = seq
         else:
             sys.stderr.write("ERROR\t" + now() + "\tunrecognized file format (extension != .bam or .cram or .fastq\n")
             sys.exit(1)
@@ -85,7 +86,7 @@ def main(args):
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser(description='find relevant reads from sequence data')
-	parser.add_argument(metavar='<input file(s) (bam or fastq)>', dest='seqs', nargs='+', help='input files')
+	parser.add_argument(metavar='<input file bam/cram/fastq>', dest='seqs', nargs=1, help='input files')
 	parser.add_argument('--samtofastq', default=None, help='path to picard SamToFastq.jar')
 	parser.add_argument('--cramjar', default=None, help='path to cramtools .jar')
 	parser.add_argument('-r', '--ref', required=True, help='reference fasta (needs bwa index and samtools faidx')

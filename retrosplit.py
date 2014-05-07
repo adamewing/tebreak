@@ -89,6 +89,9 @@ class SplitRead:
         return 1.0 - (float(nm)/float(self.gread.alen))
 
     def getbreakseq(self, flank=5):
+        if self.rescue:
+            return 'FIXME'
+
         leftseq  = ''
         rightseq = ''
 

@@ -88,20 +88,31 @@ class SplitRead:
         nm = [value for (tag, value) in self.gread.tags if tag == 'NM'][0]
         return 1.0 - (float(nm)/float(self.gread.alen))
 
-    def getbreakseq(self, flank=5):
-        if self.rescue:
-            return 'FIXME'
-
+    def getgenomebreakseq(self, flank=5):
+        ''' get breakend sequence from genome alignments '''
         leftseq  = ''
         rightseq = ''
 
         if self.gread.qstart < self.gread.rlen - self.gread.qend: # right
             leftseq  = self.gread.seq[self.gread.qend-flank:self.gread.qend].upper()
             rightseq = self.gread.seq[self.gread.qend:self.gread.qend+flank].lower()
-
         else: # left
             leftseq  = self.gread.seq[self.gread.qstart-flank:self.gread.qstart].lower()
             rightseq = self.gread.seq[self.gread.qstart:self.gread.qstart+flank].upper()
+
+        return leftseq + rightseq
+
+    def gettebreakseq(self, flank=5):
+        ''' get breakend sequence from TE alignments '''
+        leftseq  = ''
+        rightseq = ''
+
+        if self.tread.qstart < self.tread.rlen - self.tread.qend: # right
+            leftseq  = self.tread.seq[self.tread.qstart-flank:self.tread.qstart].lower()
+            rightseq = self.tread.seq[self.tread.qstart:self.tread.qstart+flank].upper()
+        else: # left
+            leftseq  = self.tread.seq[self.tread.qstart-flank:self.tread.qstart].upper()
+            rightseq = self.tread.seq[self.tread.qstart:self.tread.qstart+flank].lower()
 
         return leftseq + rightseq
 
@@ -233,10 +244,19 @@ class Cluster:
 
         raise ValueError('Cluster.best_breakpoints returned more than two breakends, panic!\n')
 
+
     def majorbreakseq(self, breakloc, flank=5):
         ''' return most common breakend sequence '''
-        return Counter([sr.getbreakseq(flank=flank) for sr in self._splitreads if sr.breakloc == breakloc]).most_common(1)[0][0]
+        gbest = [sr.getgenomebreakseq(flank=flank) for sr in self._splitreads if sr.breakloc == breakloc and not sr.rescued]
+        tbest = [sr.gettebreakseq(flank=flank) for sr in self._splitreads if sr.breakloc == breakloc and sr.rescued]
 
+        if len(gbest) == 0:
+            if len(tbest) > 0:
+                return Counter(tbest).most_common(1)[0][0] + ',TE'
+            else:
+                return 'FIXME,FIXME'
+
+        return Counter(gbest).most_common(1)[0][0] + ',GENOME'
 
     def guess_mechanism(self, refbamfn, bstart, bend):
         ''' check depth manually (only way to get ALL reads), decide whether it's likely a TSD, Deletion, or other '''
@@ -440,7 +460,10 @@ class MSA:
     def consensus(self):
         ''' compute consensus '''
         bases = [column.cons() for column in self.columns]
-        return ''.join(bases)
+        if bases is not None:
+            return ''.join(bases)
+        else:
+            sys.stderr.write("ERROR\t" + now() + "\tNone found in consensus sequence\n")
 
 
 def now():
@@ -968,15 +991,22 @@ def vcfoutput(clusters, outfile, samplename):
             out.write(str(cluster) + '\n')
 
 
-def bamoutput(clusters, refbamfn, tebamfn, prefix):
+def bamoutput(clusters, refbamfn, tebamfn, prefix, passonly=False):
     refbam = pysam.Samfile(refbamfn, 'rb')
     tebam  = pysam.Samfile(tebamfn, 'rb')
     refout = pysam.Samfile(prefix + ".ref.bam", 'wb', template=refbam)
     teout  = pysam.Samfile(prefix + ".te.bam", 'wb', template=tebam)
+    if passonly:
+        refout = pysam.Samfile(prefix + ".pass.ref.bam", 'wb', template=refbam)
+        teout  = pysam.Samfile(prefix + ".pass.te.bam", 'wb', template=tebam)
 
     for cluster in clusters:
-        [refout.write(read) for read in cluster.greads()]
-        [teout.write(read) for read in cluster.treads()]
+        if passonly and cluster.FILTER[0] == 'PASS':
+            [refout.write(read) for read in cluster.greads()]
+            [teout.write(read) for read in cluster.treads()]
+        else:
+            [refout.write(read) for read in cluster.greads()]
+            [teout.write(read) for read in cluster.treads()]
 
     refbam.close()
     tebam.close()
@@ -1016,6 +1046,8 @@ def markdups(inbam, picard):
 
 
 def main(args):
+    sys.stderr.write("INFO\t" + now() + "\tstarting " + sys.argv[0] + " called with args:\n" + ' '.join(sys.argv) + "\n")
+
     mergefq = None
     basename = args.samplename
 
@@ -1090,7 +1122,7 @@ def main(args):
 
     if args.clusterbam:
         print "INFO: " + now() + " writing BAMs"
-        bamoutput(clusters, refbamfn, tebamfn, basename)
+        bamoutput(clusters, refbamfn, tebamfn, basename, passonly=True)
 
     if args.consensus is not None:
         print "INFO: " + now() + " compiling consensus sequences for breakends and outputting to", args.consensus

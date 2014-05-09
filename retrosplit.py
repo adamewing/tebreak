@@ -88,7 +88,7 @@ class SplitRead:
         nm = [value for (tag, value) in self.gread.tags if tag == 'NM'][0]
         return 1.0 - (float(nm)/float(self.gread.alen))
 
-    def getgenomebreakseq(self, flank=5):
+    def getbreakseq(self, flank=5):
         ''' get breakend sequence from genome alignments '''
         leftseq  = ''
         rightseq = ''
@@ -99,20 +99,6 @@ class SplitRead:
         else: # left
             leftseq  = self.gread.seq[self.gread.qstart-flank:self.gread.qstart].lower()
             rightseq = self.gread.seq[self.gread.qstart:self.gread.qstart+flank].upper()
-
-        return leftseq + rightseq
-
-    def gettebreakseq(self, flank=5):
-        ''' get breakend sequence from TE alignments '''
-        leftseq  = ''
-        rightseq = ''
-
-        if self.tread.qstart < self.tread.rlen - self.tread.qend: # right
-            leftseq  = self.tread.seq[self.tread.qstart-flank:self.tread.qstart].lower()
-            rightseq = self.tread.seq[self.tread.qstart:self.tread.qstart+flank].upper()
-        else: # left
-            leftseq  = self.tread.seq[self.tread.qstart-flank:self.tread.qstart].upper()
-            rightseq = self.tread.seq[self.tread.qstart:self.tread.qstart+flank].lower()
 
         return leftseq + rightseq
 
@@ -244,19 +230,15 @@ class Cluster:
 
         raise ValueError('Cluster.best_breakpoints returned more than two breakends, panic!\n')
 
-
     def majorbreakseq(self, breakloc, flank=5):
         ''' return most common breakend sequence '''
-        gbest = [sr.getgenomebreakseq(flank=flank) for sr in self._splitreads if sr.breakloc == breakloc and not sr.rescued]
-        tbest = [sr.gettebreakseq(flank=flank) for sr in self._splitreads if sr.breakloc == breakloc and sr.rescued]
+        gbest = [sr.getbreakseq(flank=flank) for sr in self._splitreads if sr.breakloc == breakloc and not sr.rescued]
 
         if len(gbest) == 0:
-            if len(tbest) > 0:
-                return Counter(tbest).most_common(1)[0][0] + ',TE'
-            else:
-                return 'FIXME,FIXME'
-
-        return Counter(gbest).most_common(1)[0][0] + ',GENOME'
+            gbest = [sr.getbreakseq(flank=flank) for sr in self._splitreads if sr.breakloc == breakloc and sr.rescued]
+            return Counter(gbest).most_common(1)[0][0] + ',HCLIP'
+        else:
+            return Counter(gbest).most_common(1)[0][0] + ',SCLIP'
 
     def guess_mechanism(self, refbamfn, bstart, bend):
         ''' check depth manually (only way to get ALL reads), decide whether it's likely a TSD, Deletion, or other '''
@@ -747,7 +729,7 @@ def rescue_hardclips(clusters, refbamfn, telib, width=150, threads=1):
 
                     assert cliploc >= 0
                     hc_original[read.qname] = read
-
+                    
                     fqrec = bamrec_to_fastq(read, diffseq=read.seq[:cliploc], diffqual=read.qual[:cliploc])
                     fqout.write(fqrec + '\n')
 
@@ -1061,12 +1043,12 @@ def main(args):
         basename = args.outdir + '/' + basename
 
     if args.pair2 is not None:
-        print "INFO: " + now() + " overlapping paired ends"
+        sys.stderr.write("INFO: " + now() + " overlapping paired ends\n")
         mergefq = flash_wrapper(args.pair1, args.pair2, args.maxoverlap, args.threads, uid=basename)
 
     else:
         if args.pair1.endswith('.bam') and not args.premapped:
-            print "INFO: " + now() + " converting BAM", args.pair1, "to FASTQ", basename + '.fq.gz'
+            sys.stderr.write("INFO: " + now() + " converting BAM " + args.pair1 + " to FASTQ " + basename + ".fq.gz\n")
             mergefq = bamtofq(args.pair1, basename + '.fq.gz')
         else: # assume fastq
             mergefq = args.pair1
@@ -1074,58 +1056,58 @@ def main(args):
     refbamfn = None
     if args.premapped:
         if args.pair1.endswith('.bam'):
-            print "INFO: " + now() + " using pre-mapped BAM:", args.pair1
+            sys.stderr.write("INFO: " + now() + " using pre-mapped BAM: " + args.pair1 + "\n")
             refbamfn = args.pair1
         else:
             sys.stderr.write("ERROR: " + now() + " flag to use premapped bam (--premapped) called but " + args.pair1 + " is not a .bam file\n")
             sys.exit(1)
     else:
-        print "INFO: " + now() + " mapping fastq", mergefq, "to genome", args.ref, "using", args.threads, "threads"
+        sys.stderr.write("INFO: " + now() + " mapping fastq " + mergefq + " to genome " + args.ref + " using " +  str(args.threads) + " threads\n")
         refbamfn = bwamem(mergefq, args.ref, width=int(args.width), threads=args.threads, uid=basename, sortmem=args.sortmem)
 
     assert refbamfn is not None
 
-    print "INFO: " + now() + " marking likely PCR duplicates"
+    sys.stderr.write("INFO: " + now() + " marking likely PCR duplicates\n")
     markdups(refbamfn, args.picard)
 
-    print "INFO: " + now() + " finding clipped reads from genome alignment"
+    sys.stderr.write("INFO: " + now() + " finding clipped reads from genome alignment\n")
     clipfastq = fetch_clipped_reads(refbamfn, minclip=int(args.minclip))
     assert clipfastq
 
-    print "INFO: " + now() + " realigning clipped ends to TE reference library"
+    sys.stderr.write("INFO: " + now() + " realigning clipped ends to TE reference library\n")
     tebamfn = bwamem(clipfastq, args.telib, width=int(args.width), threads=args.threads, sortmem=args.sortmem)
     assert tebamfn 
 
-    print "INFO: " + now() + " identifying usable split reads from alignments"
+    sys.stderr.write("INFO: " + now() + " identifying usable split reads from alignments\n")
     splitreads = build_te_splitreads(refbamfn, tebamfn, read_fasta(args.telib))
     assert splitreads
 
-    print "INFO: " + now() + " clustering split reads on genome coordinates"
+    sys.stderr.write("INFO: " + now() + " clustering split reads on genome coordinates\n")
     clusters = build_te_clusters(splitreads)
-    print "INFO: " + now() + " cluster count:", len(clusters)
+    sys.stderr.write("INFO: " + now() + " cluster count: " + str(len(clusters)) + "\n")
 
-    print "INFO: " + now() + " further investigation of hard-clipped reads in breakend regions"
+    sys.stderr.write("INFO: " + now() + " further investigation of hard-clipped reads in breakend regions\n")
     clusters = rescue_hardclips(clusters, refbamfn, args.telib, width=int(args.width), threads=args.threads)
 
-    print "INFO: " + now() + " filtering clusters"
+    sys.stderr.write("INFO: " + now() + " filtering clusters\n")
     clusters = filter_clusters(clusters, args.active.split(','), refbamfn, 
                                minsize=int(args.mincluster), maskfile=args.mask,
                                whitelistfile=args.whitelist, unclip=float(args.unclip))
-    print "INFO: " + now() + " passing cluster count:", len([c for c in clusters if c.FILTER[0] == 'PASS'])
+    sys.stderr.write("INFO: " + now() + " passing cluster count: " + str(len([c for c in clusters if c.FILTER[0] == 'PASS'])) + "\n")
 
-    print "INFO: " + now() + " annotating clusters"
+    sys.stderr.write("INFO: " + now() + " annotating clusters\n")
     clusters = annotate(clusters, args.ref, refbamfn, allclusters=args.processfiltered, dbsnp=args.snps, minclip=args.minclip)
     assert clusters
 
-    print "INFO: " + now() + " writing VCF"
-    vcfoutput(clusters, args.outfile, args.samplename)
+    sys.stderr.write("INFO: " + now() + " writing VCF\n")
+    vcfoutput(clusters, args.outvcf, args.samplename)
 
     if args.clusterbam:
-        print "INFO: " + now() + " writing BAMs"
+        sys.stderr.write("INFO: " + now() + " writing BAMs\n")
         bamoutput(clusters, refbamfn, tebamfn, basename, passonly=True)
 
     if args.consensus is not None:
-        print "INFO: " + now() + " compiling consensus sequences for breakends and outputting to", args.consensus
+        sys.stderr.write("INFO: " + now() + " compiling consensus sequences for breakends and outputting to " + args.consensus + "\n")
         consensus_fasta(clusters, args.consensus)
 
 
@@ -1140,9 +1122,9 @@ if __name__ == '__main__':
                         help='reference genome for bwa-mem, also expects .fai index (samtools faidx ref.fa)')
     parser.add_argument('-l', '--telib', dest='telib', required=True, 
                         help='TE library (BWA indexed FASTA), seq names must be CLASS:NAME')
-    parser.add_argument('-o', '--outfile', dest='outfile', required=True, 
+    parser.add_argument('-v', '--outvcf', dest='outvcf', required=True, 
                         help='output VCF file')
-    parser.add_argument('-d', '--outdir', dest='outdir', default=None, 
+    parser.add_argument('-o', '--outdir', dest='outdir', default=None, 
                         help='output directory')
     parser.add_argument('-p', '--picard', dest='picard', required=True,
                         help='Picard install directory, needed for MarkDuplicates.jar')

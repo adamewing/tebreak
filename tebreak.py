@@ -42,6 +42,8 @@ class SplitRead:
         self.rescued   = False
         self.embedded  = False # nonref TE is completely embedded in read
 
+        self.original  = None # used for storing non-hardclipped read if rescued
+
         self.tclass, self.tname = tname.split(':')
         
         # find breakpoint
@@ -90,17 +92,32 @@ class SplitRead:
 
     def getbreakseq(self, flank=5):
         ''' get breakend sequence from genome alignments '''
-        leftseq  = ''
-        rightseq = ''
 
-        if self.gread.qstart < self.gread.rlen - self.gread.qend: # right
-            leftseq  = self.gread.seq[self.gread.qend-flank:self.gread.qend].upper()
-            rightseq = self.gread.seq[self.gread.qend:self.gread.qend+flank].lower()
-        else: # left
-            leftseq  = self.gread.seq[self.gread.qstart-flank:self.gread.qstart].lower()
-            rightseq = self.gread.seq[self.gread.qstart:self.gread.qstart+flank].upper()
+        if self.rescued:
+            origseq = self.original.seq.upper()
+            assert origseq is not None
 
-        return leftseq + rightseq
+            rstart = origseq.find(self.gread.seq.upper())
+            if rstart < 0:
+                rstart = origseq.find(rc(self.gread.seq).upper())
+
+            assert rstart >= 0
+
+            rend = rstart + len(self.gread.seq)
+            return lc(origseq, rstart, rend)
+
+        else:
+            leftseq  = ''
+            rightseq = ''
+
+            if self.gread.qstart < self.gread.rlen - self.gread.qend: # right
+                leftseq  = self.gread.seq[self.gread.qend-flank:self.gread.qend].upper()
+                rightseq = self.gread.seq[self.gread.qend:self.gread.qend+flank].lower()
+            else: # left
+                leftseq  = self.gread.seq[self.gread.qstart-flank:self.gread.qstart].lower()
+                rightseq = self.gread.seq[self.gread.qstart:self.gread.qstart+flank].upper()
+
+            return leftseq + rightseq
 
     def __gt__(self, other):
         ''' enables sorting of SplitRead objects '''
@@ -111,6 +128,12 @@ class SplitRead:
 
     def __str__(self):
         return ','.join(map(str, ('SplitRead',self.chrom, self.breakloc, self.tname, self.tread.pos)))
+
+
+def lc(seq, start, end):
+    ''' lowercase part of a sequence '''
+    assert start < end
+    return seq[:start].upper() + seq[start:end].lower() + seq[end:].upper()
 
 
 class Cluster:
@@ -527,8 +550,6 @@ def bwamem(fq, ref, threads=1, width=150, sortmem=2000000000, uid=None):
 
     sortmem = sortmem/int(threads) # avoid PBS killing my jobs
 
-    print "DEBUG: fqroot:", fqroot
-
     sam_out  = '.'.join((fqroot, 'sam'))
     bam_out  = '.'.join((fqroot, 'bam'))
     sort_out = '.'.join((fqroot, 'sorted'))
@@ -538,22 +559,22 @@ def bwamem(fq, ref, threads=1, width=150, sortmem=2000000000, uid=None):
     sort_cmd = ['samtools', 'sort', '-@', str(threads), '-m', str(sortmem), bam_out, sort_out]
     idx_cmd  = ['samtools', 'index', sort_out + '.bam']
 
-    sys.stderr.write("running bwa-mem: " + ' '.join(sam_cmd) + "\n")
+    sys.stdout.write("INFO\t" + now() + "\trunning bwa-mem: " + ' '.join(sam_cmd) + "\n")
 
     with open(sam_out, 'w') as sam:
         p = subprocess.Popen(sam_cmd, stdout=subprocess.PIPE)
         for line in p.stdout:
             sam.write(line)
 
-    sys.stderr.write("writing " + sam_out + " to BAM...\n")
+    sys.stdout.write("INFO\t" + now() + "\twriting " + sam_out + " to BAM...\n")
     subprocess.call(bam_cmd)
     os.remove(sam_out)
 
-    sys.stderr.write("sorting output: " + ' '.join(sort_cmd) + "\n")
+    sys.stdout.write("INFO\t" + now() + "\tsorting output: " + ' '.join(sort_cmd) + "\n")
     subprocess.call(sort_cmd)
     os.remove(bam_out)
 
-    sys.stderr.write("indexing: " + ' '.join(idx_cmd) + "\n")
+    sys.stdout.write("INFO\t" + now() + "\tindexing: " + ' '.join(idx_cmd) + "\n")
     subprocess.call(idx_cmd)
 
     return sort_out + '.bam'
@@ -566,7 +587,7 @@ def flash_wrapper(fq1, fq2, max_overlap, threads, uid=None):
          out = uid
 
     args = ['flash', '-d', os.path.dirname(out), '-o', os.path.basename(out), '-M', str(max_overlap), '-z', '-t', str(threads), fq1, fq2]
-    print "calling FLASH:", args
+    print "INFO\t" + now() + "\tcalling FLASH:", args
 
     subprocess.call(args)
 
@@ -608,9 +629,9 @@ def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2): # TODO PARAMS
             unmapqua = None
 
             if read.qual is None:
-                sys.stderr.write("read with no quality score:\n")
+                sys.stderr.write("ERROR\t" + now() + "\tread with no quality score:\n")
                 sys.stderr.write(str(read) + "\n")
-                sys.stderr.write("possible FASTA alignment instead of FASTQ - please re-do alignments from FASTQ\n")
+                sys.stderr.write("ERROR\t" + now() + "\tpossible FASTA alignment instead of FASTQ - please re-do alignments from FASTQ\n")
                 sys.exit(1)
 
             if read.rlen - read.alen >= int(minclip): # 'soft' clipped?
@@ -722,6 +743,7 @@ def rescue_hardclips(clusters, refbamfn, telib, width=150, threads=1):
         for read in bam.fetch(until_eof=True):
             if not read.is_secondary:
                 if read.qname in hc_clusters:
+                    # names match, hardclipped read should be a subsequence of read.seq
                     cliploc = read.seq.find(hc_reads[read.qname].seq)
 
                     if cliploc < 0:
@@ -733,7 +755,7 @@ def rescue_hardclips(clusters, refbamfn, telib, width=150, threads=1):
                     fqrec = bamrec_to_fastq(read, diffseq=read.seq[:cliploc], diffqual=read.qual[:cliploc])
                     fqout.write(fqrec + '\n')
 
-    print "Realigning hardclips to TE library..."
+    print "INFO\t" + now() + "\tealigning hardclips to TE library..."
     bamout = bwamem(fqfn, telib, width=width, threads=threads)
 
     tebam = pysam.Samfile(bamout, 'rb')
@@ -754,6 +776,7 @@ def rescue_hardclips(clusters, refbamfn, telib, width=150, threads=1):
             tlen   = te_length[tname]
 
             sr = SplitRead(gread, teread, tname, gchrom, gloc, tlen, rescue=True, breakloc=breakloc)
+            sr.original = hc_original[teread.qname]
             cn = hc_clusters[teread.qname]
             clusters[cn].add_splitread(sr)
 
@@ -954,12 +977,13 @@ def bamtofq(inbam, outfq):
         for read in bam.fetch(until_eof=True):
             seq  = read.seq
             qual = read.qual
+            salt = str(uuid4()).split('-')[0]
 
             if read.is_reverse:
                 seq  = rc(seq)
                 qual = qual[::-1]
 
-            fq.write('\n'.join(('@' + read.qname, seq, '+', qual)) + '\n')
+            fq.write('\n'.join(('@' + read.qname + ':' + salt, seq, '+', qual)) + '\n')
     
     bam.close()
     return outfq
@@ -1021,7 +1045,7 @@ def markdups(inbam, picard):
     os.remove(inbam)
     move(outtmp, inbam)
 
-    print "INFO: rebuilding index for", inbam
+    print "INFO:\t" + now() +"\trebuilding index for", inbam
     subprocess.call(['samtools', 'index', inbam])
 
     return inbam

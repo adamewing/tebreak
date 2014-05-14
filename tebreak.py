@@ -24,7 +24,7 @@ from uuid import uuid4
 from itertools import izip
 from re import sub, search
 from textwrap import dedent
-from shutil import move
+from shutil import move, copy
 
 
 class SplitRead:
@@ -580,9 +580,9 @@ def bwamem(fq, ref, threads=1, width=150, sortmem=2000000000, uid=None):
     return sort_out + '.bam'
 
 
-def flash_wrapper(fq1, fq2, max_overlap, threads, uid=None):
+def flash_wrapper(fq1, fq2, outdir, max_overlap, threads, uid=None):
     ''' wrapper for FLASH (http://ccb.jhu.edu/software/FLASH/) '''
-    out = 'RCTMP-' + str(uuid4())
+    out = outdir + '/' + 'RCTMP-' + str(uuid4())
     if uid is not None:
          out = uid
 
@@ -1068,14 +1068,19 @@ def main(args):
 
     if args.pair2 is not None:
         sys.stderr.write("INFO: " + now() + " overlapping paired ends\n")
-        mergefq = flash_wrapper(args.pair1, args.pair2, args.maxoverlap, args.threads, uid=basename)
+        mergefq = flash_wrapper(args.pair1, args.pair2, args.outdir, args.maxoverlap, args.threads, uid=basename)
 
     else:
         if args.pair1.endswith('.bam') and not args.premapped:
             sys.stderr.write("INFO: " + now() + " converting BAM " + args.pair1 + " to FASTQ " + basename + ".fq.gz\n")
             mergefq = bamtofq(args.pair1, basename + '.fq.gz')
         else: # assume fastq
-            mergefq = args.pair1
+            if args.outdir != os.path.dirname(args.pair1):
+                sys.stderr.write("INFO: " + now() + " copying " + args.pair1 + " to " + args.outdir + '/' + os.path.basename(args.pair1) + "\n")
+                copy(args.pair1, args.outdir + '/' + os.path.basename(args.pair1))
+                mergefq = args.outdir + '/' + os.path.basename(args.pair1) 
+            else:
+                mergefq = args.pair1
 
     refbamfn = None
     if args.premapped:

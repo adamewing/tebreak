@@ -377,8 +377,8 @@ class Cluster:
         output = [self.chrom, str(self.POS), self.ID, self.REF, self.ALT, str(self.QUAL)]
         output.append(';'.join(self.FILTER))
         output.append(';'.join([key + '=' + str(val) for key,val in self.INFO.iteritems()]))
-        output.append(';'.join([key for key,val in self.FORMAT.iteritems()]))
-        output.append(';'.join([str(val) for key,val in self.FORMAT.iteritems()]))
+        output.append(':'.join([key for key,val in self.FORMAT.iteritems()]))
+        output.append(':'.join([str(val) for key,val in self.FORMAT.iteritems()]))
         return '\t'.join(output)
 
     def __len__(self):
@@ -886,14 +886,14 @@ def annotate(clusters, reffa, refbamfn, allclusters=False, dbsnp=None, minclip=1
 
         breaklocs = []
         for breakloc, count in cluster.all_breakpoints().iteritems():
-            breaklocs.append(str(breakloc) + ':' + str(count))
+            breaklocs.append(str(breakloc) + '|' + str(count))
 
         cluster.FORMAT['BREAKS']  = ','.join(breaklocs)
         cluster.FORMAT['TESIDES'] = ','.join(cluster.te_sides())
 
         tetypes = []
         for tetype, count in cluster.te_names().iteritems():
-            tetypes.append(tetype + ':' + str(count))
+            tetypes.append(tetype + '|' + str(count))
         cluster.FORMAT['TEALIGN'] = ','.join(tetypes)
         cluster.FORMAT['TEMINPOS'], cluster.FORMAT['TEMAXPOS'] = map(str, cluster.te_extrema())
 

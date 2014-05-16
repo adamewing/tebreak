@@ -88,11 +88,32 @@ def getmatch(read):
 
 
 def parsebam(inbam, fqout, minmatch=0.0):
+    # pass 1, identify hardclipped reads
+    hc = {}
+    bam = pysam.Samfile(inbam, 'rb')
+    for read in bam.fetch():
+        if read.is_secondary:
+            hc[read.qname] = True
+
+    sys.stderr.write("INFO\t" + now() + "\tIdentified " + str(len(hc)) + " hardclipped reads, starting second pass\n")
+
+    # pass 2, output reads
+    found_hc = 0
+    outcount = 0
+
+    bam.close()
     with open(fqout, 'w') as fq:
         bam = pysam.Samfile(inbam, 'rb')
-        for read in bam.fetch():
+        for read in bam.fetch(until_eof=True):
             if getmatch(read) >= float(minmatch) and not read.is_secondary:
                 fq.write(fqread(read))
+                outcount += 1
+            elif read.qname in hc:
+                fq.write(fqread(read))
+                found_hc += 1
+                outcount += 1
+
+    sys.stderr.write("INFO\t" + now() + "\toutput " + str(outcount) + " reads, " + str(found_hc) + " of them rescued from hardclips\n")
 
 
 def fqread(read):
@@ -133,7 +154,7 @@ def main(args):
         assert fastq.endswith('.fastq')
 
         sys.stderr.write("INFO\t" + now() + "\taligning fastq " + fastq + " to reference " + args.ref + "\n")
-        bam = bwamem(fastq, args.outdir, args.ref, args.threads)
+        bam = bwamem(fastq, args.ref, args.outdir, args.threads)
 
         if not args.keepfastq and temp:
             os.remove(fastq)

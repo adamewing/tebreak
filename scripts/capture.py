@@ -48,7 +48,7 @@ def cramtofastq(cram, outdir, cramjar, ref, threads=1):
     return outfq
 
 
-def bwamem(fq, ref, outdir, threads=1, width=150, uid=None, removefq=False):
+def bwamem(fq, ref, outdir, threads=1, width=150, uid=None, sortmem='8G'):
     ''' FIXME: add parameters to commandline '''
     assert os.path.exists(ref + '.fai')
     
@@ -58,11 +58,21 @@ def bwamem(fq, ref, outdir, threads=1, width=150, uid=None, removefq=False):
 
     fqroot   = outdir + '/' + os.path.basename(fqroot)
 
+    if str(sortmem).rstrip('Gg') != str(sortmem):
+        sortmem = int(str(sortmem).rstrip('Gg')) * 1000000000
+
+    if str(sortmem).rstrip('Mm') != str(sortmem):
+        sortmem = int(str(sortmem).rstrip('Gg')) * 1000000
+
+    sortmem = sortmem/int(threads) # avoid PBS killing my jobs
+
     sam_out  = fqroot + 'sam'
     bam_out  = fqroot + 'bam'
 
     sam_cmd  = ['bwa', 'mem', '-t', str(threads), '-M', ref, fq]
     bam_cmd  = ['samtools', 'view', '-bt', ref + '.fai', '-o', bam_out, sam_out]
+    sort_cmd = ['samtools', 'sort', '-@', str(threads), '-m', str(sortmem), bam_out, sort_out]
+    idx_cmd  = ['samtools', 'index', sort_out + '.bam']
 
     sys.stderr.write("INFO\t" + now() + "\trunning bwa-mem: " + ' '.join(sam_cmd) + "\n")
 
@@ -75,10 +85,15 @@ def bwamem(fq, ref, outdir, threads=1, width=150, uid=None, removefq=False):
     subprocess.call(bam_cmd)
     os.remove(sam_out)
 
-    if removefq:
-    	os.remove(fq)
+    sys.stdout.write("INFO\t" + now() + "\tsorting output: " + ' '.join(sort_cmd) + "\n")
+    subprocess.call(sort_cmd)
+    os.remove(bam_out)
 
-    return bam_out
+    sys.stdout.write("INFO\t" + now() + "\tindexing: " + ' '.join(idx_cmd) + "\n")
+    subprocess.call(idx_cmd)
+
+    return sort_out + '.bam'
+
 
 
 def getmatch(read):
@@ -154,7 +169,7 @@ def main(args):
         assert fastq.endswith('.fastq')
 
         sys.stderr.write("INFO\t" + now() + "\taligning fastq " + fastq + " to reference " + args.ref + "\n")
-        bam = bwamem(fastq, args.ref, args.outdir, args.threads)
+        bam = bwamem(fastq, args.ref, args.outdir, threads=args.threads, sortmem=args.sortmem)
 
         if not args.keepfastq and temp:
             os.remove(fastq)
@@ -171,7 +186,8 @@ if __name__ == '__main__':
     parser.add_argument('-f', '--fqout', required=True, help='output FASTQ file')
     parser.add_argument('-r', '--ref', required=True, help='reference fasta (needs bwa index and samtools faidx')
     parser.add_argument('-t', '--threads', default=1, help='threads for alignment (default = 1)')
-    parser.add_argument('-m', '--minmatch', default=0.95, help='minimum percent match to output read')
+    parser.add_argument('-m', '--minmatch', default=0.90, help='minimum percent match to output read (default=0.9)')
+    parser.add_argument('--sortmem', default='8G', help='memory limit for sorting BAMs')
     parser.add_argument('--keepfastq', action='store_true', default=False, help='keep temporary fastq file if created (default = False)')
     args = parser.parse_args()
     main(args)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 '''
-retrosplit.py: Identify TE insertion sites from split reads
+tebreak.py: Identify TE insertion sites from split reads
 
 
 contact: Adam Ewing (adam.ewing@mater.uq.edu.au)
@@ -1108,7 +1108,7 @@ def main(args):
     assert tebamfn 
 
     sys.stderr.write("INFO: " + now() + " identifying usable split reads from alignments\n")
-    splitreads = build_te_splitreads(refbamfn, tebamfn, read_fasta(args.telib))
+    splitreads = build_te_splitreads(refbamfn, tebamfn, read_fasta(args.telib), min_te_match=float(args.mintematch), min_ge_match=float(args.mingenomematch))
     assert splitreads
 
     sys.stderr.write("INFO: " + now() + " clustering split reads on genome coordinates\n")
@@ -1186,6 +1186,10 @@ if __name__ == '__main__':
                         help='minimum mean mapping quality per cluster (default = 1)')
     parser.add_argument('--unclipfrac', dest='unclip', default=1.0, 
                         help='maximum fraction of unclipped reads in cluster region (default = 1.0)')
+    parser.add_argument('--mintematch', dest='mintematch', default=0.9,
+                        help='minimum identity cutoff for matches to TE library (default=0.9)')
+    parser.add_argument('--mingenomematch', dest='mingenomematch', default=0.98,
+                        help='minimum identity cutoff for matches to reference genome (default=0.98)')
     parser.add_argument('--consensus', dest='consensus', default=None,
                         help='build consensus sequences from breakends and output as FASTA to specified file')
 

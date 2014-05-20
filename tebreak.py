@@ -73,12 +73,23 @@ class SplitRead:
         ''' return start and end location of alignment within TE '''
         return min(self.tread.positions), max(self.tread.positions)
 
+    def get_georient(self):
+        ''' return orientation of TE alignment relative to TE reference '''
+        if self.gread.is_reverse:
+            return '-'
+        else:
+            return '+'
+
     def get_teorient(self):
         ''' return orientation of TE alignment relative to TE reference '''
         if self.tread.is_reverse:
             return '-'
         else:
             return '+'
+
+    def reverseorient(self):
+        ''' infer TE orientation '''
+        return self.get_georient() != self.get_teorient()
 
     def get_tematch(self):
         ''' return number of mismatches / aligned length of TE sub-read '''
@@ -209,6 +220,7 @@ class Cluster:
         return max(extrema) - min(extrema)
 
     def te_extrema(self):
+        ''' return maximum and minimum positions relative to the TE references '''
         te_positions = []
         [[te_positions.append(tepos) for tepos in sr.tread.positions] for sr in self._splitreads]
         return min(te_positions), max(te_positions)
@@ -308,6 +320,14 @@ class Cluster:
         new = Cluster()
         [new.add_splitread(read) for read in self._splitreads if read.breakloc in breakends]
         return new
+
+    def fwdbreaks(self):
+        ''' return count of splitreads supporting a forward orientation '''
+        return len([sr for sr in self._splitreads if not sr.reverseorient()])
+
+    def revbreaks(self):
+        ''' return count of splitreads supporting a reverse orientation '''
+        return len([sr for sr in self._splitreads if sr.reverseorient()])
 
     def mean_genome_qual(self):
         quals = [sr.gread.mapq for sr in self._splitreads]
@@ -496,6 +516,8 @@ def print_vcfheader(fh, samplename):
     ##FORMAT=<ID=TEALIGN,Number=.,Type=String,Description="Retroelement subfamilies (or POLYA) with alignments">
     ##FORMAT=<ID=RC,Number=1,Type=Float,Description="Read Count">
     ##FORMAT=<ID=UCF,Number=1,Type=Float,Description="Unclipped Fraction">
+    ##FORMAT=<ID=FWD,Number=1,Type=Integer,Description="Number of forward oriented splitreads">
+    ##FORMAT=<ID=REV,Number=1,Type=Integer,Description="Number of reverse oriented splitreads">
     ##ALT=<ID=DEL,Description="Deletion">
     ##ALT=<ID=INS,Description="Insertion">
     ##ALT=<ID=INS:ME:ALU,Description="Insertion of ALU element">
@@ -890,6 +912,8 @@ def annotate(clusters, reffa, refbamfn, allclusters=False, dbsnp=None, minclip=1
 
         cluster.FORMAT['BREAKS']  = ','.join(breaklocs)
         cluster.FORMAT['TESIDES'] = ','.join(cluster.te_sides())
+        cluster.FORMAT['FWD'] = str(cluster.fwdbreaks())
+        cluster.FORMAT['REV'] = str(cluster.revbreaks())
 
         tetypes = []
         for tetype, count in cluster.te_names().iteritems():

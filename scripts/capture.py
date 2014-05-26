@@ -20,7 +20,8 @@ def bamtofastq(bam, outdir, samtofastq, threads=1):
 
     outfq = sub('bam$', 'fastq', outdir + '/' + os.path.basename(bam))
 
-    cmd = ['java', '-XX:ParallelGCThreads=' + str(threads), '-Xmx4g', '-jar', samtofastq, 'INPUT=' + bam, 'INTERLEAVE=true', 'FASTQ=' + outfq]
+    cmd = ['java', '-XX:ParallelGCThreads=' + str(threads), '-Xmx4g', '-jar', samtofastq, 
+           'INPUT=' + bam, 'INTERLEAVE=true', 'VALIDATION_STRINGENCY=SILENT', 'FASTQ=' + outfq]
     sys.stderr.write("INFO\t" + now() + "\tconverting BAM " + bam + " to FASTQ\n")
     subprocess.call(cmd)
 
@@ -35,7 +36,8 @@ def cramtofastq(cram, outdir, cramjar, ref, threads=1):
 
     outfq = sub('cram$', 'fastq', outdir + '/' + os.path.basename(cram))
 
-    cmd = ['java', '-XX:ParallelGCThreads=' + str(threads), '-Xmx4g', '-jar', cramjar, 'fastq', '-I', cram, '-R', ref, '--enumerate', '--skip-md5-check']
+    cmd = ['java', '-XX:ParallelGCThreads=' + str(threads), '-Xmx4g', '-jar', cramjar, 
+           'fastq', '-I', cram, '-R', ref, '--enumerate', '--skip-md5-check']
     sys.stderr.write("INFO\t" + now() + "\tconverting CRAM " + cram + " to FASTQ\n")
 
     with open(outfq, 'w') as fq:
@@ -66,8 +68,9 @@ def bwamem(fq, ref, outdir, threads=1, width=150, uid=None, sortmem='8G'):
 
     sortmem = sortmem/int(threads) # avoid PBS killing my jobs
 
-    sam_out  = fqroot + 'sam'
-    bam_out  = fqroot + 'bam'
+    sam_out   = fqroot + 'capture.sam'
+    bam_out   = fqroot + 'capture.bam'
+    sort_out  = fqroot + 'capture.sort'
 
     sam_cmd  = ['bwa', 'mem', '-t', str(threads), '-M', ref, fq]
     bam_cmd  = ['samtools', 'view', '-bt', ref + '.fai', '-o', bam_out, sam_out]

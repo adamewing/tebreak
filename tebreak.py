@@ -115,7 +115,7 @@ class SplitRead:
             assert rstart >= 0
 
             rend = rstart + len(self.gread.seq)
-            return lc(origseq, rstart, rend)
+            return uc(origseq, rstart, rend)
 
         else:
             leftseq  = ''
@@ -141,10 +141,10 @@ class SplitRead:
         return ','.join(map(str, ('SplitRead',self.chrom, self.breakloc, self.tname, self.tread.pos)))
 
 
-def lc(seq, start, end):
-    ''' lowercase part of a sequence '''
+def uc(seq, start, end):
+    ''' uppercase part of a sequence '''
     assert start < end
-    return seq[:start].upper() + seq[start:end].lower() + seq[end:].upper()
+    return seq[:start].lower() + seq[start:end].upper() + seq[end:].lower()
 
 
 class Cluster:

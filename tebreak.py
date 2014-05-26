@@ -485,10 +485,11 @@ class MSA:
     def consensus(self):
         ''' compute consensus '''
         bases = [column.cons() for column in self.columns]
-        if bases is not None:
+        if bases is not None and None not in bases:
             return ''.join(bases)
         else:
             sys.stderr.write("ERROR\t" + now() + "\tNone found in consensus sequence\n")
+            return ''
 
 
 def now():
@@ -958,7 +959,7 @@ def annotate(clusters, reffa, refbamfn, allclusters=False, dbsnp=None, minclip=1
 def consensus(cluster, breakend):
     ''' create consensus sequence for a breakend '''
     subcluster = cluster.subcluster_by_breakend([breakend])
-    greads = [sr.gread for sr in subcluster._splitreads]
+    greads = [sr.gread for sr in subcluster._splitreads if not sr.rescued]
 
     # don't try to make a consensus of just one read...
     if len(greads) == 1:
@@ -1048,7 +1049,7 @@ def consensus_fasta(clusters, outfile, passonly=True):
     with open(outfile, 'w') as cons:
         for cluster in clusters:
             if passonly and cluster.FILTER[0] == 'PASS':
-                outname = cluster.chrom + ':' + str(cluster.POS)
+                outname = cluster.chrom + ':' + str(cluster.POS) + ':' + cluster.ALT.lstrip('<').rstrip('>').split(':')[-1]
                 cons.write('>' + outname + ':1\n' + consensus(cluster, cluster.POS) + '\n')
                 if cluster.INFO.get('END') and cluster.POS != cluster.INFO['END']:
                     cons.write('>' + outname + ':2\n' + consensus(cluster, cluster.INFO['END']) + '\n')

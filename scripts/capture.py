@@ -5,6 +5,7 @@ import argparse
 import subprocess
 import pysam
 import datetime
+import gzip
 
 from re import sub
 from uuid import uuid4
@@ -50,7 +51,7 @@ def cramtofastq(cram, outdir, cramjar, ref, threads=1):
     return outfq
 
 
-def bwamem(fq, ref, outdir, threads=1, width=150, uid=None, sortmem='8G'):
+def bwamem(fq, ref, outdir, threads=1, width=150, uid=None):
     ''' FIXME: add parameters to commandline '''
     assert os.path.exists(ref + '.fai')
     
@@ -60,22 +61,12 @@ def bwamem(fq, ref, outdir, threads=1, width=150, uid=None, sortmem='8G'):
 
     fqroot   = outdir + '/' + os.path.basename(fqroot)
 
-    if str(sortmem).rstrip('Gg') != str(sortmem):
-        sortmem = int(str(sortmem).rstrip('Gg')) * 1000000000
-
-    if str(sortmem).rstrip('Mm') != str(sortmem):
-        sortmem = int(str(sortmem).rstrip('Gg')) * 1000000
-
-    sortmem = sortmem/int(threads) # avoid PBS killing my jobs
-
     sam_out   = fqroot + 'capture.sam'
     bam_out   = fqroot + 'capture.bam'
     sort_out  = fqroot + 'capture.sort'
 
     sam_cmd  = ['bwa', 'mem', '-t', str(threads), '-M', ref, fq]
     bam_cmd  = ['samtools', 'view', '-bt', ref + '.fai', '-o', bam_out, sam_out]
-    sort_cmd = ['samtools', 'sort', '-@', str(threads), '-m', str(sortmem), bam_out, sort_out]
-    idx_cmd  = ['samtools', 'index', sort_out + '.bam']
 
     sys.stderr.write("INFO\t" + now() + "\trunning bwa-mem: " + ' '.join(sam_cmd) + "\n")
 
@@ -86,17 +77,9 @@ def bwamem(fq, ref, outdir, threads=1, width=150, uid=None, sortmem='8G'):
 
     sys.stderr.write("INFO\t" + now() + "\twriting " + sam_out + " to BAM...\n")
     subprocess.call(bam_cmd)
+
     os.remove(sam_out)
-
-    sys.stdout.write("INFO\t" + now() + "\tsorting output: " + ' '.join(sort_cmd) + "\n")
-    subprocess.call(sort_cmd)
-    os.remove(bam_out)
-
-    sys.stdout.write("INFO\t" + now() + "\tindexing: " + ' '.join(idx_cmd) + "\n")
-    subprocess.call(idx_cmd)
-
-    return sort_out + '.bam'
-
+    return bam_out
 
 
 def getmatch(read):
@@ -109,26 +92,27 @@ def parsebam(inbam, fqout, minmatch=0.0):
     # pass 1, identify hardclipped reads
     hc = {}
     bam = pysam.Samfile(inbam, 'rb')
-    for read in bam.fetch():
+    for read in bam.fetch(until_eof=True):
         if read.is_secondary:
             hc[read.qname] = True
 
-    sys.stderr.write("INFO\t" + now() + "\tIdentified " + str(len(hc)) + " hardclipped reads, starting second pass\n")
+    sys.stderr.write("INFO\t" + now() + "\tIdentified " + str(len(hc)) + " hardclipped reads\n")
 
     # pass 2, output reads
     found_hc = 0
     outcount = 0
-
     bam.close()
-    with open(fqout, 'w') as fq:
+
+    sys.stderr.write("INFO\t" + now() + "\toutputting to " + fqout + "\n")
+    with gzip.open(fqout, 'wb') as fq:
         bam = pysam.Samfile(inbam, 'rb')
         for read in bam.fetch(until_eof=True):
-            if getmatch(read) >= float(minmatch) and not read.is_secondary:
-                fq.write(fqread(read))
-                outcount += 1
-            elif read.qname in hc:
+            if read.qname in hc and not read.is_secondary:
                 fq.write(fqread(read))
                 found_hc += 1
+                outcount += 1
+            elif getmatch(read) >= float(minmatch) and not read.is_secondary:
+                fq.write(fqread(read))
                 outcount += 1
 
     sys.stderr.write("INFO\t" + now() + "\toutput " + str(outcount) + " reads, " + str(found_hc) + " of them rescued from hardclips\n")
@@ -136,7 +120,7 @@ def parsebam(inbam, fqout, minmatch=0.0):
 
 def fqread(read):
     salt = str(uuid4()).split('-')[0]
-    return '\n'.join(('@' + read.qname + ':' + salt, seq, '+', qual)) + '\n'
+    return '\n'.join(('@' + read.qname + ':' + salt, read.seq, '+', read.qual)) + '\n'
 
 
 def main(args):
@@ -159,7 +143,8 @@ def main(args):
             temp  = True
 
         elif seq.endswith('.cram'):
-            fastq = cramtofastq(seq, args.outdir, args.cramjar, threads=int(args.threads))
+            assert args.genome is not None and os.path.exists(args.genome), "must specify a valid reference genome for CRAM mode\n"
+            fastq = cramtofastq(seq, args.outdir, args.cramjar, args.genome, threads=int(args.threads))
             temp  = True
 
         elif seq.endswith('.fastq') or seq.endswith('.fastq.gz'):
@@ -171,14 +156,17 @@ def main(args):
 
         assert fastq.endswith('.fastq')
 
-        sys.stderr.write("INFO\t" + now() + "\taligning fastq " + fastq + " to reference " + args.ref + "\n")
-        bam = bwamem(fastq, args.ref, args.outdir, threads=args.threads, sortmem=args.sortmem)
+        sys.stderr.write("INFO\t" + now() + "\taligning fastq " + fastq + " to TE reference " + args.ref + "\n")
+        bam = bwamem(fastq, args.ref, args.outdir, threads=args.threads)
 
         if not args.keepfastq and temp:
             os.remove(fastq)
 
-        parsebam(bam, args.fqout, minmatch=float(args.minmatch))
-        
+        fqout = args.outdir + '/' + os.path.basename(args.fqout)
+        if not fqout.endswith('.gz'):
+            fqout += '.gz'
+        parsebam(bam, fqout, minmatch=float(args.minmatch))
+        os.remove(bam)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='find relevant reads from sequence data')
@@ -187,10 +175,10 @@ if __name__ == '__main__':
     parser.add_argument('--cramjar', default=None, help='path to cramtools .jar')
     parser.add_argument('-o', '--outdir', default='.', help='path to output directory')
     parser.add_argument('-f', '--fqout', required=True, help='output FASTQ file')
-    parser.add_argument('-r', '--ref', required=True, help='reference fasta (needs bwa index and samtools faidx')
+    parser.add_argument('-r', '--ref', required=True, help='TE reference fasta (needs bwa index and samtools faidx')
+    parser.add_argument('-g', '--genome', default=None, help='genome reference fasta (e.g. GRCh37, needs bwa index and samtools faidx')
     parser.add_argument('-t', '--threads', default=1, help='threads for alignment (default = 1)')
     parser.add_argument('-m', '--minmatch', default=0.90, help='minimum percent match to output read (default=0.9)')
-    parser.add_argument('--sortmem', default='8G', help='memory limit for sorting BAMs')
     parser.add_argument('--keepfastq', action='store_true', default=False, help='keep temporary fastq file if created (default = False)')
     args = parser.parse_args()
     main(args)

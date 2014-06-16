@@ -107,6 +107,12 @@ class SplitRead:
 
         return leftseq + rightseq
 
+    def getRG(self):
+        for tag, val in self.gread.tags:
+            if tag == 'RG':
+                return val
+        return None
+
     def __gt__(self, other):
         ''' enables sorting of SplitRead objects '''
         if self.chrom == other.chrom:
@@ -351,6 +357,9 @@ class Cluster:
         reportsnps = [snp for snp, count in Counter(foundsnps).iteritems() if count > 1]
         return reportsnps
 
+    def readgroups(self):
+        return Counter([sr.getRG() for sr in self._splitreads]).keys()
+
     def find_extrema(self):
         ''' return leftmost and rightmost aligned positions in cluster vs. reference '''
         positions = []
@@ -479,6 +488,7 @@ def print_vcfheader(fh, samplename):
     ##FORMAT=<ID=BREAKS,Number=.,Type=String,Description="Positions:Counts of all breakends detected">
     ##FORMAT=<ID=POSBREAKSEQ,Number=1,Type=String,Description="Sequence of the POS breakend">
     ##FORMAT=<ID=ENDBREAKSEQ,Number=1,Type=String,Description="Sequence of the INFO.END breakend">
+    ##FORMAT=<ID=RG,Number=1,Type=String,Description="Readgroups">
     ##FORMAT=<ID=TEALIGN,Number=.,Type=String,Description="Retroelement subfamilies (or POLYA) with alignments">
     ##FORMAT=<ID=RC,Number=1,Type=Float,Description="Read Count">
     ##FORMAT=<ID=UCF,Number=1,Type=Float,Description="Unclipped Fraction">
@@ -866,6 +876,7 @@ def annotate(clusters, reffa, refbamfn, allclusters=False, dbsnp=None, minclip=1
             cluster.FORMAT['ENDBREAKSEQ'] = cluster.majorbreakseq(cluster.INFO['END'], flank=int(minclip))
 
         cluster.FORMAT['RC'] = len(cluster)
+        cluster.FORMAT['RG'] = ','.join(cluster.readgroups())
 
     return clusters
 

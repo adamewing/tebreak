@@ -30,7 +30,6 @@ from shutil import move, copy
 class SplitRead:
     ''' gread = genome read, tread = TE read '''
     def __init__(self, gread, tread, tname, chrom, loc, tlen, rescue=False, breakloc=None):
-        ''' if read is obtained through hard-clipped rescue, need to set breakloc manually '''
         self.gread     = gread
         self.tread     = tread  
         self.alignloc  = int(loc)
@@ -38,23 +37,15 @@ class SplitRead:
         self.teside    = None # '5' or '3' (5' or 3')
         self.chrom     = chrom
         self.tlen      = int(tlen)
-        self.hardclips = [] # keep hardclipped reads for later
-        self.rescued   = False
         self.embedded  = False # nonref TE is completely embedded in read
-
-        self.original  = None # used for storing non-hardclipped read if rescued
 
         self.tclass, self.tname = tname.split(':')
         
-        # find breakpoint
-        if rescue:
-            self.breakloc = breakloc
-            self.rescued  = True
+
+        if gread.qstart < gread.rlen - gread.qend:
+            self.breakloc  = gread.positions[-1] # breakpoint on right
         else:
-            if gread.qstart < gread.rlen - gread.qend:
-                self.breakloc  = gread.positions[-1] # breakpoint on right
-            else:
-                self.breakloc  = gread.positions[0] # breakpoint on left
+            self.breakloc  = gread.positions[0] # breakpoint on left
 
         self.dist_from_3p = self.tlen - max(self.tread.positions)
 
@@ -104,31 +95,17 @@ class SplitRead:
     def getbreakseq(self, flank=5):
         ''' get breakend sequence from genome alignments '''
 
-        if self.rescued:
-            origseq = self.original.seq.upper()
-            assert origseq is not None
+        leftseq  = ''
+        rightseq = ''
 
-            rstart = origseq.find(self.gread.seq.upper())
-            if rstart < 0:
-                rstart = origseq.find(rc(self.gread.seq).upper())
+        if self.gread.qstart < self.gread.rlen - self.gread.qend: # right
+            leftseq  = self.gread.seq[self.gread.qend-flank:self.gread.qend].upper()
+            rightseq = self.gread.seq[self.gread.qend:self.gread.qend+flank].lower()
+        else: # left
+            leftseq  = self.gread.seq[self.gread.qstart-flank:self.gread.qstart].lower()
+            rightseq = self.gread.seq[self.gread.qstart:self.gread.qstart+flank].upper()
 
-            assert rstart >= 0
-
-            rend = rstart + len(self.gread.seq)
-            return uc(origseq, rstart, rend)
-
-        else:
-            leftseq  = ''
-            rightseq = ''
-
-            if self.gread.qstart < self.gread.rlen - self.gread.qend: # right
-                leftseq  = self.gread.seq[self.gread.qend-flank:self.gread.qend].upper()
-                rightseq = self.gread.seq[self.gread.qend:self.gread.qend+flank].lower()
-            else: # left
-                leftseq  = self.gread.seq[self.gread.qstart-flank:self.gread.qstart].lower()
-                rightseq = self.gread.seq[self.gread.qstart:self.gread.qstart+flank].upper()
-
-            return leftseq + rightseq
+        return leftseq + rightseq
 
     def __gt__(self, other):
         ''' enables sorting of SplitRead objects '''
@@ -267,13 +244,8 @@ class Cluster:
 
     def majorbreakseq(self, breakloc, flank=5):
         ''' return most common breakend sequence '''
-        gbest = [sr.getbreakseq(flank=flank) for sr in self._splitreads if sr.breakloc == breakloc and not sr.rescued]
-
-        if len(gbest) == 0:
-            gbest = [sr.getbreakseq(flank=flank) for sr in self._splitreads if sr.breakloc == breakloc and sr.rescued]
-            return Counter(gbest).most_common(1)[0][0] + ',HCLIP'
-        else:
-            return Counter(gbest).most_common(1)[0][0] + ',SCLIP'
+        gbest = [sr.getbreakseq(flank=flank) for sr in self._splitreads if sr.breakloc == breakloc]
+        return Counter(gbest).most_common(1)[0][0]
 
     def guess_mechanism(self, refbamfn, bstart, bend):
         ''' check depth manually (only way to get ALL reads), decide whether it's likely a TSD, Deletion, or other '''
@@ -332,13 +304,6 @@ class Cluster:
     def mean_genome_qual(self):
         quals = [sr.gread.mapq for sr in self._splitreads]
         return float(sum(quals))/float(len(quals))
-
-    def get_hardclips(self):
-        hclist = []
-        for sr in self._splitreads:
-            for hc in sr.hardclips:
-                hclist.append(hc)
-        return hclist
 
     def unclipfrac(self, refbamfn):
         ''' track fraction of reads over cluster region that are unclipped '''
@@ -558,12 +523,10 @@ def read_fasta(infa):
     return seqdict
 
 
-def bwamem(fq, ref, threads=1, width=150, sortmem=2000000000, uid=None):
+def bwamem(fq, ref, outpath, samplename, threads=1, width=150, sortmem=2000000000, RGPL='ILLUMINA'):
     ''' FIXME: add parameters to commandline '''
-    fqroot = sub('.extendedFrags.fastq.gz$', '', fq)
+    fqroot = sub('.extendedFrags.fastq.gz$', '', os.path.basename(fq))
     fqroot = sub('.fq$', '', fqroot)
-    if uid is not None:
-        fqroot = uid
 
     if str(sortmem).rstrip('Gg') != str(sortmem):
         sortmem = int(str(sortmem).rstrip('Gg')) * 1000000000
@@ -573,21 +536,28 @@ def bwamem(fq, ref, threads=1, width=150, sortmem=2000000000, uid=None):
 
     sortmem = sortmem/int(threads) # avoid PBS killing my jobs
 
-    sam_out  = '.'.join((fqroot, 'sam'))
-    bam_out  = '.'.join((fqroot, 'bam'))
-    sort_out = '.'.join((fqroot, 'sorted'))
+    sam_out  = outpath + '/' + '.'.join((fqroot, 'sam'))
+    bam_out  = outpath + '/' + '.'.join((fqroot, 'bam'))
+    sort_out = outpath + '/' + '.'.join((fqroot, 'sorted'))
 
-    sam_cmd  = ['bwa', 'mem', '-t', str(threads), '-M', ref, fq]
+    sam_cmd  = ['bwa', 'mem', '-t', str(threads), '-Y', '-M', ref, fq]
     bam_cmd  = ['samtools', 'view', '-bt', ref + '.bai', '-o', bam_out, sam_out]
     sort_cmd = ['samtools', 'sort', '-@', str(threads), '-m', str(sortmem), bam_out, sort_out]
     idx_cmd  = ['samtools', 'index', sort_out + '.bam']
 
     sys.stdout.write("INFO\t" + now() + "\trunning bwa-mem: " + ' '.join(sam_cmd) + "\n")
 
+    wrote_rg = False
     with open(sam_out, 'w') as sam:
         p = subprocess.Popen(sam_cmd, stdout=subprocess.PIPE)
         for line in p.stdout:
-            sam.write(line)
+            if line.startswith('@PG') and not wrote_rg:
+                sam.write('\t'.join(("@RG", "ID:" + fqroot, "SM:" + samplename, "PL:" + RGPL)) + "\n")
+                wrote_rg = True
+            if not line.startswith('@'):
+                sam.write(line.strip() + "\tRG:Z:" + fqroot + "\n")
+            else:
+                sam.write(line.strip() + "\n")
 
     sys.stdout.write("INFO\t" + now() + "\twriting " + sam_out + " to BAM...\n")
     subprocess.call(bam_cmd)
@@ -603,18 +573,30 @@ def bwamem(fq, ref, threads=1, width=150, sortmem=2000000000, uid=None):
     return sort_out + '.bam'
 
 
-def flash_wrapper(fq1, fq2, outdir, max_overlap, threads, uid=None):
-    ''' wrapper for FLASH (http://ccb.jhu.edu/software/FLASH/) '''
-    out = outdir + '/' + 'RCTMP-' + str(uuid4())
-    if uid is not None:
-         out = uid
+def merge(picardpath, bamlist, basename, threads=1, mem='4G'):
+    ''' run picard '''
+    mergejar = picardpath + '/' + 'MergeSamFiles.jar'
 
-    args = ['flash', '-d', os.path.dirname(out), '-o', os.path.basename(out), '-M', str(max_overlap), '-z', '-t', str(threads), fq1, fq2]
-    print "INFO\t" + now() + "\tcalling FLASH:", args
+    if len(bamlist) == 1:
+        return bamlist[0]
 
-    subprocess.call(args)
+    outbam = basename + '.merged.bam'
 
-    return out + '.extendedFrags.fastq.gz'
+    cmd = ['java', '-XX:ParallelGCThreads=' + str(threads), '-Xmx' + str(mem), '-jar', 
+           mergejar, 'USE_THREADING=true', 'ASSUME_SORTED=true' ,'SORT_ORDER=coordinate',
+           'OUTPUT=' + outbam]
+
+    for bam in bamlist:
+        cmd.append('INPUT=' + bam)
+
+    sys.stdout.write("INFO\t" + now() + "\tmerging: " + ' ' .join(cmd) + "\n")
+
+    subprocess.call(cmd)
+
+    # for bam in bamlist:
+    #     os.remove(bam)
+
+    return outbam
 
 
 def bamrec_to_fastq(read, diffseq=None, diffqual=None, diffname=None):
@@ -699,24 +681,19 @@ def build_te_splitreads(refbamfn, tebamfn, teref, min_te_match = 0.9, min_ge_mat
     ''' get sorted list of split reads '''
     splitreads = []
     for tread in tebam.fetch():
-        if not tread.is_unmapped and not tread.is_secondary:
+        if not tread.is_unmapped:
             tname = tebam.getrname(tread.tid)
             gname = ':'.join(tread.qname.split(':')[:-2])
             gchrom, gloc = tread.qname.split(':')[-2:]
 
             gloc = int(gloc)
             sr = None
-            hcreads = []
             for gread in refbam.fetch(reference=gchrom, start=gloc, end=gloc+1):
                 if (gread.qname, gread.pos, refbam.getrname(gread.tid)) == (gname, gloc, gchrom):
                     tlen = len(teref[tname])
                     sr = SplitRead(gread, tread, tname, gchrom, gloc, tlen)
                     if sr.get_tematch() >= min_te_match and sr.get_gematch() >= min_ge_match:
                         splitreads.append(sr)
-                if search('H', gread.cigarstring) and gread.is_secondary:
-                    hcreads.append(gread)
-            if sr is not None:
-                [sr.hardclips.append(hc) for hc in hcreads]
 
     refbam.close()
     tebam.close()
@@ -742,69 +719,6 @@ def build_te_clusters(splitreads, searchdist=100): # TODO PARAM
 
             else:
                 clusters[-1].add_splitread(sr)
-
-    return clusters
-
-
-def rescue_hardclips(clusters, refbamfn, telib, width=150, threads=1):
-    ''' hard-clipped reads are often mostly TE-derived, hunt down the original read and find breakpoints '''
-    hc_clusters = {}
-    hc_reads    = {}
-    hc_original = {}
-    cn = 0
-
-    for cluster in clusters:
-        for hcread in cluster.get_hardclips():
-            hc_clusters[hcread.qname] = cn
-            hc_reads   [hcread.qname] = hcread
-        cn += 1
-
-    bam  = pysam.Samfile(refbamfn, 'rb')
-    fqfn = sub('.bam$', '.rescue.fq', refbamfn)
-
-    with open(fqfn, 'w') as fqout:
-        for read in bam.fetch(until_eof=True):
-            if not read.is_secondary:
-                if read.qname in hc_clusters:
-                    # names match, hardclipped read should be a subsequence of read.seq
-                    cliploc = read.seq.find(hc_reads[read.qname].seq)
-
-                    if cliploc < 0:
-                        cliploc = read.seq.find(rc(hc_reads[read.qname].seq))
-
-                    assert cliploc >= 0
-                    hc_original[read.qname] = read
-                    
-                    fqrec = bamrec_to_fastq(read, diffseq=read.seq[:cliploc], diffqual=read.qual[:cliploc])
-                    fqout.write(fqrec + '\n')
-
-    print "INFO\t" + now() + "\tealigning hardclips to TE library..."
-    bamout = bwamem(fqfn, telib, width=width, threads=threads)
-
-    tebam = pysam.Samfile(bamout, 'rb')
-
-    te_length = dict(zip(tebam.references, tebam.lengths))
-
-    for teread in tebam.fetch():
-        if not teread.is_secondary:
-            breakloc = hc_reads[teread.qname].pos
-            # break location is at right end of read
-            if hc_reads[teread.qname].cigarstring.endswith('H'):
-                breakloc = hc_reads[teread.qname].positions[-1]
-
-            gread  = hc_reads[teread.qname]
-            tname  = tebam.getrname(teread.tid)
-            gchrom = bam.getrname(gread.tid)
-            gloc   = gread.pos
-            tlen   = te_length[tname]
-
-            sr = SplitRead(gread, teread, tname, gchrom, gloc, tlen, rescue=True, breakloc=breakloc)
-            sr.original = hc_original[teread.qname]
-            cn = hc_clusters[teread.qname]
-            clusters[cn].add_splitread(sr)
-
-    tebam.close()
-    bam.close()
 
     return clusters
 
@@ -959,7 +873,7 @@ def annotate(clusters, reffa, refbamfn, allclusters=False, dbsnp=None, minclip=1
 def consensus(cluster, breakend):
     ''' create consensus sequence for a breakend '''
     subcluster = cluster.subcluster_by_breakend([breakend])
-    greads = [sr.gread for sr in subcluster._splitreads if not sr.rescued]
+    greads = [sr.gread for sr in subcluster._splitreads]
 
     # don't try to make a consensus of just one read...
     if len(greads) == 1:
@@ -1033,11 +947,11 @@ def bamoutput(clusters, refbamfn, tebamfn, prefix, passonly=False):
 
     for cluster in clusters:
         if passonly and cluster.FILTER[0] == 'PASS':
-            [refout.write(read) for read in cluster.greads()]
-            [teout.write(read) for read in cluster.treads()]
+            [refout.write(read) for read in cluster.greads() if not read.is_secondary]
+            [teout.write(read) for read in cluster.treads() if not read.is_secondary]
         else:
-            [refout.write(read) for read in cluster.greads()]
-            [teout.write(read) for read in cluster.treads()]
+            [refout.write(read) for read in cluster.greads() if not read.is_secondary]
+            [teout.write(read) for read in cluster.treads() if not read.is_secondary]
 
     refbam.close()
     tebam.close()
@@ -1079,7 +993,7 @@ def markdups(inbam, picard):
 def main(args):
     sys.stderr.write("INFO\t" + now() + "\tstarting " + sys.argv[0] + " called with args:\n" + ' '.join(sys.argv) + "\n")
 
-    mergefq = None
+    fqs = []
     basename = args.samplename
 
     if args.outdir is not None:
@@ -1091,33 +1005,26 @@ def main(args):
 
         basename = args.outdir + '/' + basename
 
-    if args.pair2 is not None:
-        sys.stderr.write("INFO: " + now() + " overlapping paired ends\n")
-        mergefq = flash_wrapper(args.pair1, args.pair2, args.outdir, args.maxoverlap, args.threads, uid=basename)
-
-    else:
-        if args.pair1.endswith('.bam') and not args.premapped:
-            sys.stderr.write("INFO: " + now() + " converting BAM " + args.pair1 + " to FASTQ " + basename + ".fq.gz\n")
-            mergefq = bamtofq(args.pair1, basename + '.fq.gz')
-        else: # assume fastq
-            if args.outdir != os.path.dirname(args.pair1):
-                sys.stderr.write("INFO: " + now() + " copying " + args.pair1 + " to " + args.outdir + '/' + os.path.basename(args.pair1) + "\n")
-                copy(args.pair1, args.outdir + '/' + os.path.basename(args.pair1))
-                mergefq = args.outdir + '/' + os.path.basename(args.pair1) 
-            else:
-                mergefq = args.pair1
+    if args.input.endswith('.bam') and not args.premapped:
+        sys.stderr.write("INFO: " + now() + " converting BAM " + args.input + " to FASTQ " + basename + ".fq.gz\n")
+        fqs.append(bamtofq(args.input, basename + '.fq.gz'))
+    else: # assume fastq
+        fqs = args.input.split(',')
 
     refbamfn = None
+    bamlist  = []
     if args.premapped:
-        if args.pair1.endswith('.bam'):
-            sys.stderr.write("INFO: " + now() + " using pre-mapped BAM: " + args.pair1 + "\n")
-            refbamfn = args.pair1
+        if args.input.endswith('.bam'):
+            sys.stderr.write("INFO: " + now() + " using pre-mapped BAM: " + args.input + "\n")
+            refbamfn = args.input
         else:
-            sys.stderr.write("ERROR: " + now() + " flag to use premapped bam (--premapped) called but " + args.pair1 + " is not a .bam file\n")
+            sys.stderr.write("ERROR: " + now() + " flag to use premapped bam (--premapped) called but " + args.input + " is not a .bam file\n")
             sys.exit(1)
     else:
-        sys.stderr.write("INFO: " + now() + " mapping fastq " + mergefq + " to genome " + args.ref + " using " +  str(args.threads) + " threads\n")
-        refbamfn = bwamem(mergefq, args.ref, width=int(args.width), threads=args.threads, uid=basename, sortmem=args.sortmem)
+        for fq in fqs:
+            sys.stderr.write("INFO: " + now() + " mapping fastq " + fq + " to genome " + args.ref + " using " +  str(args.threads) + " threads\n")
+            bamlist.append(bwamem(fq, args.ref, args.outdir, args.samplename, width=int(args.width), threads=args.threads, sortmem=args.sortmem))
+        refbamfn = merge(args.picard, bamlist, basename, threads=args.threads, mem=args.sortmem)
 
     assert refbamfn is not None
 
@@ -1129,7 +1036,7 @@ def main(args):
     assert clipfastq
 
     sys.stderr.write("INFO: " + now() + " realigning clipped ends to TE reference library\n")
-    tebamfn = bwamem(clipfastq, args.telib, width=int(args.width), threads=args.threads, sortmem=args.sortmem)
+    tebamfn = bwamem(clipfastq, args.telib, args.outdir, args.samplename, width=int(args.width), threads=args.threads, sortmem=args.sortmem)
     assert tebamfn 
 
     sys.stderr.write("INFO: " + now() + " identifying usable split reads from alignments\n")
@@ -1139,9 +1046,6 @@ def main(args):
     sys.stderr.write("INFO: " + now() + " clustering split reads on genome coordinates\n")
     clusters = build_te_clusters(splitreads)
     sys.stderr.write("INFO: " + now() + " cluster count: " + str(len(clusters)) + "\n")
-
-    sys.stderr.write("INFO: " + now() + " further investigation of hard-clipped reads in breakend regions\n")
-    clusters = rescue_hardclips(clusters, refbamfn, args.telib, width=int(args.width), threads=args.threads)
 
     sys.stderr.write("INFO: " + now() + " filtering clusters\n")
     clusters = filter_clusters(clusters, args.active.split(','), refbamfn, 
@@ -1167,10 +1071,8 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Analyse RC-seq data')
-    parser.add_argument('-1', dest='pair1', required=True, 
-                        help='fastq(.gz) containing first end reads or BAM to process and re-map')
-    parser.add_argument('-2', dest='pair2', default=None,
-                        help='fastq(.gz) containing second end reads (optional, second read is assumed to overlap the first and will be joined via FLASH)')
+    parser.add_argument('-i', dest='input', required=True, 
+                        help='fastq(.gz) containing reads or BAM to process and re-map. Multipe fastq files can be comma-delimited.')
 
     parser.add_argument('-r', '--ref', dest='ref', required=True, 
                         help='reference genome for bwa-mem, also expects .fai index (samtools faidx ref.fa)')
@@ -1201,8 +1103,6 @@ if __name__ == '__main__':
 
     parser.add_argument('--width', dest='width', default=150,
                          help='bandwidth parameter for bwa-mem: determines max size of indels in reads (see bwa docs, default=150)')
-    parser.add_argument('--max-overlap', dest='maxoverlap', default=100, 
-                        help='Maximum overlap used for joining paired reads with FLASH')
     parser.add_argument('--mincluster', dest='mincluster', default=4, 
                         help='minimum number of reads in a cluster')
     parser.add_argument('--minclip', dest='minclip', default=50, 

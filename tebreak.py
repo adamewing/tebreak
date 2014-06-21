@@ -775,7 +775,7 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, 
             if reject:
                 subcluster.FILTER.append('tetype')
 
-            if subcluster.QUAL <= minq:
+            if subcluster.QUAL < minq:
                 reject = True
                 subcluster.FILTER.append('avgmapq')
 
@@ -823,7 +823,7 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, 
     return filtered
 
 
-def annotate(clusters, reffa, refbamfn, allclusters=False, dbsnp=None, minclip=10):
+def annotate(clusters, reffa, refbamfn, allclusters=False, dbsnp=None, minclip=10, genotype=False):
     ''' populate VCF INFO field with information about the insertion '''
 
     ref = pysam.Fastafile(reffa)
@@ -863,6 +863,14 @@ def annotate(clusters, reffa, refbamfn, allclusters=False, dbsnp=None, minclip=1
                 snps = cluster.checksnps(dbsnp, refbamfn)
                 if snps:
                     cluster.INFO['SNPS'] = ','.join(snps)
+
+            if genotype:
+                escount = findemptysite(refbamfn, cluster.chrom, leftbreak)
+                cluster.FORMAT['GQ'] = str(escount)
+                if escount > 0:
+                    cluster.FORMAT['GT'] = '1/1'
+                else:
+                    cluster.FORMAT['GT'] = '1/0'
 
         refbase = ref.fetch(cluster.chrom, cluster.POS, cluster.POS+1)
         if refbase != '':
@@ -1001,6 +1009,55 @@ def markdups(inbam, picard):
     return inbam
 
 
+def findemptysite(bamfn, chrom, pos):
+    ''' return count of unclipped (completely mapped) reads spanning chrom:pos '''
+    bam = pysam.Samfile(bamfn, 'rb')
+    if chrom not in bam.references:
+        return 0
+    pos = int(pos)
+    mapcount = 0
+    for read in bam.fetch(chrom, pos, pos+1):
+        if min(read.positions) < pos and max(read.positions) > pos:
+            mapcount += 1
+    return mapcount
+
+
+def maketargetfastq(outdir, bamfn, bedfn):
+    ''' pick reads and mates from target regions (primary alignments will be selected from non-primary alignments) '''
+    assert bamfn.endswith('.bam'), "not bam file: %r" % bamfn
+    bam  = pysam.Samfile(bamfn, 'rb')
+    fqfn = outdir + '/' + sub('bam$', str(uuid4()).split('-')[0] + '.fastq', os.path.basename(bamfn))
+   
+    print "INFO\t" + now() + "\tgetting readnames for target regions"
+    rnames = {}
+
+    with open(bedfn, 'r') as bed:
+        for line in bed:
+            chrom, start, end = line.strip().split()[:3]
+            start, end = int(start), int(end)
+            if chrom in bam.references:
+                for read in bam.fetch(chrom, start, end):
+                    rnames[read.qname] = True
+
+    bam.close()
+    bam = pysam.Samfile(bamfn, 'rb')
+
+    print "INFO\t" + now() + "\tselected " + str(len(rnames)) + " read names based on coordinates"
+    print "INFO\t" + now() + "\tdumping selected reads to fastq: " + fqfn
+
+    with open(fqfn, 'w') as fq:
+        for read in bam.fetch(until_eof=True):
+            if not read.is_secondary:
+                if read.qname in rnames:
+                    fq.write('@' + read.qname + ':' + str(uuid4()).split('-')[0] + '\n')
+                    if read.is_reverse:
+                        fq.write(rc(read.seq) + '\n+\n' + read.qual[::-1] + '\n')
+                    else:
+                        fq.write(read.seq + '\n+\n' + read.qual + '\n')
+    bam.close()
+    return fqfn
+
+
 def main(args):
     sys.stderr.write("INFO\t" + now() + "\tstarting " + sys.argv[0] + " called with args:\n" + ' '.join(sys.argv) + "\n")
 
@@ -1016,11 +1073,21 @@ def main(args):
 
         basename = args.outdir + '/' + basename
 
-    if args.input.endswith('.bam') and not args.premapped:
-        sys.stderr.write("INFO: " + now() + " converting BAM " + args.input + " to FASTQ " + basename + ".fq.gz\n")
-        fqs.append(bamtofq(args.input, basename + '.fq.gz'))
-    else: # assume fastq
-        fqs = args.input.split(',')
+    if args.targets is not None:
+        if not args.input.endswith('.bam'):
+            sys.stderr.write("ERROR\t" + now() + "\t--targets only works with a .bam file as input\n")
+            sys.exit(1)
+        if args.premapped:
+            sys.stderr.write("ERROR\t" + now() + "\t--targets cannot be called with --premapped\n")
+            sys.exit(1)
+        fqs.append(maketargetfastq(args.outdir, args.input, args.targets))
+
+    else:    
+        if args.input.endswith('.bam') and not args.premapped:
+            sys.stderr.write("INFO: " + now() + " converting BAM " + args.input + " to FASTQ " + basename + ".fq.gz\n")
+            fqs.append(bamtofq(args.input, basename + '.fq.gz'))
+        else: # assume fastq
+            fqs = args.input.split(',')
 
     refbamfn = None
     bamlist  = []
@@ -1061,11 +1128,11 @@ def main(args):
     sys.stderr.write("INFO: " + now() + " filtering clusters\n")
     clusters = filter_clusters(clusters, args.active.split(','), refbamfn, 
                                minsize=int(args.mincluster), maskfile=args.mask,
-                               whitelistfile=args.whitelist, unclip=float(args.unclip))
+                               whitelistfile=args.whitelist, unclip=float(args.unclip), minq=int(args.minq))
     sys.stderr.write("INFO: " + now() + " passing cluster count: " + str(len([c for c in clusters if c.FILTER[0] == 'PASS'])) + "\n")
 
     sys.stderr.write("INFO: " + now() + " annotating clusters\n")
-    clusters = annotate(clusters, args.ref, refbamfn, allclusters=args.processfiltered, dbsnp=args.snps, minclip=args.minclip)
+    clusters = annotate(clusters, args.ref, refbamfn, allclusters=args.processfiltered, dbsnp=args.snps, minclip=args.minclip, genotype=args.genotype)
     assert clusters
 
     sys.stderr.write("INFO: " + now() + " writing VCF\n")
@@ -1098,6 +1165,11 @@ if __name__ == '__main__':
 
     parser.add_argument('-a', '--active', dest='active', default='L1Hs',
                         help='Comma-delimited list of relevant (i.e. active) subfamilies to target (default=L1Hs)')
+
+    parser.add_argument('--targets', default=None,
+                        help='BED file of target regions: only reads and mates captured from targed region are analysed')
+    parser.add_argument('--genotype', action='store_true', default=False,
+                        help='guess genotype from alignments')
 
     parser.add_argument('-n', '--samplename', dest='samplename', default=str(uuid4()), 
                         help='unique sample name (default = generated UUID4)')

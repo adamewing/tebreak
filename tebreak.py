@@ -44,15 +44,16 @@ class SplitRead:
 
         if gread.qstart < gread.rlen - gread.qend:
             self.breakloc  = gread.positions[-1] # breakpoint on right
+            if self.tread.is_reverse:
+                self.teside = '3'
+            else:
+                self.teside = '5'
         else:
             self.breakloc  = gread.positions[0] # breakpoint on left
-
-        self.dist_from_3p = self.tlen - max(self.tread.positions)
-
-        if self.dist_from_3p < 50:
-            self.teside = '3'
-        else:
-            self.teside = '5'
+            if self.tread.is_reverse:
+                self.teside = '5'
+            else:
+                self.teside = '3'
 
         if self.tclass == 'POLYA':
             self.teside = '3'
@@ -98,7 +99,8 @@ class SplitRead:
         leftseq  = ''
         rightseq = ''
 
-        if self.gread.qstart < self.gread.rlen - self.gread.qend: # right
+        #if self.gread.qstart < self.gread.rlen - self.gread.qend: # right
+        if self.
             leftseq  = self.gread.seq[self.gread.qend-flank:self.gread.qend].upper()
             rightseq = self.gread.seq[self.gread.qend:self.gread.qend+flank].lower()
         else: # left
@@ -208,6 +210,9 @@ class Cluster:
         [[te_positions.append(tepos) for tepos in sr.tread.positions] for sr in self._splitreads]
         return min(te_positions), max(te_positions)
 
+    def max_breakpoint_support(self):
+        return self.all_breakpoints().most_common(1)[0][1]
+
     def all_breakpoints(self):
         return Counter([read.breakloc for read in self._splitreads])
 
@@ -220,6 +225,7 @@ class Cluster:
             return self.all_breakpoints().most_common(1)[0][0], None, mech
 
         n = 0
+        sides = [] #FIXME 
         for breakend, count in self.all_breakpoints().most_common():
             n += 1
             if len(be) < 2:
@@ -533,7 +539,7 @@ def read_fasta(infa):
     return seqdict
 
 
-def bwamem(fq, ref, outpath, samplename, threads=1, width=150, sortmem=2000000000, RGPL='ILLUMINA'):
+def bwamem(fq, ref, outpath, samplename, threads=1, width=150, sortmem=2000000000, RGPL='ILLUMINA', pacbio=False):
     ''' FIXME: add parameters to commandline '''
     fqroot = sub('.extendedFrags.fastq.gz$', '', os.path.basename(fq))
     fqroot = sub('.fq$', '', fqroot)
@@ -544,13 +550,20 @@ def bwamem(fq, ref, outpath, samplename, threads=1, width=150, sortmem=200000000
     if str(sortmem).rstrip('Mm') != str(sortmem):
         sortmem = int(str(sortmem).rstrip('Gg')) * 1000000
 
-    sortmem = sortmem/int(threads) # avoid PBS killing my jobs
+    sortmem = sortmem/int(threads)
 
     sam_out  = outpath + '/' + '.'.join((fqroot, 'sam'))
     bam_out  = outpath + '/' + '.'.join((fqroot, 'bam'))
     sort_out = outpath + '/' + '.'.join((fqroot, 'sorted'))
 
-    sam_cmd  = ['bwa', 'mem', '-t', str(threads), '-Y', '-M', ref, fq]
+    sam_cmd  = ['bwa', 'mem', '-t', str(threads), '-Y', '-M']
+
+    if pacbio:
+        sam_cmd.append('-x')
+        sam_cmd.append('pacbio')
+
+    sam_cmd.append(ref)
+    sam_cmd.append(fq)
     bam_cmd  = ['samtools', 'view', '-bt', ref + '.bai', '-o', bam_out, sam_out]
     sort_cmd = ['samtools', 'sort', '-@', str(threads), '-m', str(sortmem), bam_out, sort_out]
     idx_cmd  = ['samtools', 'index', sort_out + '.bam']
@@ -561,6 +574,18 @@ def bwamem(fq, ref, outpath, samplename, threads=1, width=150, sortmem=200000000
     with open(sam_out, 'w') as sam:
         p = subprocess.Popen(sam_cmd, stdout=subprocess.PIPE)
         for line in p.stdout:
+            if pacbio:
+                c = line.strip().split('\t')
+                seqlen = len(c[9])
+                qual = c[10]
+
+                if len(qual) > seqlen:
+                    c[10] = qual[:seqlen]
+                while len(qual) < seqlen:
+                    c[10] += qual[-1]
+
+                line = '\t'.join(c)
+
             if line.startswith('@PG') and not wrote_rg:
                 sam.write('\t'.join(("@RG", "ID:" + fqroot, "SM:" + samplename, "PL:" + RGPL)) + "\n")
                 wrote_rg = True
@@ -603,8 +628,8 @@ def merge(picardpath, bamlist, basename, threads=1, mem='4G'):
 
     subprocess.call(cmd)
 
-    # for bam in bamlist:
-    #     os.remove(bam)
+    for bam in bamlist:
+        os.remove(bam)
 
     return outbam
 
@@ -780,7 +805,7 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, 
                 subcluster.FILTER.append('avgmapq')
 
             # clusters have to be at least some minimum size
-            if len(subcluster) < minsize:
+            if subcluster.max_breakpoint_support() < minsize:
                 reject = True
                 subcluster.FILTER.append('csize')
 
@@ -884,7 +909,7 @@ def annotate(clusters, reffa, refbamfn, allclusters=False, dbsnp=None, minclip=1
             cluster.FORMAT['ENDBREAKSEQ'] = cluster.majorbreakseq(cluster.INFO['END'], flank=int(minclip))
 
         cluster.FORMAT['RC'] = len(cluster)
-        cluster.FORMAT['RG'] = ','.join(cluster.readgroups())
+        cluster.FORMAT['RG'] = ','.join(map(str, cluster.readgroups()))
 
     return clusters
 
@@ -1022,40 +1047,44 @@ def findemptysite(bamfn, chrom, pos):
     return mapcount
 
 
-def maketargetfastq(outdir, bamfn, bedfn):
+def maketargetfastq(outdir, bamfnlist, bedfn):
     ''' pick reads and mates from target regions (primary alignments will be selected from non-primary alignments) '''
-    assert bamfn.endswith('.bam'), "not bam file: %r" % bamfn
-    bam  = pysam.Samfile(bamfn, 'rb')
-    fqfn = outdir + '/' + sub('bam$', str(uuid4()).split('-')[0] + '.fastq', os.path.basename(bamfn))
-   
-    print "INFO\t" + now() + "\tgetting readnames for target regions"
-    rnames = {}
 
-    with open(bedfn, 'r') as bed:
-        for line in bed:
-            chrom, start, end = line.strip().split()[:3]
-            start, end = int(start), int(end)
-            if chrom in bam.references:
-                for read in bam.fetch(chrom, start, end):
-                    rnames[read.qname] = True
+    fqfnlist = []
+    for bamfn in bamfnlist.split(','):
+        assert bamfn.endswith('.bam'), "not bam file: %r" % bamfn
+        bam  = pysam.Samfile(bamfn, 'rb')
+        fqfn = outdir + '/' + sub('bam$', str(uuid4()).split('-')[0] + '.fastq', os.path.basename(bamfn))
+        fqfnlist.append(fqfn)
+       
+        print "INFO\t" + now() + "\tgetting readnames for target regions"
+        rnames = {}
 
-    bam.close()
-    bam = pysam.Samfile(bamfn, 'rb')
+        with open(bedfn, 'r') as bed:
+            for line in bed:
+                chrom, start, end = line.strip().split()[:3]
+                start, end = int(start), int(end)
+                if chrom in bam.references:
+                    for read in bam.fetch(chrom, start, end):
+                        rnames[read.qname] = True
 
-    print "INFO\t" + now() + "\tselected " + str(len(rnames)) + " read names based on coordinates"
-    print "INFO\t" + now() + "\tdumping selected reads to fastq: " + fqfn
+        bam.close()
+        bam = pysam.Samfile(bamfn, 'rb')
 
-    with open(fqfn, 'w') as fq:
-        for read in bam.fetch(until_eof=True):
-            if not read.is_secondary:
-                if read.qname in rnames:
-                    fq.write('@' + read.qname + ':' + str(uuid4()).split('-')[0] + '\n')
-                    if read.is_reverse:
-                        fq.write(rc(read.seq) + '\n+\n' + read.qual[::-1] + '\n')
-                    else:
-                        fq.write(read.seq + '\n+\n' + read.qual + '\n')
-    bam.close()
-    return fqfn
+        print "INFO\t" + now() + "\tselected " + str(len(rnames)) + " read names based on coordinates"
+        print "INFO\t" + now() + "\tdumping selected reads to fastq: " + fqfn
+
+        with open(fqfn, 'w') as fq:
+            for read in bam.fetch(until_eof=True):
+                if not read.is_secondary:
+                    if read.qname in rnames:
+                        fq.write('@' + read.qname + ':' + str(uuid4()).split('-')[0] + '\n')
+                        if read.is_reverse:
+                            fq.write(rc(read.seq) + '\n+\n' + read.qual[::-1] + '\n')
+                        else:
+                            fq.write(read.seq + '\n+\n' + read.qual + '\n')
+        bam.close()
+    return fqfnlist
 
 
 def main(args):
@@ -1080,7 +1109,7 @@ def main(args):
         if args.premapped:
             sys.stderr.write("ERROR\t" + now() + "\t--targets cannot be called with --premapped\n")
             sys.exit(1)
-        fqs.append(maketargetfastq(args.outdir, args.input, args.targets))
+        fqs = maketargetfastq(args.outdir, args.input, args.targets)
 
     else:    
         if args.input.endswith('.bam') and not args.premapped:
@@ -1106,8 +1135,9 @@ def main(args):
 
     assert refbamfn is not None
 
-    sys.stderr.write("INFO: " + now() + " marking likely PCR duplicates\n")
-    markdups(refbamfn, args.picard)
+    if not args.skipmarkdups:
+        sys.stderr.write("INFO: " + now() + " marking likely PCR duplicates\n")
+        markdups(refbamfn, args.picard)
 
     sys.stderr.write("INFO: " + now() + " finding clipped reads from genome alignment\n")
     clipfastq = fetch_clipped_reads(refbamfn, minclip=int(args.minclip))
@@ -1207,6 +1237,10 @@ if __name__ == '__main__':
                         help='use BAM specified by -1 (must be .bam) directly instead of remapping')
     parser.add_argument('--clusterbam',  action='store_true', default=False, 
                         help='output genome and TE clusters to BAMs')
+    parser.add_argument('--pacbio', action='store_true', default=False,
+                        help='PacBio mode ... experimental, uses -x pacbio parameter for bwa mem')
+    parser.add_argument('--skipmarkdups', action='store_true', default=False,
+                        help='skip duplicate marking step: PCR duplicates will count toward breakpoint support')
 
     args = parser.parse_args()
     main(args)

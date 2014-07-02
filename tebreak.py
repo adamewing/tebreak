@@ -38,18 +38,21 @@ class SplitRead:
         self.chrom     = chrom
         self.tlen      = int(tlen)
         self.embedded  = False # nonref TE is completely embedded in read
+        self.breakside = '' # L or R
 
         self.tclass, self.tname = tname.split(':')
         
 
         if gread.qstart < gread.rlen - gread.qend:
             self.breakloc  = gread.positions[-1] # breakpoint on right
+            self.breakside = 'R'
             if self.tread.is_reverse:
                 self.teside = '3'
             else:
                 self.teside = '5'
         else:
             self.breakloc  = gread.positions[0] # breakpoint on left
+            self.breakside = 'L'
             if self.tread.is_reverse:
                 self.teside = '5'
             else:
@@ -93,14 +96,20 @@ class SplitRead:
         nm = [value for (tag, value) in self.gread.tags if tag == 'NM'][0]
         return 1.0 - (float(nm)/float(self.gread.alen))
 
+    def gmatchlen(self):
+        ''' return length of genome match '''
+        return self.gread.alen
+
+    def tmatchlen(self):
+        ''' return length of TE match '''
+        return self.tread.alen
+
     def getbreakseq(self, flank=5):
         ''' get breakend sequence from genome alignments '''
-
         leftseq  = ''
         rightseq = ''
 
-        #if self.gread.qstart < self.gread.rlen - self.gread.qend: # right
-        if self.
+        if self.gread.qstart < self.gread.rlen - self.gread.qend: # right
             leftseq  = self.gread.seq[self.gread.qend-flank:self.gread.qend].upper()
             rightseq = self.gread.seq[self.gread.qend:self.gread.qend+flank].lower()
         else: # left
@@ -110,6 +119,7 @@ class SplitRead:
         return leftseq + rightseq
 
     def getRG(self):
+        ''' return read group from RG aux tag '''
         for tag, val in self.gread.tags:
             if tag == 'RG':
                 return val
@@ -187,6 +197,11 @@ class Cluster:
         ''' return list of genome-aligned pysam.AlignedRead objects '''
         return [sr.tread for sr in self._splitreads]
 
+    def bside(self, breakloc):
+        ''' return list of breaksides for given breakloc '''
+        bs = [sr.breakside for sr in self._splitreads if sr.breakloc == breakloc]
+        return Counter(bs).most_common(1)[0][0]
+
     def te_classes(self):
         ''' return distinct classes of TE in cluster '''
         return list(set([read.tclass for read in self._splitreads]))
@@ -199,6 +214,18 @@ class Cluster:
         ''' return distinct classes of TE in cluster '''
         return list(set([read.teside for read in self._splitreads]))
 
+    def be_sides(self):
+        ''' return distinct breakend sides (L or R) '''
+        return list(set([read.breakside for read in self._splitreads]))
+
+    def max_te_align(self, breakloc):
+        ''' return maximum te alignment length for breakend '''
+        return max([sr.tmatchlen() for sr in self._splitreads if sr.breakloc == breakloc])
+
+    def max_ge_align(self, breakloc):
+        ''' return maximum genome alignment length for breakend '''
+        return max([sr.gmatchlen() for sr in self._splitreads if sr.breakloc == breakloc])
+
     def guess_telen(self):
         ''' approximate TE length based on TE alignments'''
         extrema = self.te_extrema()
@@ -207,13 +234,17 @@ class Cluster:
     def te_extrema(self):
         ''' return maximum and minimum positions relative to the TE references '''
         te_positions = []
-        [[te_positions.append(tepos) for tepos in sr.tread.positions] for sr in self._splitreads]
+        [[te_positions.append(tepos) for tepos in sr.tread.positions] for sr in self._splitreads if sr.tclass != 'POLYA']
+        if len(te_positions) == 0:
+            te_positions.append(-1)
         return min(te_positions), max(te_positions)
 
     def max_breakpoint_support(self):
+        ''' returns the count of the breakpoint with the most support '''
         return self.all_breakpoints().most_common(1)[0][1]
 
     def all_breakpoints(self):
+        ''' returns collections.Counter of breakpoints '''
         return Counter([read.breakloc for read in self._splitreads])
 
     def best_breakpoints(self, refbamfn): #TODO left-shift
@@ -229,9 +260,11 @@ class Cluster:
         for breakend, count in self.all_breakpoints().most_common():
             n += 1
             if len(be) < 2:
-                be.append([breakend, count])
-                if n == 2:
-                    mech = self.guess_mechanism(refbamfn, be[0][0], breakend)
+                if self.bside(breakend) not in sides:
+                    sides.append(self.bside(breakend))
+                    be.append([breakend, count])
+                    if n == 2:
+                        mech = self.guess_mechanism(refbamfn, be[0][0], breakend)
             else:
                 if count == be[-1][1]: # next best breakend is tied for occurance count
                     newmech = self.guess_mechanism(refbamfn, be[0][0], breakend)
@@ -312,6 +345,12 @@ class Cluster:
     def revbreaks(self):
         ''' return count of splitreads supporting a reverse orientation '''
         return len([sr for sr in self._splitreads if sr.reverseorient()])
+
+    def diversity(self):
+        ''' secondary alignments might not end up marked as duplicates and can pile up in high depth samples '''
+        ''' current solution is to return the number of unique mappings based on position + CIGAR string '''
+        uniqmaps = list(set([str(sr.gread.pos) + str(sr.gread.cigarstring) for sr in self._splitreads]))
+        return len(uniqmaps)
 
     def mean_genome_qual(self):
         quals = [sr.gread.mapq for sr in self._splitreads]
@@ -491,6 +530,8 @@ def print_vcfheader(fh, samplename):
     ##INFO=<ID=TESIDES,Number=.,Type=Integer,Description="Note if 3prime and 5prime ends are detected">
     ##INFO=<ID=MECH,Number=1,Type=String,Description="Hints about the insertion mechanism (TSD, Deletion, EndoMinus, etc.)">
     ##INFO=<ID=KNOWN,Number=1,Type=Integer,Description="1=Known from a previous study (in whitelist)">
+    ##INFO=<ID=INV,Number=1,Type=Integer,Description="1=Inverted insertion">
+    ##INFO=<ID=TSDLEN,Number=1,Type=Integer,Description="TSD Length">
     ##FORMAT=<ID=BREAKS,Number=.,Type=String,Description="Positions:Counts of all breakends detected">
     ##FORMAT=<ID=POSBREAKSEQ,Number=1,Type=String,Description="Sequence of the POS breakend">
     ##FORMAT=<ID=ENDBREAKSEQ,Number=1,Type=String,Description="Sequence of the INFO.END breakend">
@@ -809,6 +850,11 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, 
                 reject = True
                 subcluster.FILTER.append('csize')
 
+            # need at least minsize distinct mappings in cluster
+            if cluster.diversity() < minsize:
+                reject = True
+                subcluster.FILTER.append('diversity')
+
             # filter out clusters without both TE ends represented if user wants this
             if bothends and len(cluster.te_sides()) < 2:
                 reject = True
@@ -864,6 +910,7 @@ def annotate(clusters, reffa, refbamfn, allclusters=False, dbsnp=None, minclip=1
         cluster.FORMAT['TESIDES'] = ','.join(cluster.te_sides())
         cluster.FORMAT['FWD'] = str(cluster.fwdbreaks())
         cluster.FORMAT['REV'] = str(cluster.revbreaks())
+        cluster.FORMAT['DIV'] = str(cluster.diversity())
 
         tetypes = []
         for tetype, count in cluster.te_names().iteritems():
@@ -879,10 +926,20 @@ def annotate(clusters, reffa, refbamfn, allclusters=False, dbsnp=None, minclip=1
             cluster.POS = leftbreak
             cluster.INFO['END'] = leftbreak
 
+            cluster.FORMAT['LEFTMAXTEALN'] = cluster.max_te_align(leftbreak) 
+            cluster.FORMAT['LEFTMAXGEALN'] = cluster.max_ge_align(leftbreak)
+
             if rightbreak is not None:
                 cluster.INFO['END']   = rightbreak
                 cluster.INFO['MECH']  = mech
                 cluster.INFO['TELEN'] = cluster.guess_telen()
+                cluster.INFO['INV']   = '0'
+                if len(cluster.te_sides()) < len(cluster.be_sides()):
+                    cluster.INFO['INV'] = '1'
+
+                cluster.INFO['TSDLEN'] = abs(rightbreak-leftbreak)
+                cluster.FORMAT['RIGHTMAXTEALN'] = cluster.max_te_align(rightbreak) 
+                cluster.FORMAT['RIGHTMAXGEALN'] = cluster.max_ge_align(rightbreak)
 
             if dbsnp is not None:
                 snps = cluster.checksnps(dbsnp, refbamfn)

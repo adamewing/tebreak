@@ -226,6 +226,14 @@ class Cluster:
         ''' return maximum genome alignment length for breakend '''
         return max([sr.gmatchlen() for sr in self._splitreads if sr.breakloc == breakloc])
 
+    def min_te_match(self, breakloc):
+        ''' return minimum te match fraction for breakend '''
+        return min([sr.get_tematch() for sr in self._splitreads if sr.breakloc == breakloc])
+
+    def min_ge_match(self, breakloc):
+        ''' return minimum te match fraction for breakend '''
+        return min([sr.get_gematch() for sr in self._splitreads if sr.breakloc == breakloc])
+
     def guess_telen(self):
         ''' approximate TE length based on TE alignments'''
         extrema = self.te_extrema()
@@ -238,6 +246,12 @@ class Cluster:
         if len(te_positions) == 0:
             te_positions.append(-1)
         return min(te_positions), max(te_positions)
+
+    def ge_extrema(self):
+        ''' return maximum and minimum positions relative to the genome reference '''
+        ge_positions = []
+        [[ge_positions.append(gepos) for gepos in sr.gread.positions] for sr in self._splitreads]
+        return min(ge_positions), max(ge_positions)
 
     def max_breakpoint_support(self):
         ''' returns the count of the breakpoint with the most support '''
@@ -799,7 +813,28 @@ def build_te_clusters(splitreads, searchdist=100): # TODO PARAM
     return clusters
 
 
-def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, maskfile=None, whitelistfile=None, minctglen=1e7, minq=1, unclip=1.0):
+def checkmap(mapfn, chrom, start, end):
+    ''' return average mappability across chrom:start-end region '''
+    map = pysam.Tabixfile(mapfn)
+    scores = []
+
+    if chrom in map.contigs:
+        for rec in map.fetch(chrom, int(start), int(end)):
+            mchrom, mstart, mend, mscore = rec.strip().split()
+            mstart, mend = int(mstart), int(mend)
+            mscore = float(mscore)
+
+            while mstart < mend and mstart:
+                mstart += 1
+                if mstart >= int(start) and mstart <= int(end):
+                    scores.append(mscore)
+
+        return sum(scores) / float(len(scores))
+    else:
+        return 0.0
+
+
+def filter_clusters(clusters, active_elts, refbamfn, minsize=4, mapfile=None, bothends=False, maskfile=None, whitelistfile=None, minctglen=1e7, minq=1, unclip=1.0):
     ''' return only clusters meeting cutoffs '''
     ''' active_elts is a list of active transposable element names (e.g. L1Hs) '''
     ''' refbamfn is the filename of the reference-aligned BAM '''
@@ -871,6 +906,13 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, 
                 reject = True
                 subcluster.FILTER.append('ctgsize')
 
+            if mapfile is not None:
+                gmin, gmax = subcluster.ge_extrema()
+                mapscore = checkmap(mapfile, subcluster.chrom, gmin, gmax)
+                if mapscore < 0.5:
+                    reject = True
+                    subcluster.FILTER.append('mapscore')
+
             # save the more time-consuming cutoffs for last... check unclipped read mappings:
             if not reject and unclip < 1.0:
                 subcluster.FORMAT['UCF'] = cluster.unclipfrac(refbamfn)
@@ -894,7 +936,7 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, bothends=False, 
     return filtered
 
 
-def annotate(clusters, reffa, refbamfn, allclusters=False, dbsnp=None, minclip=10, genotype=False):
+def annotate(clusters, reffa, refbamfn, mapfile=None, allclusters=False, dbsnp=None, minclip=10, genotype=False):
     ''' populate VCF INFO field with information about the insertion '''
 
     ref = pysam.Fastafile(reffa)
@@ -923,11 +965,17 @@ def annotate(clusters, reffa, refbamfn, allclusters=False, dbsnp=None, minclip=1
             if rightbreak is not None and leftbreak > rightbreak:
                 leftbreak, rightbreak = rightbreak, leftbreak
 
+            if mapfile is not None:
+                gmin, gmax = cluster.ge_extrema()
+                cluster.INFO['MAPSCORE'] = checkmap(mapfile, cluster.chrom, gmin, gmax)
+
             cluster.POS = leftbreak
             cluster.INFO['END'] = leftbreak
 
-            cluster.FORMAT['LEFTMAXTEALN'] = cluster.max_te_align(leftbreak) 
-            cluster.FORMAT['LEFTMAXGEALN'] = cluster.max_ge_align(leftbreak)
+            cluster.FORMAT['LEFTMAXTEALIGN'] = cluster.max_te_align(leftbreak) 
+            cluster.FORMAT['LEFTMAXGEALIGN'] = cluster.max_ge_align(leftbreak)
+            cluster.FORMAT['LEFTMINTEMATCH'] = str(cluster.min_te_match(leftbreak))
+            cluster.FORMAT['LEFTMINGEMATCH'] = str(cluster.min_ge_match(leftbreak))
 
             if rightbreak is not None:
                 cluster.INFO['END']   = rightbreak
@@ -938,8 +986,10 @@ def annotate(clusters, reffa, refbamfn, allclusters=False, dbsnp=None, minclip=1
                     cluster.INFO['INV'] = '1'
 
                 cluster.INFO['TSDLEN'] = abs(rightbreak-leftbreak)
-                cluster.FORMAT['RIGHTMAXTEALN'] = cluster.max_te_align(rightbreak) 
-                cluster.FORMAT['RIGHTMAXGEALN'] = cluster.max_ge_align(rightbreak)
+                cluster.FORMAT['RIGHTMAXTEALIGN'] = cluster.max_te_align(rightbreak) 
+                cluster.FORMAT['RIGHTMAXGEALIGN'] = cluster.max_ge_align(rightbreak)
+                cluster.FORMAT['RIGHTMINTEMATCH'] = str(cluster.min_te_match(rightbreak))
+                cluster.FORMAT['RIGHTMINGEMATCH'] = str(cluster.min_ge_match(rightbreak))
 
             if dbsnp is not None:
                 snps = cluster.checksnps(dbsnp, refbamfn)
@@ -1214,12 +1264,13 @@ def main(args):
 
     sys.stderr.write("INFO: " + now() + " filtering clusters\n")
     clusters = filter_clusters(clusters, args.active.split(','), refbamfn, 
-                               minsize=int(args.mincluster), maskfile=args.mask,
+                               mapfile=args.mapfilter, minsize=int(args.mincluster), maskfile=args.mask,
                                whitelistfile=args.whitelist, unclip=float(args.unclip), minq=int(args.minq))
     sys.stderr.write("INFO: " + now() + " passing cluster count: " + str(len([c for c in clusters if c.FILTER[0] == 'PASS'])) + "\n")
 
     sys.stderr.write("INFO: " + now() + " annotating clusters\n")
-    clusters = annotate(clusters, args.ref, refbamfn, allclusters=args.processfiltered, dbsnp=args.snps, minclip=args.minclip, genotype=args.genotype)
+    clusters = annotate(clusters, args.ref, refbamfn, mapfile=args.mapfilter, allclusters=args.processfiltered, 
+                        dbsnp=args.snps, minclip=args.minclip, genotype=args.genotype)
     assert clusters
 
     sys.stderr.write("INFO: " + now() + " writing VCF\n")
@@ -1285,6 +1336,8 @@ if __name__ == '__main__':
                         help='minimum identity cutoff for matches to TE library (default=0.9)')
     parser.add_argument('--mingenomematch', dest='mingenomematch', default=0.98,
                         help='minimum identity cutoff for matches to reference genome (default=0.98)')
+    parser.add_argument('--mapfilter', dest='mapfilter', default=None,
+                        help='mappability filter (from UCSC mappability track) ... recommended!')
     parser.add_argument('--consensus', dest='consensus', default=None,
                         help='build consensus sequences from breakends and output as FASTA to specified file')
 

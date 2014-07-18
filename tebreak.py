@@ -543,7 +543,7 @@ def print_vcfheader(fh, samplename):
     ##INFO=<ID=END,Number=1,Type=Integer,Description="Position of second breakend (same as first if not known)">
     ##INFO=<ID=TESIDES,Number=.,Type=Integer,Description="Note if 3prime and 5prime ends are detected">
     ##INFO=<ID=MECH,Number=1,Type=String,Description="Hints about the insertion mechanism (TSD, Deletion, EndoMinus, etc.)">
-    ##INFO=<ID=KNOWN,Number=1,Type=Integer,Description="1=Known from a previous study (in whitelist)">
+    ##INFO=<ID=KNOWN,Number=1,Type=Integer,Description="1=Known from a previous study">
     ##INFO=<ID=INV,Number=1,Type=Integer,Description="1=Inverted insertion">
     ##INFO=<ID=TSDLEN,Number=1,Type=Integer,Description="TSD Length">
     ##FORMAT=<ID=BREAKS,Number=.,Type=String,Description="Positions:Counts of all breakends detected">
@@ -834,21 +834,17 @@ def checkmap(mapfn, chrom, start, end):
         return 0.0
 
 
-def filter_clusters(clusters, active_elts, refbamfn, minsize=4, mapfile=None, bothends=False, maskfile=None, whitelistfile=None, minctglen=1e7, minq=1, unclip=1.0):
+def filter_clusters(clusters, active_elts, refbamfn, minsize=4, mapfile=None, bothends=False, maskfile=None, minctglen=1e7, minq=1, unclip=1.0):
     ''' return only clusters meeting cutoffs '''
     ''' active_elts is a list of active transposable element names (e.g. L1Hs) '''
     ''' refbamfn is the filename of the reference-aligned BAM '''
-    ''' maskfile / whitelist should be a tabix-indexed BED file of intervals to ignore (e.g. L1Hs reference locations) '''
+    ''' maskfile should be a tabix-indexed BED file of intervals to ignore (e.g. L1Hs reference locations) '''
     filtered = []
     active_elts = Counter(active_elts)
 
     mask = None
     if maskfile is not None:
         mask = pysam.Tabixfile(maskfile)
-
-    whitelist = None
-    if whitelistfile is not None:
-        whitelist = pysam.Tabixfile(whitelistfile)
 
     bam = pysam.Samfile(refbamfn, 'rb')
     chromlen = dict(zip(bam.references, bam.lengths))
@@ -919,13 +915,6 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, mapfile=None, bo
                 if subcluster.FORMAT['UCF'] > unclip:
                     reject = True
                     subcluster.FILTER.append('unclipfrac')
-
-            if 'masked' not in subcluster.FILTER and whitelist is not None and subcluster.chrom in whitelist.contigs:
-                tclasses = [wl.strip().split()[-1] for wl in whitelist.fetch(subcluster.chrom, subcluster._start, subcluster._end+1)]
-                if tclass in tclasses:
-                    reject = False
-                    subcluster.INFO['KNOWN'] = '1'
-                    subcluster.FILTER = []
 
             if not reject:
                 subcluster.FILTER.append('PASS')
@@ -1264,8 +1253,7 @@ def main(args):
 
     sys.stderr.write("INFO: " + now() + " filtering clusters\n")
     clusters = filter_clusters(clusters, args.active.split(','), refbamfn, 
-                               mapfile=args.mapfilter, minsize=int(args.mincluster), maskfile=args.mask,
-                               whitelistfile=args.whitelist, unclip=float(args.unclip), minq=int(args.minq))
+                               mapfile=args.mapfilter, minsize=int(args.mincluster), maskfile=args.mask, unclip=float(args.unclip), minq=int(args.minq))
     sys.stderr.write("INFO: " + now() + " passing cluster count: " + str(len([c for c in clusters if c.FILTER[0] == 'PASS'])) + "\n")
 
     sys.stderr.write("INFO: " + now() + " annotating clusters\n")
@@ -1313,8 +1301,6 @@ if __name__ == '__main__':
                         help='unique sample name (default = generated UUID4)')
     parser.add_argument('-m', '--mask', dest='mask', default=None, 
                         help='genome coordinate mask (recommended!!) - expects tabix-indexed BED-3')
-    parser.add_argument('-w', '--whitelist', dest='whitelist', default=None,
-                        help='PASS any non-mask insertions found tabix-indexed BED-3 plus a fourth column corresponding to L1/ALU/SVA')
     parser.add_argument('-s', '--snps', dest='snps', default=None,
                         help='dbSNP VCF (tabix-indexed) to link SNPs with insertions')
     parser.add_argument('-t', '--threads', dest='threads', default=1, 

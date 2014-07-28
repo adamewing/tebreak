@@ -829,7 +829,10 @@ def checkmap(mapfn, chrom, start, end):
                 if mstart >= int(start) and mstart <= int(end):
                     scores.append(mscore)
 
-        return sum(scores) / float(len(scores))
+        if len(scores) > 0:
+            return sum(scores) / float(len(scores))
+        else:
+            return 0.0
     else:
         return 0.0
 

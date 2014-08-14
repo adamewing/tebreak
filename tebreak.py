@@ -837,13 +837,11 @@ def checkmap(mapfn, chrom, start, end):
         return 0.0
 
 
-def filter_clusters(clusters, active_elts, refbamfn, minsize=4, mapfile=None, bothends=False, maskfile=None, minctglen=1e7, minq=1, unclip=1.0):
+def filter_clusters(clusters, refbamfn, minsize=4, mapfile=None, bothends=False, maskfile=None, minctglen=1e7, minq=1, unclip=1.0):
     ''' return only clusters meeting cutoffs '''
-    ''' active_elts is a list of active transposable element names (e.g. L1Hs) '''
     ''' refbamfn is the filename of the reference-aligned BAM '''
     ''' maskfile should be a tabix-indexed BED file of intervals to ignore (e.g. L1Hs reference locations) '''
     filtered = []
-    active_elts = Counter(active_elts)
 
     mask = None
     if maskfile is not None:
@@ -867,9 +865,9 @@ def filter_clusters(clusters, active_elts, refbamfn, minsize=4, mapfile=None, bo
 
             reject = True
             
-            # at least one alignment in a cluster has to be from an active element
+            # at least one alignment in a cluster has to be non-POLYA
             for tn in subcluster.te_names():
-                if tn in active_elts:
+                if tn != 'POLYA':
                     reject = False
                     
             if reject:
@@ -1013,7 +1011,7 @@ def annotate(clusters, reffa, refbamfn, mapfile=None, allclusters=False, dbsnp=N
     return clusters
 
 
-def consensus(cluster, breakend):
+def consensus(cluster, breakend, threads=1):
     ''' create consensus sequence for a breakend '''
     subcluster = cluster.subcluster_by_breakend([breakend])
     greads = [sr.gread for sr in subcluster._splitreads]
@@ -1026,7 +1024,7 @@ def consensus(cluster, breakend):
     with open(tmpfa, 'w') as fa:
         [fa.write('>' + gread.qname + '\n' + gread.seq + '\n') for gread in greads]
 
-    alnfa = mafft(tmpfa)
+    alnfa = mafft(tmpfa, threads=threads)
     msa = MSA(alnfa)
 
     os.remove(tmpfa)
@@ -1102,14 +1100,14 @@ def bamoutput(clusters, refbamfn, tebamfn, prefix, passonly=False):
     teout.close()
 
 
-def consensus_fasta(clusters, outfile, passonly=True):
+def consensus_fasta(clusters, outfile, passonly=True, threads=1):
     with open(outfile, 'w') as cons:
         for cluster in clusters:
             if passonly and cluster.FILTER[0] == 'PASS':
                 outname = cluster.chrom + ':' + str(cluster.POS) + ':' + cluster.ALT.lstrip('<').rstrip('>').split(':')[-1]
-                cons.write('>' + outname + ':1\n' + consensus(cluster, cluster.POS) + '\n')
+                cons.write('>' + outname + ':1\n' + consensus(cluster, cluster.POS, threads=threads) + '\n')
                 if cluster.INFO.get('END') and cluster.POS != cluster.INFO['END']:
-                    cons.write('>' + outname + ':2\n' + consensus(cluster, cluster.INFO['END']) + '\n')
+                    cons.write('>' + outname + ':2\n' + consensus(cluster, cluster.INFO['END'], threads=threads) + '\n')
 
 
 def markdups(inbam, picard):
@@ -1255,8 +1253,7 @@ def main(args):
     sys.stderr.write("INFO: " + now() + " cluster count: " + str(len(clusters)) + "\n")
 
     sys.stderr.write("INFO: " + now() + " filtering clusters\n")
-    clusters = filter_clusters(clusters, args.active.split(','), refbamfn, 
-                               mapfile=args.mapfilter, minsize=int(args.mincluster), maskfile=args.mask, unclip=float(args.unclip), minq=int(args.minq))
+    clusters = filter_clusters(clusters, refbamfn, mapfile=args.mapfilter, minsize=int(args.mincluster), maskfile=args.mask, unclip=float(args.unclip), minq=int(args.minq))
     sys.stderr.write("INFO: " + now() + " passing cluster count: " + str(len([c for c in clusters if c.FILTER[0] == 'PASS'])) + "\n")
 
     sys.stderr.write("INFO: " + now() + " annotating clusters\n")
@@ -1273,7 +1270,7 @@ def main(args):
 
     if args.consensus is not None:
         sys.stderr.write("INFO: " + now() + " compiling consensus sequences for breakends and outputting to " + args.consensus + "\n")
-        consensus_fasta(clusters, args.consensus)
+        consensus_fasta(clusters, args.consensus, threads=args.threads)
 
 
 if __name__ == '__main__':
@@ -1291,9 +1288,6 @@ if __name__ == '__main__':
                         help='output directory')
     parser.add_argument('-p', '--picard', dest='picard', required=True,
                         help='Picard install directory, needed for MarkDuplicates.jar')
-
-    parser.add_argument('-a', '--active', dest='active', default='L1Hs',
-                        help='Comma-delimited list of relevant (i.e. active) subfamilies to target (default=L1Hs)')
 
     parser.add_argument('--targets', default=None,
                         help='BED file of target regions: only reads and mates captured from targed region are analysed')

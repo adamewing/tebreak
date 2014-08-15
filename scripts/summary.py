@@ -2,7 +2,8 @@
 
 import sys
 import os
-import argparse 
+import argparse
+import blatfilter
 
 from pysam import Tabixfile
 from re import search
@@ -264,7 +265,7 @@ def parseBED(chrom, start, end, bedhandle):
     return list(set(annotations))
 
 
-def summary(tldlist, wb, tophits=False, excludelibs=None):
+def summary(tldlist, wb, blat_genomeref, blat_teref, blat_gport, blat_tport, tophits=False, excludelibs=None):
     ''' sequential merge of TLDs (two-level dictionaries) '''
     mastertld = tldlist[0]
     if len(tldlist) > 1:
@@ -280,14 +281,54 @@ def summary(tldlist, wb, tophits=False, excludelibs=None):
         if tophits:
             if mastertld[insloc]['Known_Nonref'] != 'NA':
                 filtered[insloc] = True
+
             if excludelibs is not None:
                 for lib in mastertld[insloc]['Library_List'].split(','):
                     if lib in excludelibs:
                         filtered[insloc] = True
 
+        ldata = {}
+        rdata = {}
+        if insloc not in filtered and tophits: # only run BLAT filter for 'tophits'
+            if 'Bad_BLAT' not in columns:
+                columns.append('Bad_BLAT')
+
+            if 'BLAT_Filter_Data_Left' not in columns:
+                columns.append('BLAT_Filter_Data_Left')
+
+            if 'BLAT_Filter_Data_Right' not in columns:
+                columns.append('BLAT_Filter_Data_Right')
+
+            if mastertld[insloc]['Left_Consensus'] != 'NA':
+                chrom = mastertld[insloc]['Chr']
+                lpos  = mastertld[insloc]['Left_Position']
+                lcons = mastertld[insloc]['Left_Consensus']
+                ldata = blatfilter.checkseq(lcons, chrom, lpos, blat_genomeref, blat_teref, blat_gport, blat_tport)
+                mastertld[insloc]['BLAT_Filter_Data_Left'] = str(ldata)
+                mastertld[insloc]['BLAT_Filter_Data_Right'] = 'NA' # default
+
+
+            if mastertld[insloc]['Right_Consensus'] != 'NA':
+                chrom = mastertld[insloc]['Chr']
+                rpos  = mastertld[insloc]['Right_Position']
+                rcons = mastertld[insloc]['Right_Consensus']
+                rdata = blatfilter.checkseq(rcons, chrom, rpos, blat_genomeref, blat_teref, blat_gport, blat_tport)
+                mastertld[insloc]['BLAT_Filter_Data_Right'] = str(rdata)
+
+            badblat = True
+            if 'pass' in ldata and ldata['pass']:
+                badblat = False
+
+            if 'pass' in rdata and rdata['pass']:
+                badblat = False
+
+            mastertld[insloc]['Bad_BLAT'] = str(badblat)
+
     for insloc in filtered.keys():
         del mastertld[insloc]
  
+    # TODO: move annotation here
+
     ws = None
  
     if tophits:
@@ -418,6 +459,9 @@ def main(args):
     wb = Workbook()
     tldlist = []
 
+    assert args.genomeref.endswith('2bit')
+    assert args.teref.endswith('2bit')
+
     exlibs = None
     if args.excludelibs is not None:
         with open(args.excludelibs, 'r') as exfile:
@@ -436,10 +480,23 @@ def main(args):
             tld,wb = addsheet(args, invcf, consfasta, wb, sname)
             tldlist.append(tld)
 
-    wb = summary(tldlist, wb)
-    wb = summary(tldlist, wb, tophits=True, excludelibs=exlibs)
+    p = blatfilter.start_blat_server(args.genomeref, port=args.refport)
+    t = blatfilter.start_blat_server(args.teref, port=args.teport)
 
-    wb.save(args.out)
+    try:
+        wb = summary(tldlist, wb, args.genomeref, args.teref, args.refport, args.teport)
+        wb = summary(tldlist, wb, args.genomeref, args.teref, args.refport, args.teport, tophits=True, excludelibs=exlibs)
+        wb.save(args.out)
+
+    except Exception, e:
+        sys.stderr.write("*"*60 + "\nerror in blat filter:\n")
+        traceback.print_exc(file=sys.stderr)
+        sys.stderr.write("*"*60 + "\n")
+
+    print "killing BLAT server(s) ..."
+    p.kill()
+    t.kill()
+
 
 
 if __name__ == '__main__':
@@ -452,5 +509,9 @@ if __name__ == '__main__':
     parser.add_argument('--bed', default=None, help='BED annotation file (regulatory info)')
     parser.add_argument('--refwindow', default=500, help='distance cutoff for finding reference elements')
     parser.add_argument('--excludelibs', default=None, help='file containing list of libraries to exclude')
+    parser.add_argument('--genomeref', required=True, help='genome BLAT reference (2bit)')
+    parser.add_argument('--teref', required=True, help='TE BLAT reference (2bit)')
+    parser.add_argument('--refport', default=9999)
+    parser.add_argument('--teport', default=9998)
     args = parser.parse_args()
     main(args)

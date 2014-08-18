@@ -222,7 +222,7 @@ def checkseq(cons, chrom, pos, genomeref, teref, refport, teport, maptabix=None)
         if data['avgmap'] < 0.85:
             data['pass'] = False
 
-    if data['tematchlen'] < 20:
+    if data['tematchlen'] < 30:
         data['pass'] = False
 
     os.remove(fa)

@@ -404,8 +404,8 @@ def mergetlds(tld1, tld2):
                 if float(tld2[insloc]['Family_Conf']) > float(tld1[insloc]['Family_Conf']):
                     best_family = tld2
 
-                newends = tld1[insloc]['Found_Ends'] + ',' + tld2[insloc]['Found_Ends']
-                newends = ','.join(list(set(newends.split(','))))
+                #newends = tld1[insloc]['Found_Ends'] + ',' + tld2[insloc]['Found_Ends']
+                #newends = ','.join(list(set(newends.split(','))))
 
                 newlength = tld1[insloc]['Elt_Length']
                 if newlength == 'NA' and tld2[insloc]['Elt_Length'] != 'NA':
@@ -437,7 +437,7 @@ def mergetlds(tld1, tld2):
                 newtld[insloc]['Family']          = best_family[insloc]['Family']
                 newtld[insloc]['Family_Conf']     = best_family[insloc]['Family_Conf']
                 newtld[insloc]['Ref_TE']          = default[insloc]['Ref_TE']
-                newtld[insloc]['Found_Ends']      = newends
+                #newtld[insloc]['Found_Ends']      = newends
                 newtld[insloc]['Elt_Length']      = newlength
                 newtld[insloc]['TSD']             = best_tsd[insloc]['TSD']
                 newtld[insloc]['TSD_Length']      = best_tsd[insloc]['TSD_Length']

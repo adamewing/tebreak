@@ -23,7 +23,6 @@ columns = ['Chr',
            'Family',
            'Family_Conf',
            'Ref_TE',
-           'Found_Ends',
            'Elt_Length',
            'TE_Min_Position',
            'TE_Max_Position',
@@ -119,9 +118,6 @@ def vcf2tld(args, invcf, consfasta):
 
                     famconf = float(famcount)/float(famtotal)
 
-
-                    eltends = formatdict['TESIDES']
-
                     eltlen  = 'NA'
                     if 'TELEN' in infodict:
                         eltlen = infodict['TELEN']
@@ -185,9 +181,9 @@ def vcf2tld(args, invcf, consfasta):
                     reg    = 'NA'
 
                     data = [chrom, start, end, posconf, strand, strandconf, alt, family, famconf, refelt,
-                            eltends, eltlen, teminpos, temaxpos, TSD, tlen, DEL, dlen, rightsnip, leftsnip,
-                            leftcons, rightcons, lsupport, rsupport, support, libcount, liblist, mapscore,
-                            nonref, genes, reg]
+                            eltlen, teminpos, temaxpos, TSD, tlen, DEL, dlen, rightsnip, leftsnip, leftcons,
+                            rightcons, lsupport, rsupport, support, libcount, liblist, mapscore, nonref, 
+                            genes, reg]
 
                     assert len(data) == len(columns), "column count: " + str(len(columns)) + " data count: " + str(len(data))
 

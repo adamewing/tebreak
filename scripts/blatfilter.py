@@ -142,7 +142,30 @@ def te_parsepsl(psl):
     return recs
 
 
-def checkseq(cons, chrom, pos, genomeref, teref, refport, teport):
+def checkmap(maptabix, chrom, start, end):
+    ''' return average mappability across chrom:start-end region '''
+    scores = []
+
+    if chrom in maptabix.contigs:
+        for rec in maptabix.fetch(chrom, int(start), int(end)):
+            mchrom, mstart, mend, mscore = rec.strip().split()
+            mstart, mend = int(mstart), int(mend)
+            mscore = float(mscore)
+
+            while mstart < mend and mstart:
+                mstart += 1
+                if mstart >= int(start) and mstart <= int(end):
+                    scores.append(mscore)
+
+        if len(scores) > 0:
+            return sum(scores) / float(len(scores))
+        else:
+            return 0.0
+    else:
+        return 0.0
+
+
+def checkseq(cons, chrom, pos, genomeref, teref, refport, teport, maptabix=None):
     ''' find breakpoint chrom:pos in BLAT output '''
     pos = int(pos)
     chrom = chrom.replace('chr', '')
@@ -183,6 +206,10 @@ def checkseq(cons, chrom, pos, genomeref, teref, refport, teport):
         data['teclass']     = te_recs[0].tName.split(':')[0]
         data['tefamily']    = te_recs[0].tName.split(':')[-1]
 
+        if maptabix is not None:
+            if chrom in maptabix.contigs:
+                data['avgmap'] = checkmap(maptabix, chrom, int(ref_recs[0].tStart), int(ref_recs[0].tEnd))
+
     if data['tematch'] < 0.95:
         data['pass'] = False
 
@@ -190,6 +217,13 @@ def checkseq(cons, chrom, pos, genomeref, teref, refport, teport):
         data['pass'] = False
 
     if data['refmatchlen'] > len(cons):
+        data['pass'] = False
+
+    if maptabix is not None:
+        if data['avgmap'] < 0.8:
+            data['pass'] = False
+
+    if data['tematchlen'] < 20:
         data['pass'] = False
 
     os.remove(fa)
@@ -202,8 +236,8 @@ def checkseq(cons, chrom, pos, genomeref, teref, refport, teport):
 def main(args):
     chrom1, pos1 = args.pos1.split(':')
 
-    #p = start_blat_server(args.genomeref, port=args.refport)
-    #t = start_blat_server(args.teref, port=args.teport)
+    p = start_blat_server(args.genomeref, port=args.refport)
+    t = start_blat_server(args.teref, port=args.teport)
 
     try:
         data = checkseq(args.seq1, chrom1, pos1, args.genomeref, args.teref, args.refport, args.teport)
@@ -214,8 +248,8 @@ def main(args):
         sys.stderr.write("*"*60 + "\n")
 
     print "killing BLAT server(s) ..."
-    #p.kill()
-    #t.kill()
+    p.kill()
+    t.kill()
 
 
 if __name__ == '__main__':

@@ -240,6 +240,8 @@ def summary(tldlist, wb, args, tophits=False, excludelibs=None):
         bedhandle = Tabixfile(args.bed)
     if args.gff is not None:
         gffhandle = Tabixfile(args.gff)
+    if args.mapscore is not None:
+        maptabix=Tabixfile(args.mapscore)
 
     # Annotation
     if not tophits:
@@ -315,7 +317,7 @@ def summary(tldlist, wb, args, tophits=False, excludelibs=None):
                 chrom = mastertld[insloc]['Chr']
                 lpos  = mastertld[insloc]['Left_Position']
                 lcons = mastertld[insloc]['Left_Consensus']
-                ldata = blatfilter.checkseq(lcons, chrom, lpos, args.genomeref, args.teref, args.refport, args.teport)
+                ldata = blatfilter.checkseq(lcons, chrom, lpos, args.genomeref, args.teref, args.refport, args.teport, maptabix=maptabix)
                 mastertld[insloc]['BLAT_Filter_Data_Left'] = str(ldata)
                 mastertld[insloc]['BLAT_Filter_Data_Right'] = 'NA' # default
 
@@ -324,7 +326,7 @@ def summary(tldlist, wb, args, tophits=False, excludelibs=None):
                 chrom = mastertld[insloc]['Chr']
                 rpos  = mastertld[insloc]['Right_Position']
                 rcons = mastertld[insloc]['Right_Consensus']
-                rdata = blatfilter.checkseq(rcons, chrom, rpos, args.genomeref, args.teref, args.refport, args.teport)
+                rdata = blatfilter.checkseq(rcons, chrom, rpos, args.genomeref, args.teref, args.refport, args.teport, maptabix=maptabix)
                 mastertld[insloc]['BLAT_Filter_Data_Right'] = str(rdata)
 
             badblat = True
@@ -520,7 +522,8 @@ if __name__ == '__main__':
     parser.add_argument('-i', '--indirlist', required=True, help='list of tebreak output directories used as input')
     parser.add_argument('-r', '--ref', default=None, help='reference element locations tabix, column 4 should correspond to element class')
     parser.add_argument('-n', '--nrtabix', default=None, help='known non-ref element tabix')
-    parser.add_argument('-o', '--out', default='out.xlsx', help='output excel') 
+    parser.add_argument('-o', '--out', default='out.xlsx', help='output excel')
+    parser.add_argument('-m', '--mapscore', default=None, help='mapscore tabix')
     parser.add_argument('--gff', default=None, help='GFF annotation file (genes, exons)')
     parser.add_argument('--bed', default=None, help='BED annotation file (regulatory info)')
     parser.add_argument('--refwindow', default=500, help='distance cutoff for finding reference elements')

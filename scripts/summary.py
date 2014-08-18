@@ -4,6 +4,7 @@ import sys
 import os
 import argparse
 import blatfilter
+import traceback
 
 from pysam import Tabixfile
 from re import search
@@ -51,13 +52,13 @@ def addsheet(args, invcf, consfasta, wb, title):
     ws.title = title
     current_row = 0
 
-    gffhandle = None
-    if args.gff is not None:
-        gffhandle = Tabixfile(args.gff)
+    # gffhandle = None
+    # if args.gff is not None:
+    #     gffhandle = Tabixfile(args.gff)
 
-    bedhandle = None
-    if args.bed is not None:
-        bedhandle = Tabixfile(args.bed)
+    # bedhandle = None
+    # if args.bed is not None:
+    #     bedhandle = Tabixfile(args.bed)
 
     for i in range(len(columns)):
         ws.cell(row=current_row, column=i).value = columns[i]
@@ -70,8 +71,8 @@ def addsheet(args, invcf, consfasta, wb, title):
     cons = []
     seq  = []
 
-    if args.nrtabix is not None:
-        nr = Tabixfile(args.nrtabix)
+    #if args.nrtabix is not None:
+    #    nr = Tabixfile(args.nrtabix)
 
     with open(consfasta, 'r') as consfa:
         for line in consfa:
@@ -137,14 +138,15 @@ def addsheet(args, invcf, consfasta, wb, title):
 
                     # compare to reference locations, if given
                     refelt = 'NA' 
-                    refwindow = int(args.refwindow)
-                    if args.ref is not None:
-                        reftbx = Tabixfile(args.ref)
-                        if chrom in reftbx.contigs:
-                            for rec in reftbx.fetch(chrom, start-refwindow, end+refwindow):
-                                refclass = rec.split()[3]
-                                if refclass == alt:
-                                    refelt = '|'.join(rec.strip().split())
+                    # commented: attempting to speed up by shifting to summary-only
+                    #refwindow = int(args.refwindow)
+                    #if args.ref is not None:
+                    #    reftbx = Tabixfile(args.ref)
+                    #    if chrom in reftbx.contigs:
+                    #        for rec in reftbx.fetch(chrom, start-refwindow, end+refwindow):
+                    #            refclass = rec.split()[3]
+                    #            if refclass == alt:
+                    #                refelt = '|'.join(rec.strip().split())
 
                     eltends = formatdict['TESIDES']
 
@@ -204,24 +206,27 @@ def addsheet(args, invcf, consfasta, wb, title):
                     libcount = len(liblist.split(','))
                     mapscore = infodict['MAPSCORE']
 
-                    searchwindow = 100
+                    # annotation stubs, will be filled in at summary
                     nonref = 'NA' 
-                    if args.nrtabix is not None and chrom in nr.contigs:
-                        nonreflist = [elt.split()[3] + '|' + elt.split()[-1] for elt in nr.fetch(chrom, start-searchwindow, end+searchwindow)]
-                        if nonreflist:
-                            nonref = ','.join(nonreflist)
+                    # commented: attempting to speed up by shifting to summary-only
+                    #if args.nrtabix is not None and chrom in nr.contigs:
+                    #    nonreflist = [elt.split()[3] + '|' + elt.split()[-1] for elt in nr.fetch(chrom, start-searchwindow, end+searchwindow)]
+                    #    if nonreflist:
+                    #        nonref = ','.join(nonreflist)
 
                     genes = 'NA'
-                    if args.gff is not None:
-                        genes = ','.join(parseGFF(chrom, start, end, gffhandle))
-                    if not genes:
-                        genes = 'NA'
+                    # commented: attempting to speed up by shifting to summary-only
+                    #if args.gff is not None:
+                    #    genes = ','.join(parseGFF(chrom, start, end, gffhandle))
+                    #if not genes:
+                    #    genes = 'NA'
    
                     reg = 'NA'
-                    if args.bed is not None:
-                        reg = ','.join(parseBED(chrom, start, end, bedhandle))
-                    if not reg:
-                        reg = 'NA'
+                    # commented: attempting to speed up by shifting to summary-only
+                    #if args.bed is not None:
+                    #    reg = ','.join(parseBED(chrom, start, end, bedhandle))
+                    #if not reg:
+                    #    reg = 'NA'
 
                     data = [chrom, start, end, posconf, strand, strandconf, alt, family, famconf, refelt,
                             eltends, eltlen, teminpos, temaxpos, TSD, tlen, DEL, dlen, rightsnip, leftsnip,
@@ -265,12 +270,59 @@ def parseBED(chrom, start, end, bedhandle):
     return list(set(annotations))
 
 
-def summary(tldlist, wb, blat_genomeref, blat_teref, blat_gport, blat_tport, tophits=False, excludelibs=None):
+def summary(tldlist, wb, args, tophits=False, excludelibs=None):
     ''' sequential merge of TLDs (two-level dictionaries) '''
     mastertld = tldlist[0]
     if len(tldlist) > 1:
         for tld in tldlist[1:]:
             mastertld = mergetlds(mastertld, tld)
+
+    # Annotation
+    if not tophits:
+        print "Annotating summary ... "
+        for insloc in mastertld.keys():
+            assert mastertld[insloc]['Ref_TE'] == 'NA'
+            assert mastertld[insloc]['Known_Nonref'] == 'NA'
+            assert mastertld[insloc]['Genes'] == 'NA'
+            assert mastertld[insloc]['Regulation'] == 'NA'
+
+            chrom = mastertld[insloc]['Chr']
+            start = int(mastertld[insloc]['Left_Position'])
+            end   = int(mastertld[insloc]['Right_Position'])
+
+            # 'Ref_TE'
+            refwindow = int(args.refwindow)
+            if args.ref is not None:
+                reftbx = Tabixfile(args.ref)
+                if chrom in reftbx.contigs:
+                    for rec in reftbx.fetch(chrom, start-refwindow, end+refwindow):
+                        refclass = rec.split()[3]
+                        if refclass == mastertld[insloc]['Class']:
+                            mastertld[insloc]['Ref_TE'] = '|'.join(rec.strip().split())
+
+            # 'Known_Nonref'
+            searchwindow = 100
+            if args.nrtabix is not None:
+                nr = Tabixfile(args.nrtabix)
+                if chrom in nr.contigs:
+                    nonreflist = [elt.split()[3] + '|' + elt.split()[-1] for elt in nr.fetch(chrom, start-searchwindow, end+searchwindow)]
+                    if nonreflist:
+                        mastertld[insloc]['Known_Nonref'] = ','.join(nonreflist)
+
+            # 'Genes'
+            if args.gff is not None:
+                gffhandle = Tabixfile(args.gff)
+                mastertld[insloc]['Genes'] = ','.join(parseGFF(chrom, start, end, gffhandle))
+            if not mastertld[insloc]['Genes']:
+                mastertld[insloc]['Genes'] = 'NA'
+
+            # 'Regulation'
+            if args.bed is not None:
+                bedhandle = Tabixfile(args.bed)
+                mastertld[insloc]['Regulation'] = ','.join(parseBED(chrom, start, end, bedhandle))
+            if not mastertld[insloc]['Regulation']:
+                mastertld[insloc]['Regulation'] = 'NA'
+
 
     # Filtering
     filtered = {}
@@ -303,7 +355,7 @@ def summary(tldlist, wb, blat_genomeref, blat_teref, blat_gport, blat_tport, top
                 chrom = mastertld[insloc]['Chr']
                 lpos  = mastertld[insloc]['Left_Position']
                 lcons = mastertld[insloc]['Left_Consensus']
-                ldata = blatfilter.checkseq(lcons, chrom, lpos, blat_genomeref, blat_teref, blat_gport, blat_tport)
+                ldata = blatfilter.checkseq(lcons, chrom, lpos, args.genomeref, args.teref, args.refport, args.teport)
                 mastertld[insloc]['BLAT_Filter_Data_Left'] = str(ldata)
                 mastertld[insloc]['BLAT_Filter_Data_Right'] = 'NA' # default
 
@@ -312,7 +364,7 @@ def summary(tldlist, wb, blat_genomeref, blat_teref, blat_gport, blat_tport, top
                 chrom = mastertld[insloc]['Chr']
                 rpos  = mastertld[insloc]['Right_Position']
                 rcons = mastertld[insloc]['Right_Consensus']
-                rdata = blatfilter.checkseq(rcons, chrom, rpos, blat_genomeref, blat_teref, blat_gport, blat_tport)
+                rdata = blatfilter.checkseq(rcons, chrom, rpos, args.genomeref, args.teref, args.refport, args.teport)
                 mastertld[insloc]['BLAT_Filter_Data_Right'] = str(rdata)
 
             badblat = True
@@ -451,7 +503,6 @@ def mergetlds(tld1, tld2):
             if insloc not in newtld:
                 newtld[insloc] = tld2[insloc]
 
-
     return newtld
 
 
@@ -480,12 +531,12 @@ def main(args):
             tld,wb = addsheet(args, invcf, consfasta, wb, sname)
             tldlist.append(tld)
 
-    p = blatfilter.start_blat_server(args.genomeref, port=args.refport)
-    t = blatfilter.start_blat_server(args.teref, port=args.teport)
+    #p = blatfilter.start_blat_server(args.genomeref, port=args.refport)
+    #t = blatfilter.start_blat_server(args.teref, port=args.teport)
 
     try:
-        wb = summary(tldlist, wb, args.genomeref, args.teref, args.refport, args.teport)
-        wb = summary(tldlist, wb, args.genomeref, args.teref, args.refport, args.teport, tophits=True, excludelibs=exlibs)
+        wb = summary(tldlist, wb, args)
+        wb = summary(tldlist, wb, args, tophits=True, excludelibs=exlibs)
         wb.save(args.out)
 
     except Exception, e:
@@ -493,10 +544,9 @@ def main(args):
         traceback.print_exc(file=sys.stderr)
         sys.stderr.write("*"*60 + "\n")
 
-    print "killing BLAT server(s) ..."
-    p.kill()
-    t.kill()
-
+    #print "killing BLAT server(s) ..."
+    #p.kill()
+    #t.kill()
 
 
 if __name__ == '__main__':

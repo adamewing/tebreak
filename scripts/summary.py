@@ -224,12 +224,13 @@ def parseBED(chrom, start, end, bedhandle):
     return list(set(annotations))
 
 
-def summary(tldlist, wb, args, tophits=False, excludelibs=None):
+def summary(tldlist, wb, args, mastertld=None, tophits=False, excludelibs=None):
     ''' sequential merge of TLDs (two-level dictionaries) '''
-    mastertld = tldlist[0]
-    if len(tldlist) > 1:
-        for tld in tldlist[1:]:
-            mastertld = mergetlds(mastertld, tld)
+    if mastertld is None:
+        mastertld = tldlist[0]
+        if len(tldlist) > 1:
+            for tld in tldlist[1:]:
+                mastertld = mergetlds(mastertld, tld)
 
     # init Tabix handles
     if args.ref is not None:
@@ -346,9 +347,6 @@ def summary(tldlist, wb, args, tophits=False, excludelibs=None):
             if 'Bad_BLAT' in mastertld[insloc] and mastertld[insloc]['Bad_BLAT'] == 'True':
                 del mastertld[insloc]
 
- 
-    # TODO: move annotation here
-
     ws = None
  
     if tophits:
@@ -375,7 +373,7 @@ def summary(tldlist, wb, args, tophits=False, excludelibs=None):
             ws.cell(row=current_row, column=i).value = data[i]
         current_row += 1
         
-    return wb
+    return wb, mastertld
 
 
 def mergetlds(tld1, tld2):
@@ -503,8 +501,8 @@ def main(args):
     t = blatfilter.start_blat_server(args.teref, port=args.teport)
 
     try:
-        wb = summary(tldlist, wb, args)
-        wb = summary(tldlist, wb, args, tophits=True, excludelibs=exlibs)
+        wb, sumtld = summary(tldlist, wb, args)
+        wb, toptld = summary(tldlist, wb, args, mastertld=sumtld, tophits=True, excludelibs=exlibs)
         wb.save(args.out)
 
     except Exception, e:

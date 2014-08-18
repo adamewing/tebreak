@@ -187,7 +187,6 @@ def checkseq(cons, chrom, pos, genomeref, teref, refport, teport, maptabix=None)
 
     # Filters
     if len(ref_recs) == 0 or len(te_recs) == 0:
-        print "Fail: nomatch"
         data['pass'] = False
         return data
 

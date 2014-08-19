@@ -362,6 +362,8 @@ def summary(tldlist, wb, args, mastertld=None, tophits=False, excludelibs=None):
     for insrow in mastertld.keys():
         data = []
         for c in columns:
+            if c not in mastertld[insrow]:
+                mastertld[insrow][c] = 'BUG'
             data.append(mastertld[insrow][c])
 
         data = map(str, data)

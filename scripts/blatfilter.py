@@ -121,7 +121,6 @@ def blat(fasta, blatref, outpsl, port=9999, minScore=0, maxIntron=None):
     if minScore is not None:
         cmd.append('-minScore=' + str(minScore))
 
-    print cmd
     cmd += ['/', fasta, outpsl]
     p = subprocess.call(cmd)
 

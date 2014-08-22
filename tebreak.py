@@ -594,7 +594,7 @@ def read_fasta(infa):
     return seqdict
 
 
-def bwamem(fq, ref, outpath, samplename, threads=1, width=150, sortmem=2000000000, RGPL='ILLUMINA', pacbio=False):
+def bwamem(fq, ref, outpath, samplename, threads=1, width=150, sortmem=2000000000, RGPL='ILLUMINA'):
     ''' FIXME: add parameters to commandline '''
     fqroot = sub('.extendedFrags.fastq.gz$', '', os.path.basename(fq))
     fqroot = sub('.fq$', '', fqroot)
@@ -613,9 +613,6 @@ def bwamem(fq, ref, outpath, samplename, threads=1, width=150, sortmem=200000000
 
     sam_cmd  = ['bwa', 'mem', '-t', str(threads), '-Y', '-M']
 
-    if pacbio:
-        sam_cmd.append('-x')
-        sam_cmd.append('pacbio')
 
     sam_cmd.append(ref)
     sam_cmd.append(fq)
@@ -629,17 +626,6 @@ def bwamem(fq, ref, outpath, samplename, threads=1, width=150, sortmem=200000000
     with open(sam_out, 'w') as sam:
         p = subprocess.Popen(sam_cmd, stdout=subprocess.PIPE)
         for line in p.stdout:
-            if pacbio:
-                c = line.strip().split('\t')
-                seqlen = len(c[9])
-                qual = c[10]
-
-                if len(qual) > seqlen:
-                    c[10] = qual[:seqlen]
-                while len(qual) < seqlen:
-                    c[10] += qual[-1]
-
-                line = '\t'.join(c)
 
             if line.startswith('@PG') and not wrote_rg:
                 sam.write('\t'.join(("@RG", "ID:" + fqroot, "SM:" + samplename, "PL:" + RGPL)) + "\n")
@@ -1077,29 +1063,6 @@ def vcfoutput(clusters, outfile, samplename):
             out.write(str(cluster) + '\n')
 
 
-def bamoutput(clusters, refbamfn, tebamfn, prefix, passonly=False):
-    refbam = pysam.Samfile(refbamfn, 'rb')
-    tebam  = pysam.Samfile(tebamfn, 'rb')
-    refout = pysam.Samfile(prefix + ".ref.bam", 'wb', template=refbam)
-    teout  = pysam.Samfile(prefix + ".te.bam", 'wb', template=tebam)
-    if passonly:
-        refout = pysam.Samfile(prefix + ".pass.ref.bam", 'wb', template=refbam)
-        teout  = pysam.Samfile(prefix + ".pass.te.bam", 'wb', template=tebam)
-
-    for cluster in clusters:
-        if passonly and cluster.FILTER[0] == 'PASS':
-            [refout.write(read) for read in cluster.greads() if not read.is_secondary]
-            [teout.write(read) for read in cluster.treads() if not read.is_secondary]
-        else:
-            [refout.write(read) for read in cluster.greads() if not read.is_secondary]
-            [teout.write(read) for read in cluster.treads() if not read.is_secondary]
-
-    refbam.close()
-    tebam.close()
-    refout.close()
-    teout.close()
-
-
 def consensus_fasta(clusters, outfile, passonly=True, threads=1):
     with open(outfile, 'w') as cons:
         for cluster in clusters:
@@ -1264,13 +1227,9 @@ def main(args):
     sys.stderr.write("INFO: " + now() + " writing VCF\n")
     vcfoutput(clusters, args.outvcf, args.samplename)
 
-    if args.clusterbam:
-        sys.stderr.write("INFO: " + now() + " writing BAMs\n")
-        bamoutput(clusters, refbamfn, tebamfn, basename, passonly=True)
-
-    if args.consensus is not None:
-        sys.stderr.write("INFO: " + now() + " compiling consensus sequences for breakends and outputting to " + args.consensus + "\n")
-        consensus_fasta(clusters, args.consensus, threads=args.threads)
+    cons_fasta = args.outdir + '/' + args.samplename + '.cons.fa'
+    sys.stderr.write("INFO: " + now() + " compiling consensus sequences for breakends and outputting to " + cons_fasta + "\n")
+    consensus_fasta(clusters, cons_fasta, threads=args.threads)
 
 
 if __name__ == '__main__':
@@ -1321,17 +1280,11 @@ if __name__ == '__main__':
                         help='minimum identity cutoff for matches to reference genome (default=0.98)')
     parser.add_argument('--mapfilter', dest='mapfilter', default=None,
                         help='mappability filter (from UCSC mappability track) ... recommended!')
-    parser.add_argument('--consensus', dest='consensus', default=None,
-                        help='build consensus sequences from breakends and output as FASTA to specified file')
 
     parser.add_argument('--processfiltered', action='store_true', default=False, 
                         help='perform post-processing steps on all clusters, even filtered ones')
     parser.add_argument('--premapped',  action='store_true', default=False, 
                         help='use BAM specified by -1 (must be .bam) directly instead of remapping')
-    parser.add_argument('--clusterbam',  action='store_true', default=False, 
-                        help='output genome and TE clusters to BAMs')
-    parser.add_argument('--pacbio', action='store_true', default=False,
-                        help='PacBio mode ... experimental, uses -x pacbio parameter for bwa mem')
     parser.add_argument('--skipmarkdups', action='store_true', default=False,
                         help='skip duplicate marking step: PCR duplicates will count toward breakpoint support')
 

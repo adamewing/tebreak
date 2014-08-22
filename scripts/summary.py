@@ -172,7 +172,9 @@ def vcf2tld(args, invcf, consfasta):
 
                     liblist  = formatdict['RG']
                     libcount = len(liblist.split(','))
-                    mapscore = infodict['MAPSCORE']
+                    mapscore = 'NA'
+                    if mapscore in infodict:
+                        mapscore = infodict['MAPSCORE']
 
                     # annotation stubs, will be filled in at summary
                     refelt = 'NA' 

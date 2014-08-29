@@ -1080,7 +1080,7 @@ def markdups(inbam, picard):
 
     outtmp  = str(uuid4()) + '.mdtmp.bam'
     metrics = inbam + '.markdups.metrics.txt'
-    args    = ['java', '-Xmx4g', '-jar', md, 'I=' + inbam, 'O=' + outtmp, 'M=' + metrics]
+    args    = ['java', '-Xmx4g', '-jar', md, 'I=' + inbam, 'O=' + outtmp, 'M=' + metrics, "TMP_DIR=" + os.path.dirname(inbam)]
     subprocess.call(args)
 
     assert os.path.exists(metrics)
@@ -1276,8 +1276,8 @@ if __name__ == '__main__':
                         help='maximum fraction of unclipped reads in cluster region (default = 1.0)')
     parser.add_argument('--mintematch', dest='mintematch', default=0.9,
                         help='minimum identity cutoff for matches to TE library (default=0.9)')
-    parser.add_argument('--mingenomematch', dest='mingenomematch', default=0.98,
-                        help='minimum identity cutoff for matches to reference genome (default=0.98)')
+    parser.add_argument('--mingenomematch', dest='mingenomematch', default=0.95,
+                        help='minimum identity cutoff for matches to reference genome (default=0.95)')
     parser.add_argument('--mapfilter', dest='mapfilter', default=None,
                         help='mappability filter (from UCSC mappability track) ... recommended!')
 

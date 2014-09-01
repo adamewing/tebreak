@@ -89,7 +89,7 @@ def makerandom(bamfn, reffn, outdir, samples=1000000):
     subprocess.call(['tabix', '-s', '1', '-b', '2', '-e', '3', '-f', outdir + '/' + 'matched.random.txt.gz'])
     assert os.path.exists(outdir + '/' + 'matched.random.txt.gz.tbi'), "tabix failed: " + outdir + '/' + 'matched.random.txt'
 
-    return outdir + '/' + 'matched.random.txt.gz'
+    return outdir + '/' + 'matched.random.txt.gz', n
 
 
 def overlap(bamfn, bedfn, outdir, tabix=False):
@@ -173,7 +173,7 @@ def main(args):
         os.mkdir(args.outdir)
     assert os.path.exists(args.outdir), 'could not create output directory: ' + args.outdir
 
-    rndfn = makerandom(args.bam, args.ref, args.outdir, samples=int(args.samples))
+    rndfn, rndcount = makerandom(args.bam, args.ref, args.outdir, samples=int(args.samples))
     real_overlaps = overlap(args.bam, args.elts, args.outdir)
     sim_overlaps  = overlap(rndfn, args.elts, args.outdir, tabix=True)
 
@@ -181,7 +181,7 @@ def main(args):
     enrichment = od()
 
     counts = readcount(args.bam)
-    counts['sampled'] = int(args.samples)
+    counts['sampled'] = rndcount
 
     for lib in real_overlaps:
         normalised[lib] = {}

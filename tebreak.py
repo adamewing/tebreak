@@ -417,7 +417,8 @@ class Cluster:
         return reportsnps
 
     def readgroups(self):
-        return Counter([sr.getRG() for sr in self._splitreads]).keys()
+        c = Counter([sr.getRG() for sr in self._splitreads])
+        return [str(k[0]) + '|' + str(k[1]) for k in zip(c.keys(), c.values())]
 
     def find_extrema(self):
         ''' return leftmost and rightmost aligned positions in cluster vs. reference '''
@@ -733,12 +734,6 @@ def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2): # TODO PARAMS
                         # (read)  RRRRRRRRRRRRRRRRRRRRRRRRRRRR
                         unmapseq = read.seq[:read.qstart]
                         unmapqua = read.qual[:read.qstart]
-
-                else:
-                    #TODO, consider this case, important for ALU insertions w/ read length > 300 bp and very short L1s
-                    # (align)           AAAAAAAAAAAAAAA
-                    # (read)   RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR
-                    pass
 
             if not read.is_unmapped and unmapseq is not None and not read.is_duplicate:
                 infoname = ':'.join((read.qname, str(inbam.getrname(read.tid)), str(read.pos))) # help find read again

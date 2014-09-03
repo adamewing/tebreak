@@ -158,7 +158,7 @@ def overlap(bamfn, bedfn, outdir, tabix=False):
 def readcount(bamfn):
     bam = pysam.Samfile(bamfn, 'rb')
     counts = dd(int)
-    for read in bam.fetch(until_eof=True):
+    for read in bam.fetch():
         rg = getRG(read.tags)
         counts[rg] += 1
 

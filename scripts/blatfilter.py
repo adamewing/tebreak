@@ -8,11 +8,27 @@ import traceback
 import argparse
 import subprocess
 import datetime
+import pysam
 
 from collections import OrderedDict as od
 from uuid import uuid4
 from time import sleep
 from math import log
+
+
+class Block:
+    def __init__(self, tstart, tend):
+        self.tstart = min(int(tstart), int(tend))
+        self.tend   = max(int(tstart), int(tend))
+
+    def length(self):
+        return self.tend - self.tstart
+
+    def __str__(self):
+        return str(self.tstart) + ' ' +  str(self.tend)
+
+    def __lt__(self, other):
+        return self.length() > other.length()
 
 
 class PSL:
@@ -22,6 +38,12 @@ class PSL:
          self.tNumInsert, self.tBaseInsert, self.strand, self.qName, self.qSize, self.qStart, self.qEnd,
          self.tName, self.tSize, self.tStart, self.tEnd, self.blockCount, self.blockSizes, self.qStarts,
          self.tStarts) = rec.strip().split()
+
+        self.tBlocks = []
+        for bsize, tstart in zip(self.blockSizes.split(',')[:-1], self.tStarts.split(',')[:-1]): # [:-1] due to trailing comma
+            self.tBlocks.append(Block(int(tstart), int(tstart) + int(bsize)))
+
+        self.tBlocks.sort()
 
         self.tName = self.tName.replace('chr', '')
 
@@ -69,7 +91,7 @@ class PSL:
 
     def __lt__(self, other):
         ''' used for ranking BLAT hits '''
-        return self.score() < other.score()
+        return self.score() > other.score()
 
 
 def now():
@@ -125,6 +147,28 @@ def blat(fasta, blatref, outpsl, port=9999, minScore=0, maxIntron=None):
     p = subprocess.call(cmd)
 
 
+def transloc_filter(psl, chrom, pos, refrmsktbx, eltclass, tlocwindow=10):
+    ''' return None if unfiltered, return TE information if filtered '''
+    recs = []
+    with open(psl, 'r') as inpsl:
+        for line in inpsl:
+            rec = PSL(line)
+            if not rec.match(chrom, pos):
+                recs.append(rec)
+
+    recs.sort()
+
+    if recs[0].tName in refrmsktbx.contigs:
+        for rmskrec in refrmsktbx.fetch(recs[0].tName, recs[0].tStart, recs[0].tEnd):
+            rmstart, rmend = map(int, rmskrec.split()[1:3])
+            rmclass = rmskrec.split()[3]
+            if rmclass == eltclass:
+                if rmstart > recs[0].tBlocks[0].tstart + tlocwindow or rmend < recs[0].tBlocks[0].tend - tlocwindow:
+                    return ':'.join(rmskrec.split())
+
+    return None
+
+
 def ref_parsepsl(psl, chrom, pos):
     recs = []
     with open(psl, 'r') as inpsl:
@@ -165,7 +209,7 @@ def checkmap(maptabix, chrom, start, end):
         return 0.0
 
 
-def checkseq(cons, chrom, pos, genomeref, teref, refport, teport, maptabix=None):
+def checkseq(cons, chrom, pos, eltclass, refrmsktbx, genomeref, teref, refport, teport, maptabix=None):
     ''' find breakpoint chrom:pos in BLAT output '''
     pos = int(pos)
     chrom = chrom.replace('chr', '')
@@ -204,12 +248,13 @@ def checkseq(cons, chrom, pos, genomeref, teref, refport, teport, maptabix=None)
         data['teqend']      = te_recs[0].qEnd
         data['teclass']     = te_recs[0].tName.split(':')[0]
         data['tefamily']    = te_recs[0].tName.split(':')[-1]
+        data['tlfilter']    = transloc_filter(ref_psl, chrom, pos, refrmsktbx, eltclass)
 
         if maptabix is not None:
             if chrom in maptabix.contigs:
                 data['avgmap'] = checkmap(maptabix, chrom, int(ref_recs[0].tStart), int(ref_recs[0].tEnd))
 
-    if data['tematch'] < 0.95:
+    if data['tematch'] < 0.90:
         data['pass'] = False
 
     if data['refmatch'] < 0.95:
@@ -219,14 +264,17 @@ def checkseq(cons, chrom, pos, genomeref, teref, refport, teport, maptabix=None)
         data['pass'] = False
 
     if maptabix is not None:
-        if data['avgmap'] < 0.85:
+        if data['avgmap'] < 0.25:
             data['pass'] = False
 
     if data['tematchlen'] < 30:
         data['pass'] = False
+    
+    if data['tlfilter'] is not None:
+        data['pass'] = False
 
     os.remove(fa)
-    #os.remove(ref_psl)
+    os.remove(ref_psl)
     os.remove(te_psl)
 
     return data
@@ -239,7 +287,8 @@ def main(args):
     t = start_blat_server(args.teref, port=args.teport)
 
     try:
-        data = checkseq(args.seq1, chrom1, pos1, args.genomeref, args.teref, args.refport, args.teport)
+        refrmsktbx = pysam.Tabixfile(args.refrmsk)
+        data = checkseq(args.seq1, chrom1, pos1, args.eltclass, refrmsktbx, args.genomeref, args.teref, args.refport, args.teport)
         print data
     except Exception, e:
         sys.stderr.write("*"*60 + "\nerror in blat filter:\n")
@@ -254,10 +303,10 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='BLAT filter')
     parser.add_argument('--seq1', required=True, help='consensus sequence')
-    parser.add_argument('--seq2', default=None, help='consensus sequence')
     parser.add_argument('--pos1', required=True, help='postion formatted as chrom:pos')
-    parser.add_argument('--pos2', default=None, help='postion formatted as chrom:pos')
+    parser.add_argument('--eltclass', required=True)
     parser.add_argument('--genomeref', required=True, help='BLAT reference')
+    parser.add_argument('--refrmsk', required=True, help='ref rmsk tabix')
     parser.add_argument('--teref', required=True, help='TE reference')
     parser.add_argument('--refport', default=9999)
     parser.add_argument('--teport', default=9998)

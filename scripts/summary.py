@@ -222,6 +222,30 @@ def parseBED(chrom, start, end, bedhandle):
     return list(set(annotations))
 
 
+def getlibcounts(libstring):
+    ''' libstring is name1|count1,name2|count2,... return dictionary of library name --> count '''
+    return dict([(l,int(c)) for l,c in [lc.split('|') for lc in libstring.split(',')]])
+
+
+def checkexclude(excludelibs, libcounts, maxexfrac=0.1):
+    ''' libcounts is a dictionary libname --> supporting read count '''
+    ''' return True if filtered due to > maxexfrac reads supporting library in excludelibs '''
+    exctotal = 0.0
+    alltotal = 0.0
+    if excludelibs is not None:
+        for lib, count in libcounts.iteritems():
+            if lib in excludelibs:
+                exctotal += float(count)
+            alltotal += float(count)
+
+        if exctotal/alltotal > maxexfrac:
+            return True
+        return False
+
+    else:
+        return False
+            
+
 def summary(tldlist, wb, args, mastertld=None, tophits=False, excludelibs=None):
     ''' sequential merge of TLDs (two-level dictionaries) '''
     if mastertld is None:
@@ -241,6 +265,8 @@ def summary(tldlist, wb, args, mastertld=None, tophits=False, excludelibs=None):
         gffhandle = Tabixfile(args.gff)
     if args.mapscore is not None:
         maptabix=Tabixfile(args.mapscore)
+
+    rmsktabix = Tabixfile(args.ref)
 
     # Annotation
     if not tophits:
@@ -284,21 +310,24 @@ def summary(tldlist, wb, args, mastertld=None, tophits=False, excludelibs=None):
             if not mastertld[insloc]['Regulation']:
                 mastertld[insloc]['Regulation'] = 'NA'
 
-
     # Filtering
     filtered = {}
     for insloc in mastertld.keys():
         assert len(mastertld[insloc]) > 0, "Error: zero length insloc: " + insloc 
         if mastertld[insloc]['Ref_TE'] != 'NA':
             filtered[insloc] = True
+
+        if int(mastertld[insloc]['Total_Support']) < int(args.minsupport):
+            filtered[insloc] = True
+
         if tophits:
             if mastertld[insloc]['Known_Nonref'] != 'NA':
                 filtered[insloc] = True
 
-            if excludelibs is not None:
-                for lib in mastertld[insloc]['Library_List'].split(','):
-                    if lib in excludelibs:
-                        filtered[insloc] = True
+            libcounts = getlibcounts(mastertld[insloc]['Library_List'])
+
+            if checkexclude(excludelibs, libcounts):
+                filtered[insloc] = True
 
         ldata = {}
         rdata = {}
@@ -316,7 +345,7 @@ def summary(tldlist, wb, args, mastertld=None, tophits=False, excludelibs=None):
                 chrom = mastertld[insloc]['Chr']
                 lpos  = mastertld[insloc]['Left_Position']
                 lcons = mastertld[insloc]['Left_Consensus']
-                ldata = blatfilter.checkseq(lcons, chrom, lpos, args.genomeref, args.teref, args.refport, args.teport, maptabix=maptabix)
+                ldata = blatfilter.checkseq(lcons, chrom, lpos, mastertld[insloc]['Class'], rmsktabix, args.genomeref, args.teref, args.refport, args.teport, maptabix=maptabix)
                 mastertld[insloc]['BLAT_Filter_Data_Left'] = str(ldata)
                 mastertld[insloc]['BLAT_Filter_Data_Right'] = 'NA' # default
 
@@ -325,7 +354,7 @@ def summary(tldlist, wb, args, mastertld=None, tophits=False, excludelibs=None):
                 chrom = mastertld[insloc]['Chr']
                 rpos  = mastertld[insloc]['Right_Position']
                 rcons = mastertld[insloc]['Right_Consensus']
-                rdata = blatfilter.checkseq(rcons, chrom, rpos, args.genomeref, args.teref, args.refport, args.teport, maptabix=maptabix)
+                rdata = blatfilter.checkseq(rcons, chrom, rpos, mastertld[insloc]['Class'], rmsktabix, args.genomeref, args.teref, args.refport, args.teport, maptabix=maptabix)
                 mastertld[insloc]['BLAT_Filter_Data_Right'] = str(rdata)
 
             badblat = True
@@ -408,9 +437,6 @@ def mergetlds(tld1, tld2):
                 if float(tld2[insloc]['Family_Conf']) > float(tld1[insloc]['Family_Conf']):
                     best_family = tld2
 
-                #newends = tld1[insloc]['Found_Ends'] + ',' + tld2[insloc]['Found_Ends']
-                #newends = ','.join(list(set(newends.split(','))))
-
                 newlength = tld1[insloc]['Elt_Length']
                 if newlength == 'NA' and tld2[insloc]['Elt_Length'] != 'NA':
                     newlength = tld2[insloc]['Elt_Length'] != 'NA'
@@ -441,7 +467,6 @@ def mergetlds(tld1, tld2):
                 newtld[insloc]['Family']          = best_family[insloc]['Family']
                 newtld[insloc]['Family_Conf']     = best_family[insloc]['Family_Conf']
                 newtld[insloc]['Ref_TE']          = default[insloc]['Ref_TE']
-                #newtld[insloc]['Found_Ends']      = newends
                 newtld[insloc]['Elt_Length']      = newlength
                 newtld[insloc]['TSD']             = best_tsd[insloc]['TSD']
                 newtld[insloc]['TSD_Length']      = best_tsd[insloc]['TSD_Length']
@@ -524,10 +549,11 @@ if __name__ == '__main__':
     parser.add_argument('-m', '--mapscore', default=None, help='mapscore tabix')
     parser.add_argument('--gff', default=None, help='GFF annotation file (genes, exons)')
     parser.add_argument('--bed', default=None, help='BED annotation file (regulatory info)')
-    parser.add_argument('--refwindow', default=500, help='distance cutoff for finding reference elements')
+    parser.add_argument('--refwindow', default=50, help='distance cutoff for finding reference elements')
     parser.add_argument('--excludelibs', default=None, help='file containing list of libraries to exclude')
     parser.add_argument('--genomeref', required=True, help='genome BLAT reference (2bit)')
     parser.add_argument('--teref', required=True, help='TE BLAT reference (2bit)')
+    parser.add_argument('--minsupport', default=5, help='minimum support (read count, default=5)')
     parser.add_argument('--refport', default=9999)
     parser.add_argument('--teport', default=9998)
     args = parser.parse_args()

@@ -48,6 +48,7 @@ class PSL:
         self.tName = self.tName.replace('chr', '')
 
         self.tStart, self.tEnd, self.qStart, self.qEnd = map(int, (self.tStart, self.tEnd, self.qStart, self.qEnd))
+        self.qSize, self.tSize = map(int, (self.qSize, self.tSize))
         
         if self.qStart > self.qEnd:
             self.qStart, self.qEnd = self.qEnd, self.qStart
@@ -179,6 +180,17 @@ def ref_parsepsl(psl, chrom, pos):
     return sorted(recs)
 
 
+def donor_parsepsl(psl, chrom, pos):
+    recs = []
+    with open(psl, 'r') as inpsl:
+        for line in inpsl:
+            rec = PSL(line)
+            if (rec.tEnd-rec.tStart) - (rec.qEnd-rec.qStart) < 10:
+                if not rec.match(chrom, pos):
+                    recs.append(rec)
+    return sorted(recs)
+
+
 def te_parsepsl(psl):
     recs = []
     with open(psl, 'r') as inpsl:
@@ -209,6 +221,20 @@ def checkmap(maptabix, chrom, start, end):
         return 0.0
 
 
+def donorcoords(recs, ref_start, ref_end):
+    ''' ref_start and ref_end is interval of query covered by non-TE ref '''
+    ''' return percentile of top hit that overlaps btwn donor and acceptor '''
+    n = 0 
+    for rec in recs:
+        overlap = min(rec.qEnd, ref_end) - max(rec.qStart, ref_start)
+        if overlap > 5:
+            #print rec.qStart, rec.qEnd, rec.tEnd-rec.tStart, rec.score(), n
+            break
+        n += 1
+
+    return float(n)/float(len(recs))
+        
+
 def checkseq(cons, chrom, pos, eltclass, refrmsktbx, genomeref, teref, refport, teport, maptabix=None):
     ''' find breakpoint chrom:pos in BLAT output '''
     pos = int(pos)
@@ -225,6 +251,7 @@ def checkseq(cons, chrom, pos, eltclass, refrmsktbx, genomeref, teref, refport, 
     blat(fa, teref, te_psl, port=teport, maxIntron=2)
     ref_recs = ref_parsepsl(ref_psl, chrom, pos)
     te_recs  = te_parsepsl(te_psl)
+    donor_recs = donor_parsepsl(ref_psl, chrom, pos)
 
     data = od()
     data['pass'] = True # default
@@ -248,7 +275,11 @@ def checkseq(cons, chrom, pos, eltclass, refrmsktbx, genomeref, teref, refport, 
         data['teqend']      = te_recs[0].qEnd
         data['teclass']     = te_recs[0].tName.split(':')[0]
         data['tefamily']    = te_recs[0].tName.split(':')[-1]
-        data['tlfilter']    = transloc_filter(ref_psl, chrom, pos, refrmsktbx, eltclass)
+        data['olpctile']    = donorcoords(donor_recs, ref_recs[0].qStart, ref_recs[0].qEnd) 
+        data['tlfilter']    = None
+
+        if args.tlfilter:
+            data['tlfilter'] = transloc_filter(ref_psl, chrom, pos, refrmsktbx, eltclass)
 
         if maptabix is not None:
             if chrom in maptabix.contigs:
@@ -270,6 +301,9 @@ def checkseq(cons, chrom, pos, eltclass, refrmsktbx, genomeref, teref, refport, 
     if data['tematchlen'] < 30:
         data['pass'] = False
     
+    if data['olpctile'] == 0.0:
+        data['pass'] = False
+
     if data['tlfilter'] is not None:
         data['pass'] = False
 
@@ -283,8 +317,8 @@ def checkseq(cons, chrom, pos, eltclass, refrmsktbx, genomeref, teref, refport, 
 def main(args):
     chrom1, pos1 = args.pos1.split(':')
 
-    p = start_blat_server(args.genomeref, port=args.refport)
-    t = start_blat_server(args.teref, port=args.teport)
+    #p = start_blat_server(args.genomeref, port=args.refport)
+    #t = start_blat_server(args.teref, port=args.teport)
 
     try:
         refrmsktbx = pysam.Tabixfile(args.refrmsk)
@@ -295,9 +329,9 @@ def main(args):
         traceback.print_exc(file=sys.stderr)
         sys.stderr.write("*"*60 + "\n")
 
-    print "killing BLAT server(s) ..."
-    p.kill()
-    t.kill()
+    #print "killing BLAT server(s) ..."
+    #p.kill()
+    #t.kill()
 
 
 if __name__ == '__main__':
@@ -310,5 +344,6 @@ if __name__ == '__main__':
     parser.add_argument('--teref', required=True, help='TE reference')
     parser.add_argument('--refport', default=9999)
     parser.add_argument('--teport', default=9998)
+    parser.add_argument('--tlfilter', action='store_true', default=False)
     args = parser.parse_args()
     main(args)

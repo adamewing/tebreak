@@ -235,7 +235,7 @@ def donorcoords(recs, ref_start, ref_end):
     return float(n)/float(len(recs))
         
 
-def checkseq(cons, chrom, pos, eltclass, refrmsktbx, genomeref, teref, refport, teport, maptabix=None):
+def checkseq(cons, chrom, pos, eltclass, refrmsktbx, genomeref, teref, refport, teport, maptabix=None, tlfilter=False):
     ''' find breakpoint chrom:pos in BLAT output '''
     pos = int(pos)
     chrom = chrom.replace('chr', '')
@@ -278,7 +278,7 @@ def checkseq(cons, chrom, pos, eltclass, refrmsktbx, genomeref, teref, refport, 
         data['olpctile']    = donorcoords(donor_recs, ref_recs[0].qStart, ref_recs[0].qEnd) 
         data['tlfilter']    = None
 
-        if args.tlfilter:
+        if tlfilter:
             data['tlfilter'] = transloc_filter(ref_psl, chrom, pos, refrmsktbx, eltclass)
 
         if maptabix is not None:

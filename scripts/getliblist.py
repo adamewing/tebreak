@@ -22,7 +22,7 @@ if len(sys.argv) == 2:
             vcf = vcf.strip()
             assert os.path.exists(vcf), "VCF not found: " + vcf
             for rg in getlibs(vcf):
-                rgs.append(rg)
+                rgs.append(rg.split('|')[0])
 
     print '\n'.join(sorted(list(set(rgs))))
             

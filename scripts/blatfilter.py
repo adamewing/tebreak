@@ -238,7 +238,7 @@ def donorcoords(recs, ref_start, ref_end):
 def checkseq(cons, chrom, pos, eltclass, refrmsktbx, genomeref, teref, refport, teport, maptabix=None, tlfilter=False):
     ''' find breakpoint chrom:pos in BLAT output '''
     pos = int(pos)
-    chrom = chrom.replace('chr', '')
+    #chrom = chrom.replace('chr', '')
 
     fa = '/tmp/' + str(uuid4()) + '.fa'
     ref_psl = fa.replace('.fa', '.ref.psl')

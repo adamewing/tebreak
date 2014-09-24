@@ -185,7 +185,7 @@ def donor_parsepsl(psl, chrom, pos):
     with open(psl, 'r') as inpsl:
         for line in inpsl:
             rec = PSL(line)
-            if (rec.tEnd-rec.tStart) - (rec.qEnd-rec.qStart) < 10:
+            if abs((rec.tEnd-rec.tStart) - (rec.qEnd-rec.qStart)) == 0:
                 if not rec.match(chrom, pos):
                     recs.append(rec)
     return sorted(recs)
@@ -228,14 +228,14 @@ def donorcoords(recs, ref_start, ref_end):
     for rec in recs:
         overlap = min(rec.qEnd, ref_end) - max(rec.qStart, ref_start)
         if overlap > 5:
-            #print rec.qStart, rec.qEnd, rec.tEnd-rec.tStart, rec.score(), n
+            print ref_start, ref_end, rec.qStart, rec.qEnd, rec.tEnd-rec.tStart, rec.score(), overlap, n
             break
         n += 1
 
     return float(n)/float(len(recs))
         
 
-def checkseq(cons, chrom, pos, eltclass, refrmsktbx, genomeref, teref, refport, teport, maptabix=None, tlfilter=False):
+def checkseq(cons, chrom, pos, eltclass, refrmsktbx, genomeref, teref, refport, teport, maptabix=None, tlfilter=False, olfilter=False):
     ''' find breakpoint chrom:pos in BLAT output '''
     pos = int(pos)
     #chrom = chrom.replace('chr', '')
@@ -301,7 +301,7 @@ def checkseq(cons, chrom, pos, eltclass, refrmsktbx, genomeref, teref, refport, 
     if data['tematchlen'] < 30:
         data['pass'] = False
     
-    if data['olpctile'] == 0.0:
+    if data['olpctile'] == 0.0 and olfilter:
         data['pass'] = False
 
     if data['tlfilter'] is not None:
@@ -317,21 +317,21 @@ def checkseq(cons, chrom, pos, eltclass, refrmsktbx, genomeref, teref, refport, 
 def main(args):
     chrom1, pos1 = args.pos1.split(':')
 
-    #p = start_blat_server(args.genomeref, port=args.refport)
-    #t = start_blat_server(args.teref, port=args.teport)
+    p = start_blat_server(args.genomeref, port=args.refport)
+    t = start_blat_server(args.teref, port=args.teport)
 
     try:
         refrmsktbx = pysam.Tabixfile(args.refrmsk)
-        data = checkseq(args.seq1, chrom1, pos1, args.eltclass, refrmsktbx, args.genomeref, args.teref, args.refport, args.teport)
+        data = checkseq(args.seq1, chrom1, pos1, args.eltclass, refrmsktbx, args.genomeref, args.teref, args.refport, args.teport, olfilter=args.olfilter)
         print data
     except Exception, e:
         sys.stderr.write("*"*60 + "\nerror in blat filter:\n")
         traceback.print_exc(file=sys.stderr)
         sys.stderr.write("*"*60 + "\n")
 
-    #print "killing BLAT server(s) ..."
-    #p.kill()
-    #t.kill()
+    print "killing BLAT server(s) ..."
+    p.kill()
+    t.kill()
 
 
 if __name__ == '__main__':
@@ -345,5 +345,6 @@ if __name__ == '__main__':
     parser.add_argument('--refport', default=9999)
     parser.add_argument('--teport', default=9998)
     parser.add_argument('--tlfilter', action='store_true', default=False)
+    parser.add_argument('--olfilter', action='store_true', default=False)
     args = parser.parse_args()
     main(args)

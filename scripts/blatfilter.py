@@ -232,7 +232,11 @@ def donorcoords(recs, ref_start, ref_end):
             break
         n += 1
 
-    return float(n)/float(len(recs))
+    if len(recs) > 0:
+        return float(n)/float(len(recs))
+
+    else:
+        return 0.0
         
 
 def checkseq(cons, chrom, pos, eltclass, refrmsktbx, genomeref, teref, refport, teport, maptabix=None, tlfilter=False, olfilter=False):

@@ -346,7 +346,9 @@ def summary(tldlist, wb, args, mastertld=None, tophits=False, excludelibs=None):
                 chrom = mastertld[insloc]['Chr']
                 lpos  = mastertld[insloc]['Left_Position']
                 lcons = mastertld[insloc]['Left_Consensus']
-                ldata = blatfilter.checkseq(lcons, chrom, lpos, mastertld[insloc]['Class'], rmsktabix, args.genomeref, args.teref, args.refport, args.teport, maptabix=maptabix, tlfilter=args.tlfilter)
+                ldata = blatfilter.checkseq(lcons, chrom, lpos, mastertld[insloc]['Class'], rmsktabix, 
+                                            args.genomeref, args.teref, args.refport, args.teport, 
+                                            maptabix=maptabix, tlfilter=args.tlfilter, olfilter=args.olfilter)
                 mastertld[insloc]['BLAT_Filter_Data_Left'] = str(ldata)
                 mastertld[insloc]['BLAT_Filter_Data_Right'] = 'NA' # default
 
@@ -355,7 +357,9 @@ def summary(tldlist, wb, args, mastertld=None, tophits=False, excludelibs=None):
                 chrom = mastertld[insloc]['Chr']
                 rpos  = mastertld[insloc]['Right_Position']
                 rcons = mastertld[insloc]['Right_Consensus']
-                rdata = blatfilter.checkseq(rcons, chrom, rpos, mastertld[insloc]['Class'], rmsktabix, args.genomeref, args.teref, args.refport, args.teport, maptabix=maptabix, tlfilter=args.tlfilter)
+                rdata = blatfilter.checkseq(rcons, chrom, rpos, mastertld[insloc]['Class'], rmsktabix, 
+                                            args.genomeref, args.teref, args.refport, args.teport, 
+                                            maptabix=maptabix, tlfilter=args.tlfilter, olfilter=args.olfilter)
                 mastertld[insloc]['BLAT_Filter_Data_Right'] = str(rdata)
 
             badblat = True
@@ -556,6 +560,7 @@ if __name__ == '__main__':
     parser.add_argument('--teref', required=True, help='TE BLAT reference (2bit)')
     parser.add_argument('--minsupport', default=5, help='minimum support (read count, default=5)')
     parser.add_argument('--tlfilter', action='store_true', help='turn on translocation filter (stringent/experimental)')
+    parser.add_argument('--olfilter', action='store_true', help='turn on donor/acceptor overlap filter (stringent/experimental)')
     parser.add_argument('--allowknown', action='store_true', help='keep known non-reference insertions even if other filters exclude them')
     parser.add_argument('--refport', default=9999)
     parser.add_argument('--teport', default=9998)

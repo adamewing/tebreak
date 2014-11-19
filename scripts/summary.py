@@ -315,19 +315,23 @@ def summary(tldlist, wb, args, mastertld=None, tophits=False, excludelibs=None):
     for insloc in mastertld.keys():
         assert len(mastertld[insloc]) > 0, "Error: zero length insloc: " + insloc 
         if mastertld[insloc]['Ref_TE'] != 'NA':
+            sys.stderr.write("DEBUG: " + insloc + " Ref_TE filter hit.\n")
             filtered[insloc] = True
 
         if int(mastertld[insloc]['Total_Support']) < int(args.minsupport):
+            sys.stderr.write("DEBUG: " + insloc + " Total_Support filter hit.\n")
             filtered[insloc] = True
 
         if tophits:
             if not args.allowknown:
                 if mastertld[insloc]['Known_Nonref'] != 'NA':
+                    sys.stderr.write("DEBUG: " + insloc + " Known_Nonref filter hit.\n")
                     filtered[insloc] = True
 
             libcounts = getlibcounts(mastertld[insloc]['Library_List'])
 
             if checkexclude(excludelibs, libcounts):
+                sys.stderr.write("DEBUG: " + insloc + " Library_List filter hit.\n")
                 filtered[insloc] = True
 
         ldata = {}
@@ -377,6 +381,9 @@ def summary(tldlist, wb, args, mastertld=None, tophits=False, excludelibs=None):
     if tophits:
         for insloc in mastertld.keys():
             if 'Bad_BLAT' in mastertld[insloc] and mastertld[insloc]['Bad_BLAT'] == 'True':
+                sys.stderr.write("DEBUG: " + insloc + " Bad_BLAT filter hit.\n")
+                sys.stderr.write("Right data: " + mastertld[insloc]['BLAT_Filter_Data_Right'] + "\n")
+                sys.stderr.write("Left data: " + mastertld[insloc]['BLAT_Filter_Data_Left'] + "\n")
                 del mastertld[insloc]
 
     ws = None
@@ -558,7 +565,7 @@ if __name__ == '__main__':
     parser.add_argument('--excludelibs', default=None, help='file containing list of libraries to exclude')
     parser.add_argument('--genomeref', required=True, help='genome BLAT reference (2bit)')
     parser.add_argument('--teref', required=True, help='TE BLAT reference (2bit)')
-    parser.add_argument('--minsupport', default=5, help='minimum support (read count, default=5)')
+    parser.add_argument('--minsupport', default=4, help='minimum support (read count, default=4)')
     parser.add_argument('--tlfilter', action='store_true', help='turn on translocation filter (stringent/experimental)')
     parser.add_argument('--olfilter', action='store_true', help='turn on donor/acceptor overlap filter (stringent/experimental)')
     parser.add_argument('--allowknown', action='store_true', help='keep known non-reference insertions even if other filters exclude them')

@@ -175,7 +175,7 @@ def ref_parsepsl(psl, chrom, pos):
     with open(psl, 'r') as inpsl:
         for line in inpsl:
             rec = PSL(line)
-            if rec.match(chrom, pos):
+            if rec.match(chrom, pos, window=10):
                 recs.append(rec)
     return sorted(recs)
 
@@ -262,32 +262,51 @@ def checkseq(cons, chrom, pos, eltclass, refrmsktbx, genomeref, teref, refport, 
 
     # Filters
     if len(ref_recs) == 0 or len(te_recs) == 0:
-        data['pass'] = False
-        return data
+        # try to rescue by trimming out te part
+        if len(te_recs) == 0:
+            data['pass'] = False
+            return data
 
-    else:
-        data['tematch']     = te_recs[0].pctmatch()
-        data['refmatch']    = ref_recs[0].pctmatch()
-        data['refmatchlen'] = int(ref_recs[0].tEnd) - int(ref_recs[0].tStart)
-        data['refquerylen'] = int(ref_recs[0].qEnd) - int(ref_recs[0].qStart)
-        data['tematchlen']  = int(te_recs[0].tEnd) - int(te_recs[0].tStart)
-        data['tequerylen']  = int(te_recs[0].qEnd) - int(te_recs[0].qStart)
-        data['overlap']     = min(te_recs[0].qEnd, ref_recs[0].qEnd) - max(te_recs[0].qStart, ref_recs[0].qStart)
-        data['refqstart']   = ref_recs[0].qStart
-        data['refqend']     = ref_recs[0].qEnd
-        data['teqstart']    = te_recs[0].qStart
-        data['teqend']      = te_recs[0].qEnd
-        data['teclass']     = te_recs[0].tName.split(':')[0]
-        data['tefamily']    = te_recs[0].tName.split(':')[-1]
-        data['olpctile']    = donorcoords(donor_recs, ref_recs[0].qStart, ref_recs[0].qEnd) 
-        data['tlfilter']    = None
+        # trim out te part
+        cons = cons.replace(cons[te_recs[0].qStart:te_recs[0].qEnd], '')
 
-        if tlfilter:
-            data['tlfilter'] = transloc_filter(ref_psl, chrom, pos, refrmsktbx, eltclass)
+        os.remove(fa)
+        os.remove(ref_psl)
 
-        if maptabix is not None:
-            if chrom in maptabix.contigs:
-                data['avgmap'] = checkmap(maptabix, chrom, int(ref_recs[0].tStart), int(ref_recs[0].tEnd))
+        with open(fa, 'w') as tmpfa:
+            tmpfa.write('>' + chrom + ':' + str(pos) + '\n' + cons + '\n')
+
+        blat(fa, genomeref, ref_psl, port=refport, minScore=0)
+        ref_recs = ref_parsepsl(ref_psl, chrom, pos)
+        donor_recs = donor_parsepsl(ref_psl, chrom, pos)
+
+        if len(ref_recs) == 0: # give up
+            data['pass'] = False
+            return data
+
+
+    data['tematch']     = te_recs[0].pctmatch()
+    data['refmatch']    = ref_recs[0].pctmatch()
+    data['refmatchlen'] = int(ref_recs[0].tEnd) - int(ref_recs[0].tStart)
+    data['refquerylen'] = int(ref_recs[0].qEnd) - int(ref_recs[0].qStart)
+    data['tematchlen']  = int(te_recs[0].tEnd) - int(te_recs[0].tStart)
+    data['tequerylen']  = int(te_recs[0].qEnd) - int(te_recs[0].qStart)
+    data['overlap']     = min(te_recs[0].qEnd, ref_recs[0].qEnd) - max(te_recs[0].qStart, ref_recs[0].qStart)
+    data['refqstart']   = ref_recs[0].qStart
+    data['refqend']     = ref_recs[0].qEnd
+    data['teqstart']    = te_recs[0].qStart
+    data['teqend']      = te_recs[0].qEnd
+    data['teclass']     = te_recs[0].tName.split(':')[0]
+    data['tefamily']    = te_recs[0].tName.split(':')[-1]
+    data['olpctile']    = donorcoords(donor_recs, ref_recs[0].qStart, ref_recs[0].qEnd) 
+    data['tlfilter']    = None
+
+    if tlfilter:
+        data['tlfilter'] = transloc_filter(ref_psl, chrom, pos, refrmsktbx, eltclass)
+
+    if maptabix is not None:
+        if chrom in maptabix.contigs:
+            data['avgmap'] = checkmap(maptabix, chrom, int(ref_recs[0].tStart), int(ref_recs[0].tEnd))
 
     if data['tematch'] < 0.90:
         data['pass'] = False
@@ -328,6 +347,7 @@ def main(args):
         refrmsktbx = pysam.Tabixfile(args.refrmsk)
         data = checkseq(args.seq1, chrom1, pos1, args.eltclass, refrmsktbx, args.genomeref, args.teref, args.refport, args.teport, olfilter=args.olfilter)
         print data
+
     except Exception, e:
         sys.stderr.write("*"*60 + "\nerror in blat filter:\n")
         traceback.print_exc(file=sys.stderr)

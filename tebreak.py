@@ -8,6 +8,7 @@ import logging
 import subprocess
 import random
 import itertools
+import cPickle as pickle
 import multiprocessing as mp
 
 import numpy as np
@@ -494,6 +495,7 @@ class Insertion:
         self.discoreads = []
         self.dr_prox_clusters = []
         self.dr_dist_clusters = []
+        self.fastqrecs = []
 
     def paired(self):
         return None not in (self.be1, self.be2)
@@ -641,7 +643,8 @@ class Insertion:
                         outreads[name] = read.seq + '\n+\n' + read.qual
 
             for name, data in outreads.iteritems():
-                out.write('>%s\n%s\n' % (name, data))
+                out.write('@%s\n%s\n' % (name, data))
+                self.fastqrecs.append('@%s\n%s\n' % (name, data))
 
         return out_fastq
 
@@ -1038,6 +1041,7 @@ def process_insertion(ins, bam, outpath):
 
     pi['SR'] = ins.sr_info
     pi['DR'] = ins.dr_info
+    pi['READSTORE'] = ins.fastqrecs
 
     # various FASTA/FASTQ outputs
     ins.unmapped_fastq(outpath)
@@ -1154,6 +1158,9 @@ def text_summary(insertions):
  
 def main(args):
     ''' housekeeping '''
+    logger = logging.getLogger(__name__)
+    if args.verbose: logger.setLevel(logging.DEBUG)
+
     checkref(args.bwaref)
 
     if not os.path.exists(args.fasta_out_path):
@@ -1174,8 +1181,6 @@ def main(args):
         with open(args.interval_bed, 'r') as bed:
             chunks = [(line.strip().split()[0], int(line.strip().split()[1]), int(line.strip().split()[2])) for line in bed]
 
-    print chunks
-
     reslist = []
 
     for chunk in chunks:
@@ -1191,7 +1196,12 @@ def main(args):
     insertions = resolve_duplicates(insertions)
     text_summary(insertions)
 
+    pickoutfn = re.sub('.bam$', '.tebreak.pickle', os.path.basename(args.bam))
 
+    with open(pickoutfn, 'w') as pickout:
+        pickle.dump(insertions, pickout)
+
+    logger.debug('Pickled to %s' % pickoutfn)
 
  
 if __name__ == '__main__':

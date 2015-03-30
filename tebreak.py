@@ -1,490 +1,81 @@
 #!/usr/bin/env python
-
-'''
-tebreak.py: Identify TE insertion sites from split reads
-
-
-contact: Adam Ewing (adam.ewing@mater.uq.edu.au)
-
-'''
-
-
-import argparse
-import subprocess
-import gzip
+ 
 import os
-import sys
+import re
 import pysam
-import datetime
+import argparse
+import logging
+import subprocess
+import random
+import itertools
+import multiprocessing as mp
 
+import numpy as np
+import scipy.stats as ss
+ 
+from uuid import uuid4
 from string import maketrans
 from collections import Counter
 from collections import OrderedDict as od
-from uuid import uuid4
-from itertools import izip
-from re import sub, search
-from textwrap import dedent
-from shutil import move, copy
-
-
-class SplitRead:
-    ''' gread = genome read, tread = TE read '''
-    def __init__(self, gread, tread, tname, chrom, loc, tlen, rescue=False, breakloc=None):
-        self.gread     = gread
-        self.tread     = tread  
-        self.alignloc  = int(loc)
-        self.breakloc  = None
-        self.teside    = None # '5' or '3' (5' or 3')
-        self.chrom     = chrom
-        self.tlen      = int(tlen)
-        self.embedded  = False # nonref TE is completely embedded in read
-        self.breakside = '' # L or R
-
-        self.tclass, self.tname = tname.split(':')
-        
-
-        if gread.qstart < gread.rlen - gread.qend:
-            self.breakloc  = gread.positions[-1] # breakpoint on right
-            self.breakside = 'R'
-            if self.tread.is_reverse:
-                self.teside = '3'
-            else:
-                self.teside = '5'
-        else:
-            self.breakloc  = gread.positions[0] # breakpoint on left
-            self.breakside = 'L'
-            if self.tread.is_reverse:
-                self.teside = '5'
-            else:
-                self.teside = '3'
-
-        if self.tclass == 'POLYA':
-            self.teside = '3'
-
-        assert self.breakloc is not None
-        assert self.teside is not None
-
-    def get_teloc(self):
-        ''' return start and end location of alignment within TE '''
-        return min(self.tread.positions), max(self.tread.positions)
-
-    def get_georient(self):
-        ''' return orientation of TE alignment relative to TE reference '''
-        if self.gread.is_reverse:
-            return '-'
-        else:
-            return '+'
-
-    def get_teorient(self):
-        ''' return orientation of TE alignment relative to TE reference '''
-        if self.tread.is_reverse:
-            return '-'
-        else:
-            return '+'
-
-    def reverseorient(self):
-        ''' infer TE orientation '''
-        return self.get_georient() != self.get_teorient()
-
-    def get_tematch(self):
-        ''' return number of mismatches / aligned length of TE sub-read '''
-        nm = [value for (tag, value) in self.tread.tags if tag == 'NM'][0]
-        return 1.0 - (float(nm)/float(self.tread.alen))
-
-    def get_gematch(self):
-        ''' return number of mismatches / aligned length of TE sub-read '''
-        nm = [value for (tag, value) in self.gread.tags if tag == 'NM'][0]
-        return 1.0 - (float(nm)/float(self.gread.alen))
-
-    def gmatchlen(self):
-        ''' return length of genome match '''
-        return self.gread.alen
-
-    def tmatchlen(self):
-        ''' return length of TE match '''
-        return self.tread.alen
-
-    def getbreakseq(self, flank=5):
-        ''' get breakend sequence from genome alignments '''
-        leftseq  = ''
-        rightseq = ''
-
-        if self.gread.qstart < self.gread.rlen - self.gread.qend: # right
-            leftseq  = self.gread.seq[self.gread.qend-flank:self.gread.qend].upper()
-            rightseq = self.gread.seq[self.gread.qend:self.gread.qend+flank].lower()
-        else: # left
-            leftseq  = self.gread.seq[self.gread.qstart-flank:self.gread.qstart].lower()
-            rightseq = self.gread.seq[self.gread.qstart:self.gread.qstart+flank].upper()
-
-        return leftseq + rightseq
-
-    def getRG(self):
-        ''' return read group from RG aux tag '''
-        for tag, val in self.gread.tags:
-            if tag == 'RG':
-                return val
-        return None
-
-    def __gt__(self, other):
-        ''' enables sorting of SplitRead objects '''
-        if self.chrom == other.chrom:
-            return self.breakloc > other.breakloc
-        else:
-            return self.chrom > other.chrom
-
-    def __str__(self):
-        return ','.join(map(str, ('SplitRead',self.chrom, self.breakloc, self.tname, self.tread.pos)))
-
-
-def uc(seq, start, end):
-    ''' uppercase part of a sequence '''
-    assert start < end
-    return seq[:start].lower() + seq[start:end].upper() + seq[end:].lower()
-
-
-class Cluster:
-    ''' store and manipulate groups of SplitRead objects '''
-    def __init__(self, firstread=None):
-        self._splitreads = []
-        self._start  = 0
-        self._end    = 0
-        self._median = 0
-        self.chrom   = None
-
-        # data for VCF fields
-        self.POS    = self._median
-        self.INFO   = od()
-        self.FORMAT = od()
-        self.FILTER = []
-        self.REF    = '.'
-        self.ID     = '.'
-        self.ALT    = '<INS:ME:FIXME>'
-        self.QUAL   = 100
-
-        # data about insertion point
-        self.tsd = None
-        self.deletion = None
-        self.fraction = None
-
-        if firstread is not None:
-            self.add_splitread(firstread)
-
-        self.INFO['KNOWN'] = '0'
-
-    def add_splitread(self, sr):
-        ''' add a SplitRead and update '''
-        self._splitreads.append(sr)
-        if self.chrom is None:
-            self.chrom = sr.chrom
-
-        assert self.chrom == sr.chrom # clusters can't include > 1 chromosome
-
-        if self._median > 0 and (self._median - sr.breakloc) > 1000:
-            print "WARNING: Splitread", str(sr), "more than 1000 bases from median of cluster."
-
-        ''' update statistics '''
-        self._splitreads.sort()
-        self._start  = self._splitreads[0].breakloc
-        self._end    = self._splitreads[-1].breakloc
-        self._median = self._splitreads[len(self)/2].breakloc
-        self.POS     = self._median
-
-    def greads(self):
-        ''' return list of genome-aligned pysam.AlignedRead objects '''
-        return [sr.gread for sr in self._splitreads]
-
-    def treads(self):
-        ''' return list of genome-aligned pysam.AlignedRead objects '''
-        return [sr.tread for sr in self._splitreads]
-
-    def bside(self, breakloc):
-        ''' return list of breaksides for given breakloc '''
-        bs = [sr.breakside for sr in self._splitreads if sr.breakloc == breakloc]
-        return Counter(bs).most_common(1)[0][0]
-
-    def te_classes(self):
-        ''' return distinct classes of TE in cluster '''
-        return list(set([read.tclass for read in self._splitreads]))
-
-    def te_names(self):
-        ''' return distinct classes of TE in cluster as Counter '''
-        return Counter([read.tname for read in self._splitreads])
-
-    def te_sides(self):
-        ''' return distinct classes of TE in cluster '''
-        return list(set([read.teside for read in self._splitreads]))
-
-    def be_sides(self):
-        ''' return distinct breakend sides (L or R) '''
-        return list(set([read.breakside for read in self._splitreads]))
-
-    def max_te_align(self, breakloc):
-        ''' return maximum te alignment length for breakend '''
-        return max([sr.tmatchlen() for sr in self._splitreads if sr.breakloc == breakloc])
-
-    def max_ge_align(self, breakloc):
-        ''' return maximum genome alignment length for breakend '''
-        return max([sr.gmatchlen() for sr in self._splitreads if sr.breakloc == breakloc])
-
-    def min_te_match(self, breakloc):
-        ''' return minimum te match fraction for breakend '''
-        return min([sr.get_tematch() for sr in self._splitreads if sr.breakloc == breakloc])
-
-    def min_ge_match(self, breakloc):
-        ''' return minimum te match fraction for breakend '''
-        return min([sr.get_gematch() for sr in self._splitreads if sr.breakloc == breakloc])
-
-    def guess_telen(self):
-        ''' approximate TE length based on TE alignments'''
-        extrema = self.te_extrema()
-        return max(extrema) - min(extrema)
-
-    def te_extrema(self):
-        ''' return maximum and minimum positions relative to the TE references '''
-        te_positions = []
-        [[te_positions.append(tepos) for tepos in sr.tread.positions] for sr in self._splitreads if sr.tclass != 'POLYA']
-        if len(te_positions) == 0:
-            te_positions.append(-1)
-        return min(te_positions), max(te_positions)
-
-    def ge_extrema(self):
-        ''' return maximum and minimum positions relative to the genome reference '''
-        ge_positions = []
-        [[ge_positions.append(gepos) for gepos in sr.gread.positions] for sr in self._splitreads]
-        return min(ge_positions), max(ge_positions)
-
-    def max_breakpoint_support(self):
-        ''' returns the count of the breakpoint with the most support '''
-        return self.all_breakpoints().most_common(1)[0][1]
-
-    def all_breakpoints(self):
-        ''' returns collections.Counter of breakpoints '''
-        return Counter([read.breakloc for read in self._splitreads])
-
-    def best_breakpoints(self, refbamfn): #TODO left-shift
-        ''' Return the most supported breakends. If tied, choose the pair that results in the smallest TSD '''
-        be   = []
-        mech = 'SingleEnd'
-
-        if len(self.te_sides()) == 1:
-            return self.all_breakpoints().most_common(1)[0][0], None, mech
-
-        n = 0
-        sides = [] #FIXME 
-        for breakend, count in self.all_breakpoints().most_common():
-            n += 1
-            if len(be) < 2:
-                if self.bside(breakend) not in sides:
-                    sides.append(self.bside(breakend))
-                    be.append([breakend, count])
-                    if n == 2:
-                        mech = self.guess_mechanism(refbamfn, be[0][0], breakend)
-            else:
-                if count == be[-1][1]: # next best breakend is tied for occurance count
-                    newmech = self.guess_mechanism(refbamfn, be[0][0], breakend)
-                    # prefer TSD annotations over all others
-                    if mech != 'TSD' and newmech == 'TSD':
-                        be[-1] = [breakend, count]
-                        mech = 'TSD'
-                    
-                    # ... but if neither or both are TSD, choose the smallest
-                    if (newmech == mech == 'TSD') or (mech != 'TSD' and newmech != 'TSD'): 
-                        if abs(be[-1][0] - be[0][0]) > abs(breakend - be[0][0]):
-                            be[-1] = [breakend, count]
-                            mech = newmech
-
-        if len(be) == 1:
-            return be[0][0], None, mech
-
-        if len(be) == 2:
-            return be[0][0], be[1][0], mech
-
-        raise ValueError('Cluster.best_breakpoints returned more than two breakends, panic!\n')
-
-    def majorbreakseq(self, breakloc, flank=5):
-        ''' return most common breakend sequence '''
-        gbest = [sr.getbreakseq(flank=flank) for sr in self._splitreads if sr.breakloc == breakloc]
-        return Counter(gbest).most_common(1)[0][0]
-
-    def guess_mechanism(self, refbamfn, bstart, bend):
-        ''' check depth manually (only way to get ALL reads), decide whether it's likely a TSD, Deletion, or other '''
-        if bstart > bend:
-            bstart, bend = bend, bstart
-
-        if len(self.te_sides()) == 1:
-            return "SingleEnd"
-
-        if bstart == bend:
-            return "EndoMinus"
-
-        window = 10
-        bam    = pysam.Samfile(refbamfn, 'rb')
-        depth  = od([(pos, 0) for pos in range(bstart-window, bend+window)])
-
-        for read in bam.fetch(self.chrom, bstart-window, bend+window):
-            for pos in read.positions:
-                if pos in depth:
-                    depth[pos] += 1
-
-        cov = depth.values()
-
-        meancov_left  = float(sum(cov[:window]))/float(window)
-        meancov_right = float(sum(cov[-window:]))/float(window)
-        meancov_break = float(sum(cov[window:-window]))/float(len(cov[window:-window]))
-
-        if meancov_break > meancov_left and meancov_break > meancov_right:
-            return "TSD"
-
-        if meancov_break < meancov_left and meancov_break < meancov_right:
-            return "Deletion"
-
-        return "Unknown"
-
-    def subcluster_by_class(self, teclass):
-        ''' return a new cluster contaning only TEs of teclass '''
-        new = Cluster()
-        [new.add_splitread(read) for read in self._splitreads if read.tclass == teclass or read.tclass == 'POLYA']
-        return new
-
-    def subcluster_by_breakend(self, breakends):
-        ''' return a new cluster containing only reads with breakpoints in passed list '''
-        new = Cluster()
-        [new.add_splitread(read) for read in self._splitreads if read.breakloc in breakends]
-        return new
-
-    def fwdbreaks(self):
-        ''' return count of splitreads supporting a forward orientation '''
-        return len([sr for sr in self._splitreads if not sr.reverseorient()])
-
-    def revbreaks(self):
-        ''' return count of splitreads supporting a reverse orientation '''
-        return len([sr for sr in self._splitreads if sr.reverseorient()])
-
-    def diversity(self):
-        ''' secondary alignments might not end up marked as duplicates and can pile up in high depth samples '''
-        ''' current solution is to return the number of unique mappings based on position + CIGAR string '''
-        uniqmaps = list(set([str(sr.gread.pos) + str(sr.gread.cigarstring) for sr in self._splitreads]))
-        return len(uniqmaps)
-
-    def mean_genome_qual(self):
-        quals = [sr.gread.mapq for sr in self._splitreads]
-        return float(sum(quals))/float(len(quals))
-
-    def unclipfrac(self, refbamfn):
-        ''' track fraction of reads over cluster region that are unclipped '''
-        used   = {}
-        unclip = 0
-        total  = 0
-
-        bam = pysam.Samfile(refbamfn, 'rb')
-        for read in bam.fetch(self.chrom, self._start, self._end+1):
-            uid = ':'.join(map(str, (read.tid,read.pos,read.rlen,read.is_reverse)))
-            if uid not in used:
-                if read.alen == read.rlen and not search('H', read.cigarstring):
-                    unclip += 1
-                total += 1
-            used[uid] = True
-
-        return float(unclip)/float(total)
-
-    def checksnps(self, dbsnpfn, refbamfn):
-        ''' dbsnpfn should be a tabix-indexed version of a dbSNP VCF '''
-        dbsnp = pysam.Tabixfile(dbsnpfn)
-        bam   = pysam.Samfile(refbamfn, 'rb')
-
-        foundsnps  = []
-        start, end = self.find_extrema() 
-        
-        snps = od()
-        if self.chrom in dbsnp.contigs:
-            for rec in dbsnp.fetch(self.chrom, start, end):
-                snps[int(rec.strip().split()[1])] = rec
-
-        for read in bam.fetch(self.chrom, start, end):
-            for rpos, gpos in read.aligned_pairs:
-                if gpos is not None and rpos is not None and int(gpos+1) in snps:
-                    snp_chrom, snp_pos, snp_id, snp_ref, snp_alt = snps[int(gpos+1)].split()[:5]
-                    if rpos is None:
-                        print "DEBUG: rpos is None somewhere:", read.aligned_pairs
-                    clusterbase = read.seq[rpos+read.qstart].upper() # rpos offsets to first _aligned_ base
-                    if len(snp_ref) == len(snp_alt) == 1 and clusterbase == snp_alt.upper():
-                        foundsnps.append(':'.join((snp_id, clusterbase, 'ALT')))
-                    if len(snp_ref) == len(snp_alt) == 1 and clusterbase == snp_ref.upper():
-                        foundsnps.append(':'.join((snp_id, clusterbase, 'REF')))
-
-        bam.close()
-        reportsnps = [snp for snp, count in Counter(foundsnps).iteritems() if count > 1]
-        return reportsnps
-
-    def readgroups(self):
-        c = Counter([sr.getRG() for sr in self._splitreads])
-        return [str(k[0]) + '|' + str(k[1]) for k in zip(c.keys(), c.values())]
-
-    def find_extrema(self):
-        ''' return leftmost and rightmost aligned positions in cluster vs. reference '''
-        positions = []
-        positions += [pos for sr in self._splitreads for pos in sr.gread.positions]
-        return min(positions), max(positions)
-
-    def __str__(self):
-        ''' convert cluster into VCF record '''
-        output = [self.chrom, str(self.POS), self.ID, self.REF, self.ALT, str(self.QUAL)]
-        output.append(';'.join(self.FILTER))
-        output.append(';'.join([key + '=' + str(val) for key,val in self.INFO.iteritems()]))
-        output.append(':'.join([key for key,val in self.FORMAT.iteritems()]))
-        output.append(':'.join([str(val) for key,val in self.FORMAT.iteritems()]))
-        return '\t'.join(output)
-
-    def __len__(self):
-        return len(self._splitreads)
-
-
+from collections import defaultdict as dd
+
+
+ 
+#######################################
+## Classes                           ##
+#######################################
+ 
+ 
 class AlignedColumn:
     ''' used by MSA class to store aligned bases '''
     def __init__(self):
         self.bases = od() # species name --> base
         self.annotations = od() # metadata
-
+ 
     def gap(self):
-        if '-' in self.bases.values():
-            return True
+        if '-' in self.bases.values(): return True
         return False
-
+ 
     def subst(self):
-        if self.gap():
-            return False
-
-        if len(set(self.bases.values())) > 1:
-            return True
+        if self.gap(): return False
+        if len(set(self.bases.values())) > 1: return True
         return False
-
+ 
     def cons(self):
         ''' consensus prefers bases over gaps '''
         for base, count in Counter(map(str.upper, self.bases.values())).most_common():
-            if base != '-':
-                return base
+            if base != '-': return base
+ 
+    def score(self):
+        topbase = self.cons()
+        nongaps = [b for b in map(str.upper, self.bases.values()) if b != '-']
+        matches = [b for b in map(str.upper, self.bases.values()) if b == topbase]
 
+        if len(nongaps) == 0: return 0.0
+ 
+        return float(len(matches)) / float(len(nongaps))
+ 
+ 
     def __str__(self):
         return str(self.bases)
-
-
+ 
+ 
 class MSA:
     ''' multiple sequence alignment class '''
     def __init__(self, infile=None):
         self.columns = []
         self.ids     = []
         self.seqs    = od()
-
-        if infile is not None:
-            self.readFastaMSA(infile)
-
+ 
+        if infile is not None: self.readFastaMSA(infile)
+ 
     def __len__(self):
         return len(self.columns)
-
+ 
     def readFastaMSA(self, infile):
         id   = None
         seq  = ''
-
+ 
         with open(infile, 'r') as fasta:
             for line in fasta:
                 line = line.strip()
@@ -497,7 +88,7 @@ class MSA:
                 else:
                     seq += line
             self.seqs[id] = seq
-
+ 
         first = True
         colen = 0
         for ID, seq in self.seqs.iteritems():
@@ -515,775 +106,1114 @@ class MSA:
                     ac = self.columns[pos]
                     ac.bases[ID] = base
                     pos += 1
-
+ 
     def consensus(self):
         ''' compute consensus '''
-        bases = [column.cons() for column in self.columns]
+        bases  = [column.cons() for column in self.columns]
+        scores = [column.score() for column in self.columns]
+ 
         if bases is not None and None not in bases:
-            return ''.join(bases)
+            return ''.join(bases), np.mean(scores)
         else:
             sys.stderr.write("ERROR\t" + now() + "\tNone found in consensus sequence\n")
-            return ''
+            return '', np.mean(scores)
 
 
-def now():
-    return str(datetime.datetime.now())
+class Genome:
+    def __init__(self, gfn):
+        ''' gfn = genome file name (.fai or chrom, length tsv) '''
+        self.chrlen = {} # length of each chromosome
+        self.chrmap = [] # used for picking chromosomes
+ 
+        self.bp = 0
+        bins = 100000
+ 
+        with open(gfn, 'r') as g:
+            for line in g:
+                if not line.startswith('#'):
+                    chrom, length = line.strip().split()[:2]
+                    self.chrlen[chrom] = int(length)
+                    self.bp += int(length)
+     
+        for chrom, length in self.chrlen.iteritems():
+            self.chrmap += [chrom] * int(float(length) / float(self.bp) * bins)
+ 
+    def pick(self):
+        ''' return a random chromosome and position '''
+        rchrom = random.choice(self.chrmap)
+        rpos   = int(random.uniform(1, self.chrlen[rchrom]))
+ 
+        return rchrom, rpos
+ 
+    def addpad(self, interval, pad):
+        ''' pad interval such that it doesn't go out of bounds '''
+        chrom, start, end = interval
+        start = int(start) - int(pad)
+        end   = int(end) + int(pad)
+
+        assert chrom in self.chrlen, "error padding interval %s, %s not a known chromosome" % (str(interval), chrom)
+
+        if start < 0: start = 0
+        if end > self.chrlen[chrom]: end = self.chrlen[chrom]
+
+        return (chrom, start, end)
 
 
-def print_vcfheader(fh, samplename):
-    fh.write(sub('FIXME',samplename,dedent("""\
-    ##fileformat=VCFv4.1
-    ##phasing=none
-    ##INDIVIDUAL=FIXME
-    ##SAMPLE=<ID=FIXME,Individual="FIXME",Description="sample name">
-    ##INFO=<ID=CIPOS,Number=2,Type=Integer,Description="Confidence interval around POS for imprecise variants">
-    ##INFO=<ID=IMPRECISE,Number=0,Type=Flag,Description="Imprecise structural variation">
-    ##INFO=<ID=SVTYPE,Number=1,Type=String,Description="Type of structural variant">
-    ##INFO=<ID=SVLEN,Number=.,Type=Integer,Description="Difference in length between REF and ALT alleles">
-    ##INFO=<ID=SOMATIC,Number=0,Type=Flag,Description="Somatic mutation in primary">
-    ##INFO=<ID=END,Number=1,Type=Integer,Description="Position of second breakend (same as first if not known)">
-    ##INFO=<ID=TESIDES,Number=.,Type=Integer,Description="Note if 3prime and 5prime ends are detected">
-    ##INFO=<ID=MECH,Number=1,Type=String,Description="Hints about the insertion mechanism (TSD, Deletion, EndoMinus, etc.)">
-    ##INFO=<ID=KNOWN,Number=1,Type=Integer,Description="1=Known from a previous study">
-    ##INFO=<ID=INV,Number=1,Type=Integer,Description="1=Inverted insertion">
-    ##INFO=<ID=TSDLEN,Number=1,Type=Integer,Description="TSD Length">
-    ##FORMAT=<ID=BREAKS,Number=.,Type=String,Description="Positions:Counts of all breakends detected">
-    ##FORMAT=<ID=POSBREAKSEQ,Number=1,Type=String,Description="Sequence of the POS breakend">
-    ##FORMAT=<ID=ENDBREAKSEQ,Number=1,Type=String,Description="Sequence of the INFO.END breakend">
-    ##FORMAT=<ID=RG,Number=1,Type=String,Description="Readgroups">
-    ##FORMAT=<ID=TEALIGN,Number=.,Type=String,Description="Retroelement subfamilies (or POLYA) with alignments">
-    ##FORMAT=<ID=RC,Number=1,Type=Float,Description="Read Count">
-    ##FORMAT=<ID=UCF,Number=1,Type=Float,Description="Unclipped Fraction">
-    ##FORMAT=<ID=FWD,Number=1,Type=Integer,Description="Number of forward oriented splitreads">
-    ##FORMAT=<ID=REV,Number=1,Type=Integer,Description="Number of reverse oriented splitreads">
-    ##ALT=<ID=DEL,Description="Deletion">
-    ##ALT=<ID=INS,Description="Insertion">
-    ##ALT=<ID=INS:ME:ALU,Description="Insertion of ALU element">
-    ##ALT=<ID=INS:ME:L1,Description="Insertion of L1 element">
-    ##ALT=<ID=INS:ME:SVA,Description="Insertion of SVA element">
-    ##ALT=<ID=INS:ME:POLYA,Description="Insertion of POLYA sequence">
-    ##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
-    #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tFIXME"""))+'\n')
+    def chunk(self, n, seed=None, sorted=False, pad=0):
+        ''' break genome into n evenly-sized chunks, return n lists of (chrom, start, end) '''
+        chunklen = int(self.bp/n)
+        
+        chunks = []
+        intervals = []
+ 
+        chunkleft = chunklen # track how much genome needs to go into each chunk
+ 
+        chromlist = self.chrlen.keys()
+ 
+        if sorted:
+            chromlist.sort()
+        else:
+            if seed is not None: random.seed(seed)
+            random.shuffle(chromlist)
+ 
+        for chrom in chromlist:
+            length = self.chrlen[chrom]
+ 
+            lenleft = length
+            if length <= chunkleft:
+                chunkleft -= length
+                lenleft -= length
+                intervals.append( self.addpad((chrom, 0, length), pad) )
+                assert lenleft == 0
+ 
+                if chunkleft == 0:
+                    chunkleft = chunklen
+                    chunks.append(intervals)
+                    intervals = []
+            else:
+                while lenleft > 0:
+                    if lenleft >= chunkleft:
+                        intervals.append( self.addpad((chrom, length-lenleft, length-lenleft+chunkleft), pad) )
+                        lenleft -= chunkleft
+ 
+                        chunkleft = chunklen
+                        chunks.append(intervals)
+                        intervals = []
+ 
+                    else: # lenleft < chunkleft
+                        intervals.append( self.addpad((chrom, length-lenleft, length), pad) )
+                        chunkleft -= lenleft
+                        lenleft -= lenleft
+ 
+        return list(itertools.chain.from_iterable(chunks)) # flatten list
+
+ 
+class SplitRead:
+    ''' store information about split read alignment '''
+    def __init__(self, chrom, read):
+        self.uuid  = str(uuid4())
+        self.chrom = chrom
+        self.read  = read
+
+        self.cliplen = len(read.seq) - len(read.query_alignment_sequence)
+
+        self.breakleft  = False
+        self.breakright = False
+        self.breakpos   = None
+ 
+        if read.qstart < read.rlen - read.qend:
+            self.breakpos   = read.get_reference_positions()[-1] # breakpoint on right
+            self.breakright = True
+ 
+        else:
+            self.breakpos  = read.get_reference_positions()[0] # breakpoint on left
+            self.breakleft = True
+ 
+        assert self.breakpos is not None
+        assert self.breakleft != self.breakright
+ 
+    def getRG(self):
+        ''' return read group from RG aux tag '''
+        for tag, val in self.read.tags:
+            if tag == 'RG': return val
+        return None
+ 
+    def __gt__(self, other):
+        ''' enables sorting of SplitRead objects '''
+        if self.chrom == other.chrom:
+            return self.breakpos > other.breakpos
+        else:
+            return self.chrom > other.chrom
+ 
+    def __str__(self):
+        return ' '.join(map(str, ('SplitRead:', self.chrom, self.breakpos, self.read.qname)))
+ 
+ 
+class DiscoRead:
+    ''' store information about discordant pair alignment '''
+    def __init__(self, chrom, read, mate_chrom=None):
+        self.chrom = chrom
+        self.read  = read
+ 
+        self.mate_chrom = mate_chrom # can be None
+        self.mate_read  = None  # set later
+ 
+    def mate_mapped(self):
+        return self.mate_chrom is not None
+
+    def sortable_pair(self):
+        ''' return mapped reads & mates as list of SortableRead reads '''
+        if self.mate_mapped():
+            return [SortableRead(self.chrom, self.read), SortableRead(self.mate_chrom, self.mate_read)]
+        else:
+            return [SortableRead(self.chrom, self.read)]
+
+    def __str__(self):
+        return  ' '.join(map(str, (self.chrom, self.read, self.mate_chrom, self.mate_start)))
 
 
+class ReadCluster:
+    ''' parent class for read clusters '''
+    def __init__(self, firstread=None):
+        self.uuid   = str(uuid4())
+        self.reads  = []
+        self.start  = 0
+        self.end    = 0
+        self.median = 0
+        self.chrom  = None
+
+        if firstread is not None:
+            self.add_read(firstread)
+
+    def add_read(self, r):
+        ''' add a read and update '''
+        self.reads.append(r)
+ 
+        if self.chrom is None: self.chrom = r.chrom
+ 
+        assert self.chrom == r.chrom # clusters can't include > 1 chromosome
+ 
+        ''' update statistics '''
+        positions = []
+        positions += [pos for r in self.reads for pos in r.read.positions]
+
+        self.reads.sort()
+        self.start  = max(positions)
+        self.end    = min(positions)
+        self.median = int(np.median(positions))
+
+    def readgroups(self):
+        c = Counter([r.getRG() for r in self.reads])
+        return [str(k[0]) + '|' + str(k[1]) for k in zip(c.keys(), c.values())]
+ 
+    def find_extrema(self):
+        ''' return leftmost and rightmost aligned positions in cluster vs. reference '''
+        positions = []
+        positions += [pos for r in self.reads for pos in r.read.positions]
+        return min(positions), max(positions)
+ 
+    def avg_matchpct(self):
+        return np.mean([read_matchpct(r.read) for r in self.reads])
+
+    def make_fasta(self, outdir):
+        ''' for downstream consensus building '''
+        out_fasta = outdir + '/' + '.'.join(('tebreak', str(uuid4()), 'fasta'))
+        with open(out_fasta, 'w') as out:
+            for sr in self.reads:
+                read = sr.read
+                name = read.qname
+                if read.is_read1:
+                    name += '/1'
+                if read.is_read2:
+                    name += '/2'
+ 
+                out.write('>%s\n%s\n' % (name, read.seq))
+ 
+        return out_fasta
+ 
+    def __len__(self):
+        return len(self.reads)
+
+
+class SplitCluster(ReadCluster):
+    ''' store and manipulate groups of SplitRead objects '''
+
+    def add_splitread(self, sr):
+        ''' add a SplitRead and update '''
+        self.reads.append(sr)
+ 
+        if self.chrom is None: self.chrom = sr.chrom
+ 
+        assert self.chrom == sr.chrom # clusters can't include > 1 chromosome
+ 
+        if self.median > 0 and (self.median - sr.breakpos) > 1000:
+            print "WARNING: Splitread", str(sr), "more than 1000 bases from median of cluster."
+ 
+        ''' update statistics '''
+        self.reads.sort()
+        self.start  = self.reads[0].breakpos
+        self.end    = self.reads[-1].breakpos
+        self.median = self.reads[len(self)/2].breakpos
+ 
+    def subcluster_by_breakend(self, breakends, direction='both'):
+        ''' return a new cluster containing only reads with breakpoints in passed list '''
+        new = SplitCluster()
+        assert direction in ('both', 'left', 'right')
+        
+        if direction == 'both':
+            [new.add_splitread(sr) for sr in self.reads if sr.breakpos in breakends]
+ 
+        if direction == 'left':
+            [new.add_splitread(sr) for sr in self.reads if sr.breakpos in breakends and sr.breakleft]
+ 
+        if direction == 'right':
+            [new.add_splitread(sr) for sr in self.reads if sr.breakpos in breakends and sr.breakright]           
+ 
+        return new
+ 
+    def all_breakpoints(self):
+        ''' returns uniquified list of breakpoints '''
+        return list(set([read.breakpos for read in self.reads]))
+ 
+    def median_D(self):
+        return np.median([splitqual(sr.read) for sr in self.reads])
+
+    def min_cliplen(self):
+        return min([sr.cliplen for sr in self.reads])
+
+    def max_cliplen(self):
+        return max([sr.cliplen for sr in self.reads])
+ 
+    def __str__(self):
+        return '\t'.join(map(str, (self.chrom, self.start, self.end, len(self.reads), self.all_breakpoints())))
+
+
+class DiscoCluster(ReadCluster):
+    ''' store and manipulate groups of DiscoRead objects '''
+
+    def overlap_insertion(self, insertion):
+        iv_ins = [insertion.min_supporting_base(), insertion.max_supporting_base()]
+        iv_dsc = self.find_extrema()
+
+        return min(iv_ins[1], iv_dsc[1]) - max(iv_ins[0], iv_dsc[0]) > 0
+
+ 
+class BreakEnd:
+    ''' coallate information about a breakend '''
+    def __init__(self, chrom, breakpos, cluster, consensus, score):
+        self.uuid      = str(uuid4())
+        self.cluster   = cluster
+        self.chrom     = chrom
+        self.breakpos  = breakpos
+        self.consensus = consensus
+        self.consscore = score
+ 
+        self.mappings = []
+ 
+    def microhomology(self):
+        pass # placeholder
+ 
+    def proximal_subread(self):
+        ''' return mapping(s) containing breakpoint '''
+        return [read for read in self.mappings if self.breakpos in read.get_reference_positions()]
+ 
+    def distal_subread(self):
+        ''' return mapping(s) not containing breakpoint '''
+        return [read for read in self.mappings if self.breakpos not in read.get_reference_positions()]
+ 
+    def unmapped_subread(self):
+        ''' returns list of intervals and corresponding subseqs '''
+        covered_bases = []
+        for subseq in map(lambda x : x.query_alignment_sequence, self.mappings):
+            subseq = orient_subseq(self.consensus, subseq)
+            covered_bases += range(*locate_subseq(self.consensus, subseq))
+ 
+        subseqs   = []
+        intervals = []
+ 
+        interval = []
+        subseq   = []
+ 
+        for p, b in enumerate(list(self.consensus)):
+            if p not in covered_bases:
+                if len(interval) > 0 and interval[-1]+1 < p:
+                    intervals.append( (min(interval), max(interval)) )
+                    subseqs.append(''.join(subseq))
+                    interval = []
+                    subseq   = []
+ 
+                else:
+                    interval.append(p)
+                    subseq.append(b)
+ 
+        if len(interval) > 0:
+            intervals.append( (min(interval), max(interval)) )
+            subseqs.append(''.join(subseq))
+ 
+        return intervals, subseqs
+ 
+    def __len__(self):
+        return len(self.cluster)
+ 
+
+class SortableRead:
+    ''' wrapper class to make pysam.AlignetSegment reads sortable '''
+    def __init__(self, chrom, read):
+        self.chrom = chrom
+        self.read  = read
+
+    def __gt__(self, other):
+        return self.read.get_reference_positions()[0] > other.read.get_reference_positions()[0]
+
+    def __lt__(self, other):
+        return self.read.get_reference_positions()[0] < other.read.get_reference_positions()[0]
+
+    def __eq__(self, other):
+        return self.read.get_reference_positions()[0] == other.read.get_reference_positions()[0]
+
+
+class Insertion:
+    ''' store and compile information about an insertion with 1 or 2 breakpoints '''
+    def __init__(self, be1=None, be2=None):
+        self.uuid = str(uuid4())
+
+        self.be1 = None
+        self.be2 = None
+ 
+        if be1 is not None:
+            self.be1 = be1
+        if be2 is not None:
+            self.be2 = be2
+ 
+        if self.paired():
+            if self.be1.breakpos > self.be2.breakpos:
+                self.be1, self.be2 = self.be2, self.be1 # keep breakends in position order
+
+        self.sr_info = od() # split read info, set with self.compile_sr_info()
+        self.dr_info = od() # discordant read info, set with self.compile_dr_info()
+        self.discoreads = []
+        self.dr_prox_clusters = []
+        self.dr_dist_clusters = []
+
+    def paired(self):
+        return None not in (self.be1, self.be2)
+ 
+    def breakend_overlap(self):
+        if not self.paired():
+            return None
+ 
+        return ref_dist(self.be1.proximal_subread()[0], self.be2.proximal_subread()[0])
+ 
+    def min_supporting_base(self):
+        ''' return leftmost supporting reference position covered '''
+        be2 = []
+        if self.be2 is not None:
+            be2 = self.be2.proximal_subread()[0].get_reference_positions()
+
+        return min(self.be1.proximal_subread()[0].get_reference_positions() + be2)
+
+    def max_supporting_base(self):
+        ''' return rightmost supporting reference position covered '''
+        be2 = []
+        if self.be2 is not None:
+            be2 = self.be2.proximal_subread()[0].get_reference_positions()
+
+        return max(self.be1.proximal_subread()[0].get_reference_positions() + be2)
+
+    def tsd(self):
+        ''' target site duplication '''
+        if not self.paired():
+            return None
+ 
+        if self.breakend_overlap() > 0:
+            return None
+ 
+        else:
+            junc1 = self.be1.proximal_subread()[0]
+            junc2 = self.be2.proximal_subread()[0]
+ 
+            tsd_ref_interval = ref_overlap(junc1, junc2)
+
+            if tsd_ref_interval is None:
+                return None
+
+            tsd_ref_interval[1] += 1
+ 
+            tsdseq1 = ''
+            tsdseq2 = ''
+ 
+            for (qrypos, refpos) in junc1.get_aligned_pairs():
+                if refpos in range(*tsd_ref_interval):
+                    if qrypos is not None:
+                        tsdseq1 += junc1.seq[qrypos+junc1.qstart]
+ 
+            for (qrypos, refpos) in junc2.get_aligned_pairs():
+                if refpos in range(*tsd_ref_interval):
+                    if qrypos is not None:
+                        tsdseq2 += junc2.seq[qrypos+junc2.qstart]
+ 
+            return tsdseq1, tsdseq2
+
+    def fetch_discordant_reads(self, bam, isize=10000):
+        ''' Return list of DiscoRead objects '''
+        chrom = self.be1.chrom
+        start = self.min_supporting_base()
+        end   = self.max_supporting_base()
+     
+        assert start < end
+
+        mapped   = {}
+        unmapped = {}
+     
+        for read in bam.fetch(chrom, start, end):
+            if not read.is_unmapped and not read.is_duplicate:
+                chrom = str(bam.getrname(read.tid))
+     
+                if read.mate_is_unmapped:
+                    unmapped[read.qname] = DiscoRead(chrom, read)
+     
+                else:
+                    pair_dist = abs(read.reference_start - read.next_reference_start)
+                    if read.tid != read.next_reference_id or pair_dist > isize:
+                        mate_chrom = str(bam.getrname(read.next_reference_id))
+                        mapped[read.qname] = DiscoRead(chrom, read, mate_chrom)
+
+        # get mate info
+
+        # mate mapped
+        for qname, dr in mapped.iteritems():
+            for read in bam.fetch(dr.mate_chrom, dr.read.next_reference_start-1, dr.read.next_reference_start+1):
+                if read.qname == qname and not read.is_secondary and not is_supplementary(read):
+                    if read.seq != mapped[qname].read.seq:
+                        mapped[qname].mate_read = read
+
+        # mate unmapped
+        for read in bam.fetch(chrom, start, end):
+            if read.is_unmapped and read.qname in unmapped:
+                if not read.is_secondary and not is_supplementary(read):
+                    unmapped[read.qname].mate_read = read
+
+        self.discoreads = mapped.values() + unmapped.values()
+
+    def unmapped_fastq(self, outdir):
+        ''' for downstream analysis of unmapped paired reads '''
+        assert os.path.exists(outdir)
+
+        out_fastq = outdir + '/' + '.'.join(('disc_unmap', self.be1.chrom, str(self.be1.breakpos), 'fq'))
+        with open(out_fastq, 'w') as out:
+            for dr in self.discoreads:
+                read = dr.mate_read
+                if read is not None and read.is_unmapped:
+                    name = read.qname
+                    if read.is_read1:
+                        name += '/1'
+                    if read.is_read2:
+                        name += '/2'
+ 
+                    out.write('@%s\n%s\n+\n%s\n' % (name, read.seq, read.qual))
+ 
+        return out_fastq
+
+    def supportreads_fastq(self, outdir):
+        ''' discordant support reads marked DR, split support reads marked SR '''
+        assert os.path.exists(outdir)
+
+        outreads = od()
+
+        out_fastq = outdir + '/' + '.'.join(('supportreads', self.be1.chrom, str(self.be1.breakpos), 'fq'))
+        with open(out_fastq, 'w') as out:
+            for readstore in (self.be1, self.be2, self.discoreads):
+                if readstore:
+                    try:
+                        rtype = 'SR'
+                        readlist = readstore.cluster.reads
+                    except:
+                        rtype = 'DR'
+                        readlist = readstore
+
+                    for r in readlist:
+                        read = r.read
+                        name = read.qname
+                        if read.is_read1:
+                            name += '.%s/1' % rtype
+                        if read.is_read2:
+                            name += '.%s/2' % rtype
+                        outreads[name] = read.seq + '\n+\n' + read.qual
+
+            for name, data in outreads.iteritems():
+                out.write('>%s\n%s\n' % (name, data))
+
+        return out_fastq
+
+    def consensus_fasta(self, outdir):
+        assert os.path.exists(outdir)
+
+        out_fasta = outdir + '/' + '.'.join(('consensus', self.be1.chrom, str(self.be1.breakpos), 'fa'))
+        with open(out_fasta, 'w') as out:
+            out.write('>tebreak:%s:%d\n%s\n' % (self.be1.chrom, self.be1.breakpos, self.be1.consensus))
+            if self.be2 is not None:
+                out.write('>tebreak:%s:%d\n%s\n' % (self.be2.chrom, self.be2.breakpos, self.be2.consensus))
+
+        return out_fasta
+
+    def compile_dr_info(self):
+        for dc in build_dr_clusters(self):
+            if dc.overlap_insertion(self):
+                self.dr_prox_clusters.append(dc)
+            else:
+                self.dr_dist_clusters.append(dc)
+
+        self.dr_info['dr_count'] = len(self.discoreads)
+        self.dr_info['dr_prox_clusters']  = map(lambda x : (x.chrom, x.find_extrema()[0], x.find_extrema()[1]), self.dr_prox_clusters)
+        self.dr_info['dr_dist_clusters']  = map(lambda x : (x.chrom, x.find_extrema()[0], x.find_extrema()[1]), self.dr_dist_clusters)
+        self.dr_info['dr_unmapped_mates'] = len([dr for dr in self.discoreads if dr.mate_read is not None and dr.mate_read.is_unmapped])
+
+    def compile_sr_info(self, bam):
+        ''' fill self.sr_info with summary info, needs original bam for chromosome lookup '''
+        if self.be1 == None and self.be2 == None:
+            return None
+
+        self.sr_info['ins_uuid'] = self.uuid
+        self.sr_info['chrom'] = self.be1.chrom
+
+        self.sr_info['be1_breakpos'] = self.be1.breakpos
+        self.sr_info['be1_obj_uuid'] = self.be1.uuid
+        
+        #seqs
+        self.sr_info['be1_cons_seq'] = self.be1.consensus
+        self.sr_info['be1_prox_seq'] = ','.join(map(lambda x : x.query_alignment_sequence, self.be1.proximal_subread()))
+        self.sr_info['be1_dist_seq'] = ','.join(map(lambda x : x.query_alignment_sequence, self.be1.distal_subread()))
+        self.sr_info['be1_umap_seq'] = ','.join(self.be1.unmapped_subread()[1])
+
+        # stats
+        self.sr_info['be1_sr_count'] = len(self.be1)
+        self.sr_info['be1_num_maps'] = len(self.be1.mappings)
+        self.sr_info['be1_cons_scr'] = self.be1.consscore
+        self.sr_info['be1_median_D'] = self.be1.cluster.median_D()
+        self.sr_info['be1_avgmatch'] = self.be1.cluster.avg_matchpct()
+        self.sr_info['be1_rg_count'] = self.be1.cluster.readgroups()
+
+        if self.sr_info['be1_dist_seq'] == '':
+            self.sr_info['be1_dist_seq'] = 'NA'
+        else:
+            self.sr_info['be1_dist_chr'] = ','.join(map(lambda x : bam.getrname(x.tid), self.be1.distal_subread()))
+            self.sr_info['be1_dist_pos'] = ','.join(map(lambda x : str(x.get_reference_positions()[0]), self.be1.distal_subread()))
+            self.sr_info['be1_dist_end'] = ','.join(map(lambda x : str(x.get_reference_positions()[-1]), self.be1.distal_subread()))
+
+        if self.sr_info['be1_umap_seq'] == '':
+            self.sr_info['be1_umap_seq'] = 'NA'
+
+        if self.be2 is not None:
+            self.sr_info['be2_breakpos'] = self.be2.breakpos
+            self.sr_info['be2_obj_uuid'] = self.be2.uuid
+            self.sr_info['be2_cons_seq'] = self.be2.consensus
+            self.sr_info['be2_prox_seq'] = ','.join(map(lambda x : x.query_alignment_sequence, self.be2.proximal_subread()))
+            self.sr_info['be2_dist_seq'] = ','.join(map(lambda x : x.query_alignment_sequence, self.be2.distal_subread()))
+            self.sr_info['be2_umap_seq'] = ','.join(self.be2.unmapped_subread()[1])
+
+            # stats
+            self.sr_info['be2_sr_count'] = len(self.be2)
+            self.sr_info['be2_num_maps'] = len(self.be2.mappings)
+            self.sr_info['be2_cons_scr'] = self.be2.consscore
+            self.sr_info['be2_median_D'] = self.be2.cluster.median_D()
+            self.sr_info['be2_avgmatch'] = self.be2.cluster.avg_matchpct()
+            self.sr_info['be2_rg_count'] = self.be2.cluster.readgroups()
+
+
+            if self.sr_info['be2_dist_seq'] == '':
+                self.sr_info['be2_dist_seq'] = 'NA'
+            else:
+                self.sr_info['be2_dist_chr'] = ','.join(map(lambda x: bam.getrname(x.tid), self.be2.distal_subread()))
+                self.sr_info['be2_dist_pos'] = ','.join(map(lambda x: str(x.get_reference_positions()[0]), self.be2.distal_subread()))
+                self.sr_info['be2_dist_end'] = ','.join(map(lambda x: str(x.get_reference_positions()[-1]), self.be2.distal_subread()))
+
+            if self.sr_info['be2_umap_seq'] == '':
+                self.sr_info['be2_umap_seq'] = 'NA'
+
+            tsdpair = self.tsd()
+            if tsdpair is not None:
+                self.sr_info['be1_end_over'], self.sr_info['be2_end_over'] = tsdpair
+
+        if 'be2_breakpos' not in self.sr_info:
+            self.sr_info['be2_breakpos'] = self.sr_info['be1_breakpos']
+
+        if 'be2_sr_count' not in self.sr_info:
+            self.sr_info['be2_sr_count'] = 0
+
+ 
+#######################################
+## Functions                         ##
+#######################################
+ 
+ 
 def rc(dna):
     ''' reverse complement '''
     complements = maketrans('acgtrymkbdhvACGTRYMKBDHV', 'tgcayrkmvhdbTGCAYRKMVHDB')
     return dna.translate(complements)[::-1]
+ 
 
+def read_matchpct(read):
+    ''' return number of mismatches / aligned length of read '''
+    nm = [value for (tag, value) in read.tags if tag == 'NM'][0]
+    return 1.0 - (float(nm)/float(read.alen))
 
-def read_fasta(infa):
-    ''' potato '''
-    seqdict = {}
-
-    with open(infa, 'r') as fa:
-        seqid = ''
-        seq   = ''
-        for line in fa:
-            if line.startswith('>'):
-                if seq != '':
-                    seqdict[seqid] = seq
-                seqid = line.lstrip('>').strip()
-                seq   = ''
-            else:
-                assert seqid != ''
-                seq = seq + line.strip()
-
-    if seqid not in seqdict and seq != '':
-        seqdict[seqid] = seq
-
-    return seqdict
-
-
-def bwamem(fq, ref, outpath, samplename, threads=1, width=150, sortmem=2000000000, RGPL='ILLUMINA'):
-    ''' FIXME: add parameters to commandline '''
-    fqroot = sub('.extendedFrags.fastq.gz$', '', os.path.basename(fq))
-    fqroot = sub('.fq$', '', fqroot)
-
-    if str(sortmem).rstrip('Gg') != str(sortmem):
-        sortmem = int(str(sortmem).rstrip('Gg')) * 1000000000
-
-    if str(sortmem).rstrip('Mm') != str(sortmem):
-        sortmem = int(str(sortmem).rstrip('Gg')) * 1000000
-
-    sortmem = sortmem/int(threads)
-
-    sam_out  = outpath + '/' + '.'.join((fqroot, 'sam'))
-    bam_out  = outpath + '/' + '.'.join((fqroot, 'bam'))
-    sort_out = outpath + '/' + '.'.join((fqroot, 'sorted'))
-
-    sam_cmd  = ['bwa', 'mem', '-t', str(threads), '-Y', '-M']
-
-
-    sam_cmd.append(ref)
-    sam_cmd.append(fq)
-    bam_cmd  = ['samtools', 'view', '-bt', ref + '.bai', '-o', bam_out, sam_out]
-    sort_cmd = ['samtools', 'sort', '-@', str(threads), '-m', str(sortmem), bam_out, sort_out]
-    idx_cmd  = ['samtools', 'index', sort_out + '.bam']
-
-    sys.stdout.write("INFO\t" + now() + "\trunning bwa-mem: " + ' '.join(sam_cmd) + "\n")
-
-    wrote_rg = False
-    with open(sam_out, 'w') as sam:
-        p = subprocess.Popen(sam_cmd, stdout=subprocess.PIPE)
-        for line in p.stdout:
-
-            if line.startswith('@PG') and not wrote_rg:
-                sam.write('\t'.join(("@RG", "ID:" + fqroot, "SM:" + samplename, "PL:" + RGPL)) + "\n")
-                wrote_rg = True
-            if not line.startswith('@'):
-                sam.write(line.strip() + "\tRG:Z:" + fqroot + "\n")
-            else:
-                sam.write(line.strip() + "\n")
-
-    sys.stdout.write("INFO\t" + now() + "\twriting " + sam_out + " to BAM...\n")
-    subprocess.call(bam_cmd)
-    os.remove(sam_out)
-
-    sys.stdout.write("INFO\t" + now() + "\tsorting output: " + ' '.join(sort_cmd) + "\n")
-    subprocess.call(sort_cmd)
-    os.remove(bam_out)
-
-    sys.stdout.write("INFO\t" + now() + "\tindexing: " + ' '.join(idx_cmd) + "\n")
-    subprocess.call(idx_cmd)
-
-    return sort_out + '.bam'
-
-
-def merge(picardpath, bamlist, basename, threads=1, mem='4G'):
-    ''' run picard '''
-    mergejar = picardpath + '/' + 'MergeSamFiles.jar'
-
-    if len(bamlist) == 1:
-        return bamlist[0]
-
-    outbam = basename + '.merged.bam'
-
-    cmd = ['java', '-XX:ParallelGCThreads=' + str(threads), '-Xmx' + str(mem), '-jar', 
-           mergejar, 'USE_THREADING=true', 'ASSUME_SORTED=true' ,'SORT_ORDER=coordinate',
-           'OUTPUT=' + outbam]
-
-    for bam in bamlist:
-        cmd.append('INPUT=' + bam)
-
-    sys.stdout.write("INFO\t" + now() + "\tmerging: " + ' ' .join(cmd) + "\n")
-
-    subprocess.call(cmd)
-
-    for bam in bamlist:
-        os.remove(bam)
-
-    return outbam
-
-
-def bamrec_to_fastq(read, diffseq=None, diffqual=None, diffname=None):
-    ''' convert BAM record to FASTQ record: can substitute name/seq/qual using diffseq/diffqual/diffname '''
-    name = read.qname
-    if diffname is not None:
-        name = diffname
-
-    qual = read.qual
-    if diffqual is not None:
-        qual = diffqual
-
-    seq  = read.seq
-    if diffseq is not None:
-        seq = diffseq
-
-    if read.is_reverse:
-        qual = qual[::-1]
-        seq  = rc(seq)
-
-    return '\n'.join(('@'+name,seq,"+",qual))
-
-
-def fetch_clipped_reads(inbamfn, minclip=50, maxaltclip=2): # TODO PARAMS
-    ''' FIXME: add parameters to commandline '''
+ 
+def ref_overlap(read1, read2):
+    ''' return overlapping interval in ref. coords (not chrom), none otherwise '''
+ 
+    if read1 is None or read2 is None:
+        return None
+ 
+    iv1 = sorted((read1.get_reference_positions()[0], read1.get_reference_positions()[-1]))
+    iv2 = sorted((read2.get_reference_positions()[0], read2.get_reference_positions()[-1]))
+ 
+    if min(iv1[1], iv2[1]) - max(iv1[0], iv2[0]) > 0: # is there overlap?
+        return [max(iv1[0], iv2[0]), min(iv1[1], iv2[1])]
+ 
+    return None
+ 
+ 
+def ref_dist(read1, read2):
+    ''' return distance between intervals in ref., overlapping = negative values '''
+ 
+    if read1 is None or read2 is None:
+        return None
+ 
+    iv1 = sorted((read1.get_reference_positions()[0], read1.get_reference_positions()[-1]))
+    iv2 = sorted((read2.get_reference_positions()[0], read2.get_reference_positions()[-1]))
+ 
+    return max(iv1[0], iv2[0]) - min(iv1[1], iv2[1])
+ 
+ 
+def orient_subseq(longseq, shortseq):
+    ''' return shortseq in same orientation as longseq '''
+    assert len(longseq) >= len(shortseq)
+ 
+    if re.search(shortseq, longseq):
+        return shortseq
+    else:
+        assert re.search(rc(shortseq), longseq), "orient_subseq: %s not a subseq of %s" %(shortseq, longseq)
+        return rc(shortseq)
+ 
+ 
+def locate_subseq(longseq, shortseq):
+    ''' return (start, end) of shortseq in longseq '''
+    assert len(longseq) >= len(shortseq)
+ 
+    match = re.search(shortseq, longseq)
+    if match is not None:
+        return sorted((match.start(0), match.end(0)))
+ 
+    return None
+ 
+ 
+def is_primary(read):
+    ''' not included in pysam '''
+    return not (read.is_secondary or is_supplementary(read))
+ 
+ 
+def is_supplementary(read):
+    ''' pysam does not currently include a check for this flag '''
+    return bin(read.flag & 2048) == bin(2048)
+ 
+ 
+def fetch_clipped_reads(bam, chrom, start, end, minclip=3, maxaltclip=2, maxD=0.8):
+    ''' Return list of SplitRead objects '''
     assert minclip > maxaltclip
-
-    outfqfn = sub('.bam$', '.clipped.fq', inbamfn)
-    inbam   = pysam.Samfile(inbamfn, 'rb')
-
-    with open(outfqfn, 'w') as outfq:
-        for read in inbam.fetch():
-            uid = ':'.join(map(str, (read.tid,read.pos,read.rlen,read.is_reverse)))
-            unmapseq = None
-            unmapqua = None
-
-            if read.qual is None:
-                sys.stderr.write("ERROR\t" + now() + "\tread with no quality score:\n")
-                sys.stderr.write(str(read) + "\n")
-                sys.stderr.write("ERROR\t" + now() + "\tpossible FASTA alignment instead of FASTQ - please re-do alignments from FASTQ\n")
-                sys.exit(1)
-
+ 
+    splitreads = []
+ 
+    start = int(start)
+    end   = int(end)
+ 
+    assert start < end
+ 
+    for read in bam.fetch(chrom, start, end):
+        if not read.is_unmapped and not read.is_duplicate:
+ 
             if read.rlen - read.alen >= int(minclip): # 'soft' clipped?
-
+ 
                 # length of 'minor' clip
                 altclip = min(read.qstart, read.rlen-read.qend)
-
+ 
                 if altclip <= maxaltclip:
-                    # get unmapped part
-                    if read.qstart <= maxaltclip:
-                        # (align) AAAAAAAAAAAAAAAAAA
-                        # (read)  RRRRRRRRRRRRRRRRRRRRRRRRRRRR
-                        unmapseq = read.seq[read.qend:]
-                        unmapqua = read.qual[read.qend:]
-
-                    else:
-                        # (align)           AAAAAAAAAAAAAAAAAA
-                        # (read)  RRRRRRRRRRRRRRRRRRRRRRRRRRRR
-                        unmapseq = read.seq[:read.qstart]
-                        unmapqua = read.qual[:read.qstart]
-
-            if not read.is_unmapped and unmapseq is not None and not read.is_duplicate:
-                infoname = ':'.join((read.qname, str(inbam.getrname(read.tid)), str(read.pos))) # help find read again
-                outfq.write(bamrec_to_fastq(read, diffseq=unmapseq, diffqual=unmapqua, diffname=infoname) + '\n')
-
-        inbam.close()
-
-    return outfqfn
-
-
-def build_te_splitreads(refbamfn, tebamfn, teref, min_te_match = 0.9, min_ge_match = 0.98): # TODO PARAM
-    ''' g* --> locations on genome; t* --> locations on TE '''
-    refbam = pysam.Samfile(refbamfn, 'rb')
-    tebam  = pysam.Samfile(tebamfn, 'rb')
-
-    ''' get sorted list of split reads '''
-    splitreads = []
-    for tread in tebam.fetch():
-        if not tread.is_unmapped:
-            tname = tebam.getrname(tread.tid)
-            gname = ':'.join(tread.qname.split(':')[:-2])
-            gchrom, gloc = tread.qname.split(':')[-2:]
-
-            gloc = int(gloc)
-            sr = None
-            for gread in refbam.fetch(reference=gchrom, start=gloc, end=gloc+1):
-                if (gread.qname, gread.pos, refbam.getrname(gread.tid)) == (gname, gloc, gchrom):
-                    tlen = len(teref[tname])
-                    sr = SplitRead(gread, tread, tname, gchrom, gloc, tlen)
-                    if sr.get_tematch() >= min_te_match and sr.get_gematch() >= min_ge_match:
-                        splitreads.append(sr)
-
-    refbam.close()
-    tebam.close()
-    splitreads.sort()
-
+                    if splitqual(read) <= maxD:
+                        chrom = str(bam.getrname(read.tid))
+                        splitreads.append(SplitRead(chrom, read))
+ 
     return splitreads
-
-
-def build_te_clusters(splitreads, searchdist=100): # TODO PARAM
-    ''' cluster SplitRead objects into Cluster objects and return a list of them '''
-    clusters  = []
-
-    for sr in splitreads:
-        if len(clusters) == 0:
-            clusters.append(Cluster(sr))
-
-        elif clusters[-1].chrom != sr.chrom:
-            clusters.append(Cluster(sr))
-
-        else:
-            if abs(clusters[-1]._median - sr.breakloc) > searchdist:
-                clusters.append(Cluster(sr))
-
-            else:
-                clusters[-1].add_splitread(sr)
-
-    return clusters
-
-
-def checkmap(mapfn, chrom, start, end):
-    ''' return average mappability across chrom:start-end region '''
-    map = pysam.Tabixfile(mapfn)
-    scores = []
-
-    if chrom in map.contigs:
-        for rec in map.fetch(chrom, int(start), int(end)):
-            mchrom, mstart, mend, mscore = rec.strip().split()
-            mstart, mend = int(mstart), int(mend)
-            mscore = float(mscore)
-
-            while mstart < mend and mstart:
-                mstart += 1
-                if mstart >= int(start) and mstart <= int(end):
-                    scores.append(mscore)
-
-        if len(scores) > 0:
-            return sum(scores) / float(len(scores))
-        else:
-            return 0.0
-    else:
-        return 0.0
-
-
-def filter_clusters(clusters, refbamfn, minsize=4, mapfile=None, bothends=False, maskfile=None, minctglen=1e7, minq=1, unclip=1.0):
-    ''' return only clusters meeting cutoffs '''
-    ''' refbamfn is the filename of the reference-aligned BAM '''
-    ''' maskfile should be a tabix-indexed BED file of intervals to ignore (e.g. L1Hs reference locations) '''
-    filtered = []
-
-    mask = None
-    if maskfile is not None:
-        mask = pysam.Tabixfile(maskfile)
-
-    bam = pysam.Samfile(refbamfn, 'rb')
-    chromlen = dict(zip(bam.references, bam.lengths))
-
-    for cluster in clusters:
-        for teclass in cluster.te_classes(): # can consider peaks with more than one TE class
-            subcluster = cluster.subcluster_by_class(teclass)
-            tclasses   = Counter([read.tclass for read in subcluster._splitreads]).most_common()
-
-            # prefer to report element type even if POLYA is the dominant annotation
-            tclass = tclasses[0][0]
-            if tclass == 'POLYA' and len(tclasses) > 1:
-                tclass = tclasses[1][0]
-
-            subcluster.ALT  = sub('FIXME', tclass, subcluster.ALT)
-            subcluster.QUAL = int(subcluster.mean_genome_qual())
-
-            reject = True
-            
-            # at least one alignment in a cluster has to be non-POLYA
-            for tn in subcluster.te_names():
-                if tn != 'POLYA':
-                    reject = False
-                    
-            if reject:
-                subcluster.FILTER.append('tetype')
-
-            if subcluster.QUAL < minq:
-                reject = True
-                subcluster.FILTER.append('avgmapq')
-
-            # clusters have to be at least some minimum size
-            if subcluster.max_breakpoint_support() < minsize:
-                reject = True
-                subcluster.FILTER.append('csize')
-
-            # need at least minsize distinct mappings in cluster
-            if cluster.diversity() < minsize:
-                reject = True
-                subcluster.FILTER.append('diversity')
-
-            # filter out clusters without both TE ends represented if user wants this
-            if bothends and len(cluster.te_sides()) < 2:
-                reject = True
-                subcluster.FILTER.append('bothends')
-
-            # apply position-based masking
-            if mask is not None and subcluster.chrom in mask.contigs:
-                if len(list(mask.fetch(subcluster.chrom, subcluster._start, subcluster._end+1))) > 0:
-                    reject = True
-                    subcluster.FILTER.append('masked')
-
-            # filter out contigs below specified size cutoff
-            if chromlen[subcluster.chrom] < minctglen:
-                reject = True
-                subcluster.FILTER.append('ctgsize')
-
-            if mapfile is not None:
-                gmin, gmax = subcluster.ge_extrema()
-                mapscore = checkmap(mapfile, subcluster.chrom, gmin, gmax)
-                if mapscore < 0.5:
-                    reject = True
-                    subcluster.FILTER.append('mapscore')
-
-            # save the more time-consuming cutoffs for last... check unclipped read mappings:
-            if not reject and unclip < 1.0:
-                subcluster.FORMAT['UCF'] = cluster.unclipfrac(refbamfn)
-                if subcluster.FORMAT['UCF'] > unclip:
-                    reject = True
-                    subcluster.FILTER.append('unclipfrac')
-
-            if not reject:
-                subcluster.FILTER.append('PASS')
-
-            filtered.append(subcluster)
-
-    bam.close()
-    return filtered
-
-
-def annotate(clusters, reffa, refbamfn, mapfile=None, allclusters=False, dbsnp=None, minclip=10, genotype=False):
-    ''' populate VCF INFO field with information about the insertion '''
-
-    ref = pysam.Fastafile(reffa)
-
-    for cluster in clusters:
-        cluster.INFO['SVTYPE'] = 'INS'
-
-        breaklocs = []
-        for breakloc, count in cluster.all_breakpoints().iteritems():
-            breaklocs.append(str(breakloc) + '|' + str(count))
-
-        cluster.FORMAT['BREAKS']  = ','.join(breaklocs)
-        cluster.FORMAT['TESIDES'] = ','.join(cluster.te_sides())
-        cluster.FORMAT['FWD'] = str(cluster.fwdbreaks())
-        cluster.FORMAT['REV'] = str(cluster.revbreaks())
-        cluster.FORMAT['DIV'] = str(cluster.diversity())
-
-        tetypes = []
-        for tetype, count in cluster.te_names().iteritems():
-            tetypes.append(tetype + '|' + str(count))
-        cluster.FORMAT['TEALIGN'] = ','.join(tetypes)
-        cluster.FORMAT['TEMINPOS'], cluster.FORMAT['TEMAXPOS'] = map(str, cluster.te_extrema())
-
-        if cluster.FILTER[0] == 'PASS' or allclusters: 
-            leftbreak, rightbreak, mech = cluster.best_breakpoints(refbamfn)
-            if rightbreak is not None and leftbreak > rightbreak:
-                leftbreak, rightbreak = rightbreak, leftbreak
-
-            if mapfile is not None:
-                gmin, gmax = cluster.ge_extrema()
-                cluster.INFO['MAPSCORE'] = checkmap(mapfile, cluster.chrom, gmin, gmax)
-
-            cluster.POS = leftbreak
-            cluster.INFO['END'] = leftbreak
-
-            cluster.FORMAT['LEFTMAXTEALIGN'] = cluster.max_te_align(leftbreak) 
-            cluster.FORMAT['LEFTMAXGEALIGN'] = cluster.max_ge_align(leftbreak)
-            cluster.FORMAT['LEFTMINTEMATCH'] = str(cluster.min_te_match(leftbreak))
-            cluster.FORMAT['LEFTMINGEMATCH'] = str(cluster.min_ge_match(leftbreak))
-
-            if rightbreak is not None:
-                cluster.INFO['END']   = rightbreak
-                cluster.INFO['MECH']  = mech
-                cluster.INFO['TELEN'] = cluster.guess_telen()
-                cluster.INFO['INV']   = '0'
-                if len(cluster.te_sides()) < len(cluster.be_sides()):
-                    cluster.INFO['INV'] = '1'
-
-                cluster.INFO['TSDLEN'] = abs(rightbreak-leftbreak)
-                cluster.FORMAT['RIGHTMAXTEALIGN'] = cluster.max_te_align(rightbreak) 
-                cluster.FORMAT['RIGHTMAXGEALIGN'] = cluster.max_ge_align(rightbreak)
-                cluster.FORMAT['RIGHTMINTEMATCH'] = str(cluster.min_te_match(rightbreak))
-                cluster.FORMAT['RIGHTMINGEMATCH'] = str(cluster.min_ge_match(rightbreak))
-
-            if dbsnp is not None:
-                snps = cluster.checksnps(dbsnp, refbamfn)
-                if snps:
-                    cluster.INFO['SNPS'] = ','.join(snps)
-
-            if genotype:
-                escount = findemptysite(refbamfn, cluster.chrom, leftbreak)
-                cluster.FORMAT['GQ'] = str(escount)
-                if escount > 0:
-                    cluster.FORMAT['GT'] = '1/1'
-                else:
-                    cluster.FORMAT['GT'] = '1/0'
-
-        refbase = ref.fetch(cluster.chrom, cluster.POS, cluster.POS+1)
-        if refbase != '':
-            cluster.REF = refbase
-        else:
-            cluster.REF = '.'
-
-        cluster.FORMAT['POSBREAKSEQ'] = cluster.majorbreakseq(cluster.POS, flank=int(minclip))
-
-        if 'END' in cluster.INFO and cluster.INFO['END'] != cluster.POS:
-            cluster.FORMAT['ENDBREAKSEQ'] = cluster.majorbreakseq(cluster.INFO['END'], flank=int(minclip))
-
-        cluster.FORMAT['RC'] = len(cluster)
-        cluster.FORMAT['RG'] = ','.join(map(str, cluster.readgroups()))
-
-    return clusters
-
-
-def consensus(cluster, breakend, threads=1):
-    ''' create consensus sequence for a breakend '''
-    subcluster = cluster.subcluster_by_breakend([breakend])
-    greads = [sr.gread for sr in subcluster._splitreads]
-
-    # don't try to make a consensus of just one read...
-    if len(greads) == 1:
-        return greads[0].seq
-
-    tmpfa = str(uuid4()) + '.fa'
-    with open(tmpfa, 'w') as fa:
-        [fa.write('>' + gread.qname + '\n' + gread.seq + '\n') for gread in greads]
-
-    alnfa = mafft(tmpfa, threads=threads)
-    msa = MSA(alnfa)
-
-    os.remove(tmpfa)
-    os.remove(alnfa)
-
-    return msa.consensus()
-
-
-def mafft(infafn, iterations=100, threads=1):
+ 
+ 
+def splitqual(read):
+    ''' return KS-test D value for clipped vs. unclipped bases'''
+    
+    breakpos = None
+ 
+    breakpos = read.get_aligned_pairs()[-1][0] # breakpoint on right
+ 
+    q1 = map(ord, list(read.qual[:breakpos]))
+    q2 = map(ord, list(read.qual[breakpos:]))
+ 
+    return ss.ks_2samp(q1, q2)[0]
+ 
+ 
+def mafft(infafn, iterations=100, threads=1, tmpdir='/tmp'):
     ''' use MAFFT to create MSA '''
-
-    outfafn = str(uuid4()) + '.aln.fa'
-
+ 
+    outfafn = tmpdir + '/' + str(uuid4()) + '.aln.fa'
+ 
     args = ['mafft', '--localpair', '--maxiterate', str(iterations), '--thread', str(threads), infafn]
-
+ 
     FNULL = open(os.devnull, 'w')
-
+ 
     with open(outfafn, 'w') as outfa:
         p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=FNULL)
         for line in p.stdout:
             outfa.write(line)
-
+ 
     return outfafn
-
-
-def bamtofq(inbam, outfq):
-    assert inbam.endswith('.bam')
-    with gzip.open(outfq, 'wb') as fq:
-        bam = pysam.Samfile(inbam, 'rb')
-        for read in bam.fetch(until_eof=True):
-            seq  = read.seq
-            qual = read.qual
-            salt = str(uuid4()).split('-')[0]
-
-            if read.is_reverse:
-                seq  = rc(seq)
-                qual = qual[::-1]
-
-            fq.write('\n'.join(('@' + read.qname + ':' + salt, seq, '+', qual)) + '\n')
-    
-    bam.close()
-    return outfq
-
-
-def vcfoutput(clusters, outfile, samplename):
-    ''' output results in VCF format '''
-    with open(outfile, 'w') as out:
-        print_vcfheader(out, samplename)
-        for cluster in clusters:
-            out.write(str(cluster) + '\n')
-
-
-def consensus_fasta(clusters, outfile, passonly=True, threads=1):
-    with open(outfile, 'w') as cons:
-        for cluster in clusters:
-            if passonly and cluster.FILTER[0] == 'PASS':
-                outname = cluster.chrom + ':' + str(cluster.POS) + ':' + cluster.ALT.lstrip('<').rstrip('>').split(':')[-1]
-                cons.write('>' + outname + ':1\n' + consensus(cluster, cluster.POS, threads=threads) + '\n')
-                if cluster.INFO.get('END') and cluster.POS != cluster.INFO['END']:
-                    cons.write('>' + outname + ':2\n' + consensus(cluster, cluster.INFO['END'], threads=threads) + '\n')
-
-
-def markdups(inbam, picard):
-    ''' call MarkDuplicates.jar from Picard (requires java) '''
-    md = picard + '/MarkDuplicates.jar'
-    assert os.path.exists(md)
-
-    outtmp  = str(uuid4()) + '.mdtmp.bam'
-    metrics = inbam + '.markdups.metrics.txt'
-    args    = ['java', '-Xmx4g', '-jar', md, 'I=' + inbam, 'O=' + outtmp, 'M=' + metrics, "TMP_DIR=" + os.path.dirname(inbam)]
-    subprocess.call(args)
-
-    assert os.path.exists(metrics)
-
-    os.remove(inbam)
-    move(outtmp, inbam)
-
-    print "INFO:\t" + now() +"\trebuilding index for", inbam
-    subprocess.call(['samtools', 'index', inbam])
-
-    return inbam
-
-
-def findemptysite(bamfn, chrom, pos):
-    ''' return count of unclipped (completely mapped) reads spanning chrom:pos '''
-    bam = pysam.Samfile(bamfn, 'rb')
-    if chrom not in bam.references:
-        return 0
-    pos = int(pos)
-    mapcount = 0
-    for read in bam.fetch(chrom, pos, pos+1):
-        if min(read.positions) < pos and max(read.positions) > pos:
-            mapcount += 1
-    return mapcount
-
-
-def maketargetfastq(outdir, bamfnlist, bedfn):
-    ''' pick reads and mates from target regions (primary alignments will be selected from non-primary alignments) '''
-
-    fqfnlist = []
-    for bamfn in bamfnlist.split(','):
-        assert bamfn.endswith('.bam'), "not bam file: %r" % bamfn
-        bam  = pysam.Samfile(bamfn, 'rb')
-        fqfn = outdir + '/' + sub('bam$', str(uuid4()).split('-')[0] + '.fastq', os.path.basename(bamfn))
-        fqfnlist.append(fqfn)
-       
-        print "INFO\t" + now() + "\tgetting readnames for target regions"
-        rnames = {}
-
-        with open(bedfn, 'r') as bed:
-            for line in bed:
-                chrom, start, end = line.strip().split()[:3]
-                start, end = int(start), int(end)
-                if chrom in bam.references:
-                    for read in bam.fetch(chrom, start, end):
-                        rnames[read.qname] = True
-
-        bam.close()
-        bam = pysam.Samfile(bamfn, 'rb')
-
-        print "INFO\t" + now() + "\tselected " + str(len(rnames)) + " read names based on coordinates"
-        print "INFO\t" + now() + "\tdumping selected reads to fastq: " + fqfn
-
-        with open(fqfn, 'w') as fq:
-            for read in bam.fetch(until_eof=True):
-                if not read.is_secondary:
-                    if read.qname in rnames:
-                        fq.write('@' + read.qname + ':' + str(uuid4()).split('-')[0] + '\n')
-                        if read.is_reverse:
-                            fq.write(rc(read.seq) + '\n+\n' + read.qual[::-1] + '\n')
-                        else:
-                            fq.write(read.seq + '\n+\n' + read.qual + '\n')
-        bam.close()
-    return fqfnlist
-
-
-def main(args):
-    sys.stderr.write("INFO\t" + now() + "\tstarting " + sys.argv[0] + " called with args:\n" + ' '.join(sys.argv) + "\n")
-
-    fqs = []
-    basename = args.samplename
-
-    if args.outdir is not None:
-        if not os.path.exists(args.outdir):
-            try:
-                os.mkdir(args.outdir)
-            except:
-                sys.stderr.write("ERROR: " + now() + " failed to create output directory: " + args.outdir + ", exiting.\n")
-
-        basename = args.outdir + '/' + basename
-
-    if args.targets is not None:
-        if not args.input.endswith('.bam'):
-            sys.stderr.write("ERROR\t" + now() + "\t--targets only works with a .bam file as input\n")
-            sys.exit(1)
-        if args.premapped:
-            sys.stderr.write("ERROR\t" + now() + "\t--targets cannot be called with --premapped\n")
-            sys.exit(1)
-        fqs = maketargetfastq(args.outdir, args.input, args.targets)
-
-    else:    
-        if args.input.endswith('.bam') and not args.premapped:
-            sys.stderr.write("INFO: " + now() + " converting BAM " + args.input + " to FASTQ " + basename + ".fq.gz\n")
-            fqs.append(bamtofq(args.input, basename + '.fq.gz'))
-        else: # assume fastq
-            fqs = args.input.split(',')
-
-    refbamfn = None
-    bamlist  = []
-    if args.premapped:
-        if args.input.endswith('.bam'):
-            sys.stderr.write("INFO: " + now() + " using pre-mapped BAM: " + args.input + "\n")
-            refbamfn = args.input
+ 
+ 
+def build_sr_clusters(splitreads, searchdist=100): # TODO PARAM
+    ''' cluster SplitRead objects into Cluster objects and return a list of them '''
+    clusters  = []
+ 
+    for sr in splitreads:
+        if len(clusters) == 0:
+            clusters.append(SplitCluster(sr))
+ 
+        elif clusters[-1].chrom != sr.chrom:
+            clusters.append(SplitCluster(sr))
+ 
         else:
-            sys.stderr.write("ERROR: " + now() + " flag to use premapped bam (--premapped) called but " + args.input + " is not a .bam file\n")
-            sys.exit(1)
+            if abs(clusters[-1].median - sr.breakpos) > searchdist:
+                clusters.append(SplitCluster(sr))
+ 
+            else:
+                clusters[-1].add_splitread(sr)
+ 
+    return clusters
+
+
+def build_dr_clusters(insertion, searchdist=100): # TODO PARAM
+    ''' cluster discordant read ends assocaited with insertion '''
+
+    discoreads = []
+
+    for dr in insertion.discoreads:
+        discoreads += dr.sortable_pair()
+
+    clusters  = []
+ 
+    for dr in sorted(discoreads):
+        if len(clusters) == 0:
+            clusters.append(DiscoCluster(dr))
+ 
+        elif clusters[-1].chrom != dr.chrom:
+            clusters.append(DiscoCluster(dr))
+ 
+        else:
+            if ref_overlap(clusters[-1].reads[-1].read, dr.read) is None:
+                clusters.append(DiscoCluster(dr))
+ 
+            else:
+                clusters[-1].add_read(dr)
+
+    return clusters
+ 
+ 
+def build_breakends(cluster, minsr, mincs, min_maxclip=20, tmpdir='/tmp'):
+    ''' returns list of breakends from cluster '''
+    breakends = []
+ 
+    for breakpos in cluster.all_breakpoints():
+        subclusters = (cluster.subcluster_by_breakend([breakpos], direction='left'), cluster.subcluster_by_breakend([breakpos], direction='right'))
+        for subcluster in subclusters:
+            if len(subcluster) > minsr:
+                out_fa     = subcluster.make_fasta(tmpdir)
+                align_fa   = mafft(out_fa, tmpdir=tmpdir)
+                msa        = MSA(align_fa)
+                seq, score = msa.consensus()
+                maxclip    = subcluster.max_cliplen()
+ 
+                os.remove(out_fa)
+                os.remove(align_fa)
+ 
+                if score >= mincs and min_maxclip <= maxclip:
+                    breakends.append(BreakEnd(cluster.chrom, breakpos, subcluster, seq, score))
+ 
+    return breakends
+ 
+ 
+def map_breakends(breakends, db, tmpdir='/tmp'):
+    ''' remap consensus sequences stored in BreakEnd objects '''
+    tmp_fa = tmpdir + '/' + '.'.join(('tebreak', str(uuid4()), 'be.fa'))
+    breakdict = {} # for faster lookup
+ 
+    with open(tmp_fa, 'w') as out:
+        for be in breakends:
+            breakdict[be.uuid] = be
+            qual = 'I' * len(be.consensus)
+            out.write('>%s\n%s\n+\n%s\n' % (be.uuid, be.consensus, qual))
+ 
+    tmp_sam = '.'.join(tmp_fa.split('.')[:-1]) + '.sam'
+ 
+    with open(tmp_sam, 'w') as out:
+        sam_cmd  = ['bwa', 'mem', '-k', '10', '-w', '500', '-M', '-v', '0', db, tmp_fa]
+        p = subprocess.Popen(sam_cmd, stdout=subprocess.PIPE)
+        for line in p.stdout:
+            out.write(line)
+ 
+    sam = pysam.AlignmentFile(tmp_sam)
+ 
+    for read in sam.fetch(until_eof=True):
+        breakdict[read.qname].mappings.append(read)
+ 
+    os.remove(tmp_fa)
+    os.remove(tmp_sam)
+ 
+    return breakdict.values()
+ 
+ 
+def score_breakend_pair(be1, be2):
+    ''' assign a score to a breakend, higher is "better" '''
+    prox1 = be1.proximal_subread()[0]
+    prox2 = be2.proximal_subread()[0]
+ 
+    if prox1 and prox2:
+        # prefer overlapping breakend reads (TSDs), but small TSDs can be overridden with high enough read counts
+        return (1.0 - ref_dist(prox1, prox2)) + np.sqrt(len(be1.cluster) + len(be2.cluster))
+ 
+    return 0
+ 
+ 
+def checkref(ref_fasta):
+    assert os.path.exists(ref_fasta), 'reference not found: %s' % ref_fasta
+    assert os.path.exists(ref_fasta + '.fai'), 'please run samtools faidx on %s' % ref_fasta
+    assert os.path.exists(ref_fasta + '.bwt'), 'please run bwa index on %s' % ref_fasta
+ 
+ 
+def build_insertions(breakends, maxdist=100):
+    ''' return list of Insertion objects '''
+    insertions = []
+    paired = {}
+    for be1 in breakends:
+        best_match = None
+        best_pair  = None
+ 
+        for be2 in breakends:
+            if be1.proximal_subread() and be2.proximal_subread():
+                dist = ref_dist(be1.proximal_subread()[0], be2.proximal_subread()[0])
+ 
+                if be1.uuid != be2.uuid and dist <= maxdist and be2.uuid not in paired and be1.uuid not in paired:
+                    if best_match is None:
+                        best_match = score_breakend_pair(be1, be2)
+                        best_pair  = (be1, be2)
+ 
+                    else:
+                        if score_breakend_pair(be1, be2) > best_match:
+                            best_match = score_breakend_pair(be1, be2)
+                            best_pair  = (be1, be2)
+ 
+        if best_pair is not None:
+            paired[best_pair[0].uuid] = True
+            paired[best_pair[1].uuid] = True
+            insertions.append(Insertion(*best_pair))
+ 
+        else:
+            if be1.uuid not in paired:
+                paired[be1.uuid] = True
+                insertions.append(Insertion(be1))
+     
+    return insertions
+ 
+
+def process_insertion(ins, bam, outpath):
+    ''' returns a pickleable version of the insertion information '''
+    pi = dd(dict)
+
+    ins.fetch_discordant_reads(bam)
+    ins.compile_sr_info(bam)
+    ins.compile_dr_info()
+
+    pi['SR'] = ins.sr_info
+    pi['DR'] = ins.dr_info
+
+    # various FASTA/FASTQ outputs
+    ins.unmapped_fastq(outpath)
+    ins.consensus_fasta(outpath)
+    ins.supportreads_fastq(outpath)
+
+    return pi
+
+
+def run_chunk(args, chrom, start, end):
+    logger = logging.getLogger(__name__)
+    if args.verbose: logger.setLevel(logging.DEBUG)
+
+    bam = pysam.AlignmentFile(args.bam, 'rb')
+    minsr = int(args.minsplitreads)
+    mincs = float(args.min_consensus_score)
+    maxD  = float(args.maxD)
+
+    start = int(start)
+    end   = int(end)
+
+    insertions = []
+ 
+    chunkname = '%s:%d-%d' % (chrom, start, end)
+
+    logger.debug('Processing chunk: %s ...' % chunkname)
+    logger.debug('Chunk %s: Parsing split reads from bam: %s ...' % (chunkname, args.bam))
+    sr = fetch_clipped_reads(bam, chrom, start, end, minclip=int(args.min_minclip), maxD=maxD)
+ 
+    logger.debug('Chunk %s: Building clusters from %d split reads ...' % (chunkname, len(sr)))
+    clusters = build_sr_clusters(sr)
+ 
+    breakends = []
+    for cluster in clusters:
+        breakends += build_breakends(cluster, minsr, mincs, min_maxclip=int(args.min_maxclip), tmpdir=args.tmpdir)
+ 
+    logger.debug('Chunk %s: Mapping %d breakends ...' % (chunkname, len(breakends)))
+    breakends = map_breakends(breakends, args.bwaref, tmpdir=args.tmpdir)
+ 
+    insertions = build_insertions(breakends)
+    logger.debug('Chunk %s: Processing %d insertions ...' % (chunkname, len(insertions)))
+
+    processed_insertions = []
+
+    for ins in insertions:
+        if len(ins.be1.proximal_subread()) > 0:
+            processed_insertions.append(process_insertion(ins, bam, args.fasta_out_path))
+
+    logger.debug('Finished chunk: %s' % chunkname)
+
+    return processed_insertions
+
+
+def resolve_duplicates(insertions):
+    ''' resolve instances where breakpoints occur > 1x in the insertion list '''
+    ''' this can happen if intervals overlap, e.g. in  genome chunking '''
+
+    insdict = {} # --> index in insertions
+
+    for n, ins in enumerate(insertions):
+        be1 = ins['SR']['chrom'] + ':' + str(ins['SR']['be1_breakpos'])
+        be2 = ins['SR']['chrom'] + ':' + str(ins['SR']['be2_breakpos'])
+        
+        if be1 not in insdict:
+            insdict[be1] = n 
+            insdict[be2] = n
+        
+        else:
+            if prefer_insertion(ins, insertions[insdict[be1]]):
+                insdict[be1] = n
+                insdict[be2] = n
+
+
+    return [insertions[n] for n in list(set(insdict.values()))]
+
+
+
+def prefer_insertion(ins1, ins2):
+    ''' return true if ins1 has more evidence than ins2, false otherwise '''
+    # prefer two-end support over one end
+    if ins1['SR']['be1_breakpos'] != ins1['SR']['be2_breakpos'] and ins2['SR']['be1_breakpos'] == ins2['SR']['be2_breakpos']:
+        return True
+
+    # prefer higher split read count
+    if ins1['SR']['be1_sr_count'] + ins1['SR']['be2_sr_count'] > ins2['SR']['be1_sr_count'] + ins2['SR']['be2_sr_count']:
+        return True
+
+    # prefer higher discordant read count
+    if ins1['DR']['dr_count'] > ins2['DR']['dr_count']:
+        return True
+
+    return False
+
+
+def text_summary(insertions):
+    for ins in insertions:
+        print '#BEGIN'
+        for label, value in ins['SR'].iteritems():
+            print '%s: %s' % (label, str(value))
+        for label, value in ins['DR'].iteritems():
+            print '%s: %s' % (label, str(value))
+        print '#END'
+
+        # some test filters...
+        bestmatch = ins['SR']['be1_avgmatch']
+        if 'be2_avgmatch' in ins['SR']:
+            bestmatch = max(ins['SR']['be1_avgmatch'], ins['SR']['be2_avgmatch'])
+
+        # if ins['DR']['dr_count'] > 4 and bestmatch >= 0.95:
+        #     print '%s\t%d\t%d\tINSCALL' % (ins['SR']['chrom'], ins['SR']['be1_breakpos'], ins['SR']['be2_breakpos'])
+
+        print "\n"
+
+ 
+def main(args):
+    ''' housekeeping '''
+    checkref(args.bwaref)
+
+    if not os.path.exists(args.fasta_out_path):
+        os.mkdir(args.fasta_out_path)
+        assert os.path.exists(args.fasta_out_path), "could not create directory: %s" % args.fasta_out_path
+
+    ''' Chunk genome or use input BED '''
+    
+    procs = int(args.processes)
+    pool = mp.Pool(processes=procs)
+    chunks = []
+
+    if args.interval_bed is None:
+        genome = Genome(args.bwaref + '.fai')
+        chunks = genome.chunk(procs, sorted=True, pad=5000)
+
     else:
-        for fq in fqs:
-            sys.stderr.write("INFO: " + now() + " mapping fastq " + fq + " to genome " + args.ref + " using " +  str(args.threads) + " threads\n")
-            bamlist.append(bwamem(fq, args.ref, args.outdir, args.samplename, width=int(args.width), threads=args.threads, sortmem=args.sortmem))
-        refbamfn = merge(args.picard, bamlist, basename, threads=args.threads, mem=args.sortmem)
+        with open(args.interval_bed, 'r') as bed:
+            chunks = [(line.strip().split()[0], int(line.strip().split()[1]), int(line.strip().split()[2])) for line in bed]
 
-    assert refbamfn is not None
+    print chunks
 
-    if not args.skipmarkdups:
-        sys.stderr.write("INFO: " + now() + " marking likely PCR duplicates\n")
-        markdups(refbamfn, args.picard)
+    reslist = []
 
-    sys.stderr.write("INFO: " + now() + " finding clipped reads from genome alignment\n")
-    clipfastq = fetch_clipped_reads(refbamfn, minclip=int(args.minclip))
-    assert clipfastq
+    for chunk in chunks:
+    #     ins_info = run_chunk(args, *chunk) # uncomment for mp debug
+    #     text_summary(ins_info)             # uncomment for mp debug
+        res = pool.apply_async(run_chunk, [args, chunk[0], chunk[1], chunk[2]])
+        reslist.append(res)
 
-    sys.stderr.write("INFO: " + now() + " realigning clipped ends to TE reference library\n")
-    tebamfn = bwamem(clipfastq, args.telib, args.outdir, args.samplename, width=int(args.width), threads=args.threads, sortmem=args.sortmem)
-    assert tebamfn 
-
-    sys.stderr.write("INFO: " + now() + " identifying usable split reads from alignments\n")
-    splitreads = build_te_splitreads(refbamfn, tebamfn, read_fasta(args.telib), min_te_match=float(args.mintematch), min_ge_match=float(args.mingenomematch))
-    assert splitreads
-
-    sys.stderr.write("INFO: " + now() + " clustering split reads on genome coordinates\n")
-    clusters = build_te_clusters(splitreads)
-    sys.stderr.write("INFO: " + now() + " cluster count: " + str(len(clusters)) + "\n")
-
-    sys.stderr.write("INFO: " + now() + " filtering clusters\n")
-    clusters = filter_clusters(clusters, refbamfn, mapfile=args.mapfilter, minsize=int(args.mincluster), maskfile=args.mask, unclip=float(args.unclip), minq=int(args.minq))
-    sys.stderr.write("INFO: " + now() + " passing cluster count: " + str(len([c for c in clusters if c.FILTER[0] == 'PASS'])) + "\n")
-
-    sys.stderr.write("INFO: " + now() + " annotating clusters\n")
-    clusters = annotate(clusters, args.ref, refbamfn, mapfile=args.mapfilter, allclusters=args.processfiltered, 
-                        dbsnp=args.snps, minclip=args.minclip, genotype=args.genotype)
-    assert clusters
-
-    sys.stderr.write("INFO: " + now() + " writing VCF\n")
-    vcfoutput(clusters, args.outvcf, args.samplename)
-
-    cons_fasta = args.outdir + '/' + args.samplename + '.cons.fa'
-    sys.stderr.write("INFO: " + now() + " compiling consensus sequences for breakends and outputting to " + cons_fasta + "\n")
-    consensus_fasta(clusters, cons_fasta, threads=args.threads)
+    insertions = []
+    for res in reslist:
+        insertions += res.get()
+    
+    insertions = resolve_duplicates(insertions)
+    text_summary(insertions)
 
 
+
+ 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Analyse RC-seq data')
-    parser.add_argument('-i', dest='input', required=True, 
-                        help='fastq(.gz) containing reads or BAM to process and re-map. Multipe fastq files can be comma-delimited.')
+    # set up logger
+    FORMAT = '%(asctime)s %(message)s'
+    logging.basicConfig(format=FORMAT)
+ 
+    parser = argparse.ArgumentParser(description='Find inserted sequences vs. reference')
+    parser.add_argument('-b', '--bam', required=True, help='target BAM')
+    parser.add_argument('-r', '--bwaref', required=True, help='bwa/samtools indexed reference genome')
+    parser.add_argument('-p', '--processes', default=1, help='split work across multiple processes')
+    parser.add_argument('-i', '--interval_bed', default=None, help='BED file with intervals to scan')
+    parser.add_argument('-D', '--maxD', default=0.8, help='maximum value of KS D statistic for split qualities (default = 0.8)')
+    parser.add_argument('--min_minclip', default=3, help='min. shortest clipped bases per cluster (default = 3)')
+    parser.add_argument('--min_maxclip', default=20, help='min. longest clipped bases per cluster (default = 20)')
+    parser.add_argument('--minsplitreads', default=4, help='minimum split reads per breakend (default = 4)')
+    parser.add_argument('--min_consensus_score', default=0.95, help='quality of consensus alignment (default = 0.95)')
 
-    parser.add_argument('-r', '--ref', dest='ref', required=True, 
-                        help='reference genome for bwa-mem, also expects .fai index (samtools faidx ref.fa)')
-    parser.add_argument('-l', '--telib', dest='telib', required=True, 
-                        help='TE library (BWA indexed FASTA), seq names must be CLASS:NAME')
-    parser.add_argument('-v', '--outvcf', dest='outvcf', required=True, 
-                        help='output VCF file')
-    parser.add_argument('-o', '--outdir', dest='outdir', default=None, 
-                        help='output directory')
-    parser.add_argument('-p', '--picard', dest='picard', required=True,
-                        help='Picard install directory, needed for MarkDuplicates.jar')
-
-    parser.add_argument('--targets', default=None,
-                        help='BED file of target regions: only reads and mates captured from targed region are analysed')
-    parser.add_argument('--genotype', action='store_true', default=False,
-                        help='guess genotype from alignments')
-
-    parser.add_argument('-n', '--samplename', dest='samplename', default=str(uuid4()), 
-                        help='unique sample name (default = generated UUID4)')
-    parser.add_argument('-m', '--mask', dest='mask', default=None, 
-                        help='genome coordinate mask (recommended!!) - expects tabix-indexed BED-3')
-    parser.add_argument('-s', '--snps', dest='snps', default=None,
-                        help='dbSNP VCF (tabix-indexed) to link SNPs with insertions')
-    parser.add_argument('-t', '--threads', dest='threads', default=1, 
-                        help='number of threads (default = 1)')
-    parser.add_argument('--sortmem', dest='sortmem', default='8G',
-                        help='amount of memory for sorting (default = 8G)')
-
-    parser.add_argument('--width', dest='width', default=150,
-                         help='bandwidth parameter for bwa-mem: determines max size of indels in reads (see bwa docs, default=150)')
-    parser.add_argument('--mincluster', dest='mincluster', default=4, 
-                        help='minimum number of reads in a cluster')
-    parser.add_argument('--minclip', dest='minclip', default=50, 
-                        help='minimum clipped bases for adding a read to a cluster (default = 50)')
-    parser.add_argument('--minq', dest='minq', default=1, 
-                        help='minimum mean mapping quality per cluster (default = 1)')
-    parser.add_argument('--unclipfrac', dest='unclip', default=1.0, 
-                        help='maximum fraction of unclipped reads in cluster region (default = 1.0)')
-    parser.add_argument('--mintematch', dest='mintematch', default=0.9,
-                        help='minimum identity cutoff for matches to TE library (default=0.9)')
-    parser.add_argument('--mingenomematch', dest='mingenomematch', default=0.95,
-                        help='minimum identity cutoff for matches to reference genome (default=0.95)')
-    parser.add_argument('--mapfilter', dest='mapfilter', default=None,
-                        help='mappability filter (from UCSC mappability track) ... recommended!')
-
-    parser.add_argument('--processfiltered', action='store_true', default=False, 
-                        help='perform post-processing steps on all clusters, even filtered ones')
-    parser.add_argument('--premapped',  action='store_true', default=False, 
-                        help='use BAM specified by -1 (must be .bam) directly instead of remapping')
-    parser.add_argument('--skipmarkdups', action='store_true', default=False,
-                        help='skip duplicate marking step: PCR duplicates will count toward breakpoint support')
-
+    parser.add_argument('--tmpdir', default='/tmp', help='temporary directory (default = /tmp)')
+    parser.add_argument('-o', '--fasta_out_path', default='tebreak_seqdata', help='path for FASTA output')
+ 
+    parser.add_argument('-v', '--verbose', action='store_true')
+ 
     args = parser.parse_args()
     main(args)
-
-

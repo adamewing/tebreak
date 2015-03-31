@@ -112,12 +112,12 @@ def lastal_cons(ins, ref_fa, tmpdir='/tmp'):
 
 
 def add_insdata(ins, last_res):
-    be1_bestmatch = best_match(last_res, ins['be1_obj_uuid'])
+    be1_bestmatch = best_match(last_res, ins['SR']['be1_obj_uuid'])
     be2_bestmatch = None
-    if 'be2_obj_uuid' in ins and ins['be2_obj_uuid'] != ins['be1_obj_uuid']:
-        be2_bestmatch = best_match(last_res, ins['be2_obj_uuid'])
+    if 'be2_obj_uuid' in ins and ins['SR']['be2_obj_uuid'] != ins['SR']['be1_obj_uuid']:
+        be2_bestmatch = best_match(last_res, ins['SR']['be2_obj_uuid'])
 
-    print be1_bestmatch
+    #print be1_bestmatch
 
     if be1_bestmatch is not None: ins['SR']['be1_bestmatch'] = be1_bestmatch
     if be2_bestmatch is not None: ins['SR']['be2_bestmatch'] = be2_bestmatch

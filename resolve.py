@@ -60,6 +60,28 @@ def best_match(last_results, query_name):
     return None
 
 
+def load_inslib(infa):
+    seqdict = {}
+
+    with open(infa, 'r') as fa:
+        seqid = ''
+        seq   = ''
+        for line in fa:
+            if line.startswith('>'):
+                if seq != '':
+                    seqdict[seqid] = seq
+                seqid = line.lstrip('>').strip()
+                seq   = ''
+            else:
+                assert seqid != ''
+                seq = seq + line.strip()
+
+    if seqid not in seqdict and seq != '':
+        seqdict[seqid] = seq
+
+    return seqdict
+
+
 def prepare_ref(fasta, refoutdir='tebreak_refs'):
     if not os.path.exists(refoutdir):
         os.mkdir(refoutdir)
@@ -88,7 +110,7 @@ def lastal_cons(ins, ref_fa, tmpdir='/tmp'):
     tmpfa = tmpdir + '/' + 'tebreak.resolve.%s.fa' % str(uuid4())
     with open(tmpfa, 'w') as fa:
         fa.write('>%s\n%s\n' % (ins['SR']['be1_obj_uuid'], ins['SR']['be1_dist_seq']))
-        if 'be2_cons_seq' in ins['SR']:
+        if 'be2_dist_seq' in ins['SR'] and ins['SR']['be2_dist_seq'] is not None:
             fa.write('>%s\n%s\n' % (ins['SR']['be2_obj_uuid'], ins['SR']['be2_dist_seq']))
 
     cmd = ['lastal', '-e 20', ref_fa, tmpfa]
@@ -114,15 +136,34 @@ def lastal_cons(ins, ref_fa, tmpdir='/tmp'):
 def add_insdata(ins, last_res):
     be1_bestmatch = best_match(last_res, ins['SR']['be1_obj_uuid'])
     be2_bestmatch = None
-    if 'be2_obj_uuid' in ins and ins['SR']['be2_obj_uuid'] != ins['SR']['be1_obj_uuid']:
+    if 'be2_obj_uuid' in ins['SR'] and ins['SR']['be2_obj_uuid'] != ins['SR']['be1_obj_uuid']:
         be2_bestmatch = best_match(last_res, ins['SR']['be2_obj_uuid'])
-
-    #print be1_bestmatch
 
     if be1_bestmatch is not None: ins['SR']['be1_bestmatch'] = be1_bestmatch
     if be2_bestmatch is not None: ins['SR']['be2_bestmatch'] = be2_bestmatch
 
+    # get insertion length ...
+
+    # get insertion orientation ...
+
+
+
+    if None not in (be1_bestmatch, be2_bestmatch): # compare to decide 3' end
+        ins['SR']['be1_is_3prime'] = be1_bestmatch.target_start > be2_bestmatch.target_start
+
+    else: # use coordinates to decide 3' end
+        pass
+
+
     return ins
+
+
+def infer_orientation(ins):
+    pass
+
+
+def infer_length(ins):
+    pass
 
 
 def resolve_insertions(insertions, ref_fa):

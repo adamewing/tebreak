@@ -539,6 +539,9 @@ class Insertion:
             if tsd_ref_interval is None:
                 return None
 
+            if len(self.be1.distal_subread()) == 0 or len(self.be2.distal_subread()) == 0:
+                return None
+
             tsd_ref_interval[1] += 1
  
             tsdseq1 = ''
@@ -562,7 +565,7 @@ class Insertion:
         start = self.min_supporting_base()
         end   = self.max_supporting_base()
      
-        assert start < end
+        assert start < end, 'fetch_discordant_reads: start > end'
 
         mapped   = {}
         unmapped = {}
@@ -599,7 +602,7 @@ class Insertion:
 
     def unmapped_fastq(self, outdir):
         ''' for downstream analysis of unmapped paired reads '''
-        assert os.path.exists(outdir)
+        assert os.path.exists(outdir), 'cannot find path: %s' % outpath
 
         out_fastq = outdir + '/' + '.'.join(('disc_unmap', self.be1.chrom, str(self.be1.breakpos), 'fq'))
         with open(out_fastq, 'w') as out:
@@ -688,6 +691,15 @@ class Insertion:
         self.sr_info['be1_dist_seq'] = ','.join(map(lambda x : x.query_alignment_sequence, self.be1.distal_subread()))
         self.sr_info['be1_umap_seq'] = ','.join(self.be1.unmapped_subread()[1])
 
+        if self.be1.proximal_subread() and self.be1.proximal_subread()[0].is_reverse:
+            self.sr_info['be1_prox_str'] = '-'
+        else:
+            self.sr_info['be1_prox_str'] = '+'
+
+        self.sr_info['be1_prox_loc'] = []
+        for subseq in self.sr_info['be1_prox_seq'].split(','):
+            self.sr_info['be1_prox_loc'].append(locate_subseq(self.be1.consensus, orient_subseq(self.be1.consensus, subseq)))
+
         # stats
         self.sr_info['be1_sr_count'] = len(self.be1)
         self.sr_info['be1_num_maps'] = len(self.be1.mappings)
@@ -713,6 +725,16 @@ class Insertion:
             self.sr_info['be2_prox_seq'] = ','.join(map(lambda x : x.query_alignment_sequence, self.be2.proximal_subread()))
             self.sr_info['be2_dist_seq'] = ','.join(map(lambda x : x.query_alignment_sequence, self.be2.distal_subread()))
             self.sr_info['be2_umap_seq'] = ','.join(self.be2.unmapped_subread()[1])
+
+            if self.be2.proximal_subread() and self.be2.proximal_subread()[0].is_reverse:
+                self.sr_info['be2_prox_str'] = '-'
+            else:
+                self.sr_info['be2_prox_str'] = '+'
+
+
+            self.sr_info['be2_prox_loc'] = []
+            for subseq in self.sr_info['be2_prox_seq'].split(','):
+                self.sr_info['be2_prox_loc'].append(locate_subseq(self.be2.consensus, orient_subseq(self.be2.consensus, subseq)))
 
             # stats
             self.sr_info['be2_sr_count'] = len(self.be2)
@@ -790,7 +812,7 @@ def ref_dist(read1, read2):
  
 def orient_subseq(longseq, shortseq):
     ''' return shortseq in same orientation as longseq '''
-    assert len(longseq) >= len(shortseq)
+    assert len(longseq) >= len(shortseq), 'orient_subseq: %s < %s' % (longseq, shortseq)
  
     if re.search(shortseq, longseq):
         return shortseq
@@ -801,7 +823,7 @@ def orient_subseq(longseq, shortseq):
  
 def locate_subseq(longseq, shortseq):
     ''' return (start, end) of shortseq in longseq '''
-    assert len(longseq) >= len(shortseq)
+    assert len(longseq) >= len(shortseq), 'orient_subseq: %s < %s' % (longseq, shortseq)
  
     match = re.search(shortseq, longseq)
     if match is not None:

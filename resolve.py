@@ -142,28 +142,103 @@ def add_insdata(ins, last_res):
     if be1_bestmatch is not None: ins['SR']['be1_bestmatch'] = be1_bestmatch
     if be2_bestmatch is not None: ins['SR']['be2_bestmatch'] = be2_bestmatch
 
-    # get insertion length ...
+    ins = assign_insertion_ends(ins)
 
-    # get insertion orientation ...
+    ins['SR']['ins_length'] = infer_length(ins)
+
+    ins = infer_orientation(ins)
 
 
+def assign_insertion_ends(ins):
+    be1 = None
+    be2 = None
 
-    if None not in (be1_bestmatch, be2_bestmatch): # compare to decide 3' end
-        ins['SR']['be1_is_3prime'] = be1_bestmatch.target_start > be2_bestmatch.target_start
+    if 'be1_bestmatch' in ins['SR']: be1 = ins['SR']['be1_bestmatch']
+    if 'be2_bestmatch' in ins['SR']: be2 = ins['SR']['be2_bestmatch']
 
-    else: # use coordinates to decide 3' end
-        pass
+    if None not in (be1, be2): # compare to decide 3' end
+        ins['SR']['be1_is_3prime'] = be1.target_start > be2.target_start
+        ins['SR']['be2_is_3prime'] = not ins['SR']['be1_is_3prime']
 
+    else: # for single end evidence, use coordinates to decide 3' end
+        if be1 is not None:
+            # 10bp to end of elt reference or has >= 10bp polyA we'll call it 3 prime
+            ins['SR']['be1_is_3prime'] = be1.target_seqsize - (be1.target_start+be1.target_alnsize) < 10
+            if not ins['SR']['be1_is_3prime']: ins['SR']['be1_is_3prime'] = be1.query_align.endswith('A'*10)
+            if not ins['SR']['be1_is_3prime']: ins['SR']['be1_is_3prime'] = be1.target_align.endswith('A'*10)
+            ins['SR']['be2_is_3prime'] = not ins['SR']['be1_is_3prime']
+
+        elif be2 is not None:
+            ins['SR']['be2_is_3prime'] = be2.target_seqsize - (be2.target_start+be2.target_alnsize) < 10
+            if not ins['SR']['be2_is_3prime']: ins['SR']['be2_is_3prime'] = be2.query_align.endswith('A'*10)
+            if not ins['SR']['be2_is_3prime']: ins['SR']['be2_is_3prime'] = be2.target_align.endswith('A'*10)
+            ins['SR']['be1_is_3prime'] = not ins['SR']['be2_is_3prime']
 
     return ins
 
 
 def infer_orientation(ins):
-    pass
+    # not sure if the prox. alignment must always be +, but it seems that way... testing assumption
+    if 'be1_prox_str' in ins['SR']:
+        assert ins['SR']['be1_prox_str'] == '+', "be1 negative strand alignment in proximal sequence"
+
+    if 'be2_prox_str' in ins['SR']:
+        assert ins['SR']['be2_prox_str'] == '+', "be2 negative strand alignment in proximal sequence"
+
+    # defaults
+    ins['SR']['be1_orient'] = None
+    ins['SR']['be2_orient'] = None
+    
+    for be in ('be1', 'be2'):
+        if be+'_prox_loc' in ins['SR'] and len(ins['SR'][be+'_prox_loc']) == 1:
+            # work out which end of the consensus belongs to the distal sequence: _dist to proximal seq.
+            right_dist = len(ins['SR'][be+'_prox_seq']) - max(ins['SR'][be+'_prox_loc'][0])
+            left_dist  = min(ins['SR'][be+'_prox_loc'][0])
+
+            distal_is_left = False
+
+            if left_dist > right_dist:
+                distal_is_left = True
+
+            if be+'_is_3prime' in ins['SR']:
+                if ins['SR'][be+'_is_3prime']:
+                    if distal_is_left:
+                        ins['SR'][be+'_orient'] = '+'
+                    else:
+                        ins['SR'][be+'_orient'] = '-'
+
+                else:
+                    if distal_is_left:
+                        ins['SR'][be+'_orient'] = '-'
+                    else:
+                        ins['SR'][be+'_orient'] = '+'
+
+    ins['SR']['inversion'] = ins['SR']['be1_orient'] != ins['SR']['be2_orient']
+
+    return ins
 
 
 def infer_length(ins):
-    pass
+    be1 = None
+    be2 = None
+
+    if 'be1_bestmatch' in ins['SR']: be1 = ins['SR']['be1_bestmatch']
+    if 'be2_bestmatch' in ins['SR']: be2 = ins['SR']['be2_bestmatch']
+
+    # length is known if both ends are known
+    if None not in (be1, be2):
+        coords = (be1.target_start+be1.target_alnsize, be1.target_start, be2.target_start+be2.target_alnsize, be2.target_start)
+        return max(coords) - min(coords)
+
+    # can reasonably approximate length if only 5' end is known
+    if be1 is not None and not ins['SR']['be1_is_3prime']:
+        return be1.target_seqsize - min(be1.target_start+be1.target_alnsize, be1.target_start)
+
+    if be2 is not None and not ins['SR']['be2_is_3prime']:
+        return be2.target_seqsize - min(be2.target_start+be2.target_alnsize, be2.target_start)
+
+    # no idea
+    return None
 
 
 def resolve_insertions(insertions, ref_fa):

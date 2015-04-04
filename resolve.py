@@ -6,48 +6,12 @@ import cPickle as pickle
 import argparse
 import logging
 import tebreak
+import pysam
 import subprocess
 
 from uuid import uuid4
 
 logger = logging.getLogger(__name__)
-
-
-#######################################
-## Classes                           ##
-#######################################
-
-
-class LASTResult:
-    def __init__(self, res):
-        self.raw = res
-        self.score = int(res[0].split()[1].replace('score=', ''))
-
-        self.target_id      = res[1].split()[1]
-        self.target_start   = int(res[1].split()[2])
-        self.target_alnsize = int(res[1].split()[3])
-        self.target_strand  = res[1].split()[4]
-        self.target_seqsize = int(res[1].split()[5])
-        self.target_align   = res[1].split()[6]
-
-        self.query_id      = res[2].split()[1]
-        self.query_start   = int(res[2].split()[2])
-        self.query_alnsize = int(res[2].split()[3])
-        self.query_strand  = res[2].split()[4]
-        self.query_seqsize = int(res[2].split()[5])
-        self.query_align   = res[2].split()[6]
-
-    def pct_match(self):
-        return float(sum([a==b for a,b in zip(list(self.query_align), list(self.target_align))])) / float(self.query_alnsize)
-
-    def __lt__(self, other):
-        return self.score > other.score
-
-    def __gt__(self, other):
-        return self.score < other.score
-
-    def __str__(self):
-        return "\n".join(self.raw)
 
 
 #######################################
@@ -61,28 +25,6 @@ def best_match(last_results, query_name, req_target=None):
         return qres[0]
 
     return None
-
-
-def load_inslib(infa):
-    seqdict = {}
-
-    with open(infa, 'r') as fa:
-        seqid = ''
-        seq   = ''
-        for line in fa:
-            if line.startswith('>'):
-                if seq != '':
-                    seqdict[seqid] = seq
-                seqid = line.lstrip('>').strip()
-                seq   = ''
-            else:
-                assert seqid != ''
-                seq = seq + line.strip()
-
-    if seqid not in seqdict and seq != '':
-        seqdict[seqid] = seq
-
-    return seqdict
 
 
 def prepare_ref(fasta, refoutdir='tebreak_refs', makeFAI=True, makeBWA=True, makeLAST=True):
@@ -133,7 +75,7 @@ def lastal_cons(ins, ref_fa, tmpdir='/tmp'):
                 la_lines.append(line.strip())
 
             else:
-                la_results.append(LASTResult(la_lines))
+                la_results.append(tebreak.LASTResult(la_lines))
                 la_lines = []
 
     os.remove(tmpfa)
@@ -210,12 +152,12 @@ def assign_insertion_ends(ins):
 
 
 def infer_orientation(ins):
-    # not sure if the prox. alignment must always be +, but it seems that way... testing assumption
-    if 'be1_prox_str' in ins['SR']:
-        assert ins['SR']['be1_prox_str'] == '+', "be1 negative strand alignment in proximal sequence"
+    # # not sure if the prox. alignment must always be +, but it seems that way... testing assumption
+    # if 'be1_prox_str' in ins['SR']:
+    #     assert ins['SR']['be1_prox_str'] == '+', "be1 negative strand alignment in proximal sequence"
 
-    if 'be2_prox_str' in ins['SR']:
-        assert ins['SR']['be2_prox_str'] == '+', "be2 negative strand alignment in proximal sequence"
+    # if 'be2_prox_str' in ins['SR']:
+    #     assert ins['SR']['be2_prox_str'] == '+', "be2 negative strand alignment in proximal sequence"
 
     # defaults
     ins['SR']['be1_orient'] = None
@@ -245,9 +187,16 @@ def infer_orientation(ins):
                     else:
                         ins['SR'][be+'_orient'] = '+'
 
+                if ins['SR'][be+'_prox_str'] == '-': ins['SR'][be+'_orient'] = swapstrand(ins['SR'][be+'_orient'])
+
     ins['SR']['inversion'] = ins['SR']['be1_orient'] != ins['SR']['be2_orient']
 
     return ins
+
+
+def swapstrand(strand):
+    if strand == '+': return '-'
+    if strand == '-': return '+'
 
 
 def infer_length(ins):
@@ -300,7 +249,7 @@ def make_tmp_ref(ins, ref_fa, tmpdir='/tmp'):
     if ref_id is None:
         return None
 
-    inslib = load_inslib(ref_fa)
+    inslib = tebreak.load_falib(ref_fa)
     assert ref_id in inslib, 'Reference is missing: %s' % ref_id
 
     tmp_ref = tmpdir + '/tebreak.ref.%s.%s.fa' % (ref_id, str(uuid4()))
@@ -311,15 +260,19 @@ def make_tmp_ref(ins, ref_fa, tmpdir='/tmp'):
     return prepare_ref(tmp_ref, refoutdir=tmpdir, makeLAST=False)
 
 
-def remap_discordant(ins, ref_fa, tmpdir='/tmp'):
+def remap_discordant(ins, inslib_fa=None, useref=None, tmpdir='/tmp'):
+    ''' will build temporary ref from inslib_fasta unless useref is specified '''
     if len(ins['READSTORE']) == 0:
         return None
 
+    if inslib_fa is not None:
     # make references for best target
-    tmp_ref = make_tmp_ref(ins, ref_fa, tmpdir)
+        tmp_ref = make_tmp_ref(ins, inslib_fa, tmpdir)
+        if tmp_ref is None: return None
 
-    if tmp_ref is None:
-        return None
+    if useref is not None: tmp_ref = useref
+
+    if tmp_ref is None: return None
 
     tmp_fq  = '%s/tebreak.%s.discoremap.fq' % (tmpdir, str(uuid4()))
     tmp_sam = '.'.join(tmp_fq.split('.')[:-1]) + '.sam'
@@ -331,7 +284,7 @@ def remap_discordant(ins, ref_fa, tmpdir='/tmp'):
             fq.write(dr)
 
     sam_cmd = ['bwa', 'mem', '-k', '10', '-M', '-S', '-P', tmp_ref, tmp_fq]
-    bam_cmd = ['samtools', 'view', '-bt', ref_fa + '.fai', '-o', tmp_bam, tmp_sam]
+    bam_cmd = ['samtools', 'view', '-bt', tmp_ref + '.fai', '-o', tmp_bam, tmp_sam]
     srt_cmd = ['samtools', 'sort', tmp_bam, tmp_srt]
     idx_cmd = ['samtools', 'index', tmp_bam]
 
@@ -360,14 +313,16 @@ def remap_discordant(ins, ref_fa, tmpdir='/tmp'):
     return tmp_bam
 
 
-def resolve_insertion(args, ins, ref_fa):
+def resolve_insertion(args, ins, inslib_fa):
     ''' add data based on alignments of library to consensus '''
-    last_res = lastal_cons(ins, ref_fa)
+    last_res = lastal_cons(ins, inslib_fa)
     ins = add_insdata(ins, last_res)
 
     if 'best_ins_matchpct' in ins['SR']:
         if ins['DR']['dr_count'] > 0 and ins['SR']['best_ins_matchpct'] > 0.90: # change to parameter
-            ins['DR']['tmpBAM'] = remap_discordant(ins, ref_fa, tmpdir=args.tmpdir)
+            tmp_bam = remap_discordant(ins, inslib_fa=inslib_fa, tmpdir=args.tmpdir)
+            bam = pysam.AlignmentFile(tmp_bam, 'rb')
+            ins['DR']['sr_mapped_target'] = bam.mapped
 
     return ins
 
@@ -384,14 +339,14 @@ def main(args):
     with open(args.pickle, 'r') as pickin:
         insertions = pickle.load(pickin)
 
-    ref_fa = prepare_ref(args.fasta, refoutdir=args.refoutdir, makeFAI=False, makeBWA=False)
+    inslib_fa = prepare_ref(args.inslib_fasta, refoutdir=args.refoutdir, makeFAI=False, makeBWA=False)
 
     # parallelise insertions[]
 
     results = []
 
     for ins in insertions:
-        results.append(resolve_insertion(args, ins, ref_fa))
+        results.append(resolve_insertion(args, ins, inslib_fa))
 
     tebreak.text_summary(results) # debug
 
@@ -403,7 +358,7 @@ if __name__ == '__main__':
  
     parser = argparse.ArgumentParser(description='Resolve TE insertions from TEbreak data')
     parser.add_argument('-p', '--pickle', required=True)
-    parser.add_argument('-f', '--fasta', required=True, help='reference for insertions (not genome)')
+    parser.add_argument('-i', '--inslib_fasta', required=True, help='reference for insertions (not genome)')
     parser.add_argument('--refoutdir', default='tebreak_refs')
 
     parser.add_argument('--tmpdir', default='/tmp')

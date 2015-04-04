@@ -208,6 +208,38 @@ class Genome:
  
         return list(itertools.chain.from_iterable(chunks)) # flatten list
 
+
+class LASTResult:
+    def __init__(self, res):
+        self.raw = res
+        self.score = int(res[0].split()[1].replace('score=', ''))
+
+        self.target_id      = res[1].split()[1]
+        self.target_start   = int(res[1].split()[2])
+        self.target_alnsize = int(res[1].split()[3])
+        self.target_strand  = res[1].split()[4]
+        self.target_seqsize = int(res[1].split()[5])
+        self.target_align   = res[1].split()[6]
+
+        self.query_id      = res[2].split()[1]
+        self.query_start   = int(res[2].split()[2])
+        self.query_alnsize = int(res[2].split()[3])
+        self.query_strand  = res[2].split()[4]
+        self.query_seqsize = int(res[2].split()[5])
+        self.query_align   = res[2].split()[6]
+
+    def pct_match(self):
+        return float(sum([a==b for a,b in zip(list(self.query_align), list(self.target_align))])) / float(self.query_alnsize)
+
+    def __lt__(self, other):
+        return self.score > other.score
+
+    def __gt__(self, other):
+        return self.score < other.score
+
+    def __str__(self):
+        return "\n".join(self.raw)
+
  
 class SplitRead:
     ''' store information about split read alignment '''
@@ -398,6 +430,9 @@ class DiscoCluster(ReadCluster):
 
         return min(iv_ins[1], iv_dsc[1]) - max(iv_ins[0], iv_dsc[0]) > 0
 
+    def summary_tuple(self):
+        return (self.chrom, self.find_extrema()[0], self.find_extrema()[1], self.readgroups(), len(self))
+
  
 class BreakEnd:
     ''' coallate information about a breakend '''
@@ -463,6 +498,12 @@ class SortableRead:
         self.chrom = chrom
         self.read  = read
 
+    def getRG(self):
+        ''' return read group from RG aux tag '''
+        for tag, val in self.read.tags:
+            if tag == 'RG': return val
+        return None
+
     def __gt__(self, other):
         return self.read.get_reference_positions()[0] > other.read.get_reference_positions()[0]
 
@@ -496,6 +537,7 @@ class Insertion:
         self.dr_prox_clusters = []
         self.dr_dist_clusters = []
         self.fastqrecs = []
+        self.cons_fasta = None
 
     def paired(self):
         return None not in (self.be1, self.be2)
@@ -600,6 +642,49 @@ class Insertion:
 
         self.discoreads = mapped.values() + unmapped.values()
 
+    def improve_consensus(self, ctg_fa, bwaref):
+        assert self.cons_fasta is not None, "need to write consensus fasta before trying to improve consensus"
+
+        ctg_falib = load_falib(ctg_fa)
+
+        #logger.debug('Create LAST db for %s ...' % ctg_fa)
+        subprocess.call(['lastdb', '-s', '4G', ctg_fa, ctg_fa])
+        assert os.path.exists(ctg_fa + '.tis'), 'could not lastdb -4G %s %s' % (ctg_fa, ctg_fa)
+
+        last_cmd = ['lastal', '-e 20', ctg_fa, self.cons_fasta]
+
+        la_lines   = []
+        la_results = []
+
+        p = subprocess.Popen(last_cmd, stdout=subprocess.PIPE)
+
+        for line in p.stdout:
+            if not line.startswith('#'):
+                if line.strip() != '':
+                    la_lines.append(line.strip())
+
+                else:
+                    la_results.append(LASTResult(la_lines))
+                    la_lines = []
+
+        improved = False
+
+        for be in (self.be1, self.be2):
+            if be is not None:
+                # find corresponding contig, if possible
+                be_name = 'tebreak:%s:%d' % (be.chrom, be.breakpos)
+
+                for res in la_results:
+                    if res.query_id == be_name:
+                        # criteria for deciding the new consensus is better
+                        if res.target_seqsize > len(be.consensus) and len(be.consensus) - res.query_alnsize < 10 and res.pct_match() > 0.95:
+                            be.consensus = ctg_falib[res.target_id]
+                            be = map_breakends([be], bwaref)
+                            improved = True
+
+        return improved
+
+
     def unmapped_fastq(self, outdir):
         ''' for downstream analysis of unmapped paired reads '''
         assert os.path.exists(outdir), 'cannot find path: %s' % outpath
@@ -660,9 +745,14 @@ class Insertion:
             if self.be2 is not None:
                 out.write('>tebreak:%s:%d\n%s\n' % (self.be2.chrom, self.be2.breakpos, self.be2.consensus))
 
+        self.cons_fasta = out_fasta
+
         return out_fasta
 
     def compile_dr_info(self):
+        self.dr_prox_clusters = []
+        self.dr_dist_clusters = []
+
         for dc in build_dr_clusters(self):
             if dc.overlap_insertion(self):
                 self.dr_prox_clusters.append(dc)
@@ -670,8 +760,8 @@ class Insertion:
                 self.dr_dist_clusters.append(dc)
 
         self.dr_info['dr_count'] = len(self.discoreads)
-        self.dr_info['dr_prox_clusters']  = map(lambda x : (x.chrom, x.find_extrema()[0], x.find_extrema()[1]), self.dr_prox_clusters)
-        self.dr_info['dr_dist_clusters']  = map(lambda x : (x.chrom, x.find_extrema()[0], x.find_extrema()[1]), self.dr_dist_clusters)
+        self.dr_info['dr_prox_clusters']  = map(lambda x : x.summary_tuple(), self.dr_prox_clusters)
+        self.dr_info['dr_dist_clusters']  = map(lambda x : x.summary_tuple(), self.dr_dist_clusters)
         self.dr_info['dr_unmapped_mates'] = len([dr for dr in self.discoreads if dr.mate_read is not None and dr.mate_read.is_unmapped])
 
     def compile_sr_info(self, bam):
@@ -898,7 +988,29 @@ def mafft(infafn, iterations=100, threads=1, tmpdir='/tmp'):
  
     return outfafn
  
+
+def load_falib(infa):
+    seqdict = {}
+
+    with open(infa, 'r') as fa:
+        seqid = ''
+        seq   = ''
+        for line in fa:
+            if line.startswith('>'):
+                if seq != '':
+                    seqdict[seqid] = seq
+                seqid = line.lstrip('>').strip()
+                seq   = ''
+            else:
+                assert seqid != ''
+                seq = seq + line.strip()
+
+    if seqid not in seqdict and seq != '':
+        seqdict[seqid] = seq
+
+    return seqdict
  
+
 def build_sr_clusters(splitreads, searchdist=100): # TODO PARAM
     ''' cluster SplitRead objects into Cluster objects and return a list of them '''
     clusters  = []
@@ -977,6 +1089,7 @@ def map_breakends(breakends, db, tmpdir='/tmp'):
  
     with open(tmp_fa, 'w') as out:
         for be in breakends:
+            be.mappings = []
             breakdict[be.uuid] = be
             qual = 'I' * len(be.consensus)
             out.write('>%s\n%s\n+\n%s\n' % (be.uuid, be.consensus, qual))
@@ -1051,9 +1164,18 @@ def build_insertions(breakends, maxdist=100):
                 insertions.append(Insertion(be1))
      
     return insertions
+
+
+def minia(fq, tmpdir='/tmp'):
+    ''' sequence assembly '''
+    ctgbase = tmpdir + '/tebreak.minia.%s' % str(uuid4())
+    cmd = ['minia', '-in', fq, '-abundance-min', '1', '-no-length-cutoff', '-out', ctgbase]
+    subprocess.call(cmd)
+    os.remove(ctgbase + '.h5')
+    return ctgbase + '.contigs.fa'
  
 
-def process_insertion(ins, bam, outpath):
+def process_insertion(ins, bam, bwaref, outpath):
     ''' returns a pickleable version of the insertion information '''
     pi = dd(dict)
 
@@ -1061,14 +1183,26 @@ def process_insertion(ins, bam, outpath):
     ins.compile_sr_info(bam)
     ins.compile_dr_info()
 
+    # various FASTA/FASTQ outputs
+    ins.unmapped_fastq(outpath)
+    ins.consensus_fasta(outpath)
+    
+    support_fq  = ins.supportreads_fastq(outpath)
+    support_asm = minia(support_fq)
+
+    improved = ins.improve_consensus(support_asm, bwaref)
+    if improved:
+        ins.compile_sr_info(bam)
+        ins.compile_dr_info()
+    
+    print ins.be1.consensus
+    print ins.be2.consensus
+
     pi['SR'] = ins.sr_info
     pi['DR'] = ins.dr_info
     pi['READSTORE'] = ins.fastqrecs
 
-    # various FASTA/FASTQ outputs
-    ins.unmapped_fastq(outpath)
-    ins.consensus_fasta(outpath)
-    ins.supportreads_fastq(outpath)
+    pi['SR']['debug_support_asm'] = support_asm
 
     return pi
 
@@ -1110,7 +1244,7 @@ def run_chunk(args, chrom, start, end):
 
     for ins in insertions:
         if len(ins.be1.proximal_subread()) > 0:
-            processed_insertions.append(process_insertion(ins, bam, args.fasta_out_path))
+            processed_insertions.append(process_insertion(ins, bam, args.bwaref, args.fasta_out_path))
 
     logger.debug('Finished chunk: %s' % chunkname)
 

@@ -223,8 +223,12 @@ class LASTResult:
         self.target_seqsize = int(res[1].split()[5])
         self.target_align   = res[1].split()[6]
 
-        self.query_id      = res[2].split()[1].split('|')[0]
-        self.query_distnum = int(res[2].split()[1].split('|')[-1]) # track which distal read this came from
+        self.query_id = res[2].split()[1]
+        self.query_distnum = 0
+        if '|' in self.query_id:
+            self.query_id = res[2].split()[1].split('|')[0]
+            self.query_distnum = int(res[2].split()[1].split('|')[-1]) # track which distal read this came from
+
         self.query_start   = int(res[2].split()[2])
         self.query_alnsize = int(res[2].split()[3])
         self.query_strand  = res[2].split()[4]
@@ -573,7 +577,7 @@ class Insertion:
 
         return max(self.be1.proximal_subread()[0].get_reference_positions() + be2)
 
-    def tsd(self):
+    def tsd(self, be1_use_prox=0, be2_use_prox=0):
         ''' target site duplication '''
         if not self.paired():
             return None
@@ -582,8 +586,8 @@ class Insertion:
             return None
  
         else:
-            junc1 = self.be1.proximal_subread()[0]
-            junc2 = self.be2.proximal_subread()[0]
+            junc1 = self.be1.proximal_subread()[be1_use_prox]
+            junc2 = self.be2.proximal_subread()[be2_use_prox]
  
             tsd_ref_interval = ref_overlap(junc1, junc2)
 
@@ -701,6 +705,9 @@ class Insertion:
                         self.be2_alt = self.be2
                         self.be2.consensus = ctg_falib[res.target_id]
                         self.be2_improved_cons = True
+
+        for ext in ('','.amb','.ann','.bck','.bwt','.des','.fai','.pac','.prj','.sa','.sds','.ssp','.suf','.tis'):
+            if os.path.exists(ctg_fa+ext): os.remove(ctg_fa+ext)
 
         return self.be1_improved_cons, self.be2_improved_cons
 
@@ -875,7 +882,17 @@ class Insertion:
             if self.sr_info['be2_umap_seq'] == '':
                 self.sr_info['be2_umap_seq'] = 'NA'
 
-            tsdpair = self.tsd()
+            self.sr_info['be1_use_prox'] = 0
+            self.sr_info['be2_use_prox'] = 0
+
+            if self.sr_info['be1_prox_loc'] == self.sr_info['be2_prox_loc']: # insertion may be completely assembled
+                if len(self.sr_info['be1_prox_loc']) > 1:
+                    self.sr_info['be1_use_prox'] = 1
+
+                elif len(self.sr_info['be2_prox_loc']) > 1:
+                    self.sr_info['be2_use_prox'] = 1
+
+            tsdpair = self.tsd(be1_use_prox=self.sr_info['be1_use_prox'], be2_use_prox=self.sr_info['be2_use_prox'])
             if tsdpair is not None:
                 self.sr_info['be1_end_over'], self.sr_info['be2_end_over'] = tsdpair
 
@@ -1198,10 +1215,22 @@ def build_insertions(breakends, maxdist=100):
 
 def minia(fq, tmpdir='/tmp'):
     ''' sequence assembly '''
+    # minia temp files don't seem to be compatabile with concurrency, workaround w/ temp cwd
+    oldcwd = os.getcwd()
+    fq = oldcwd + '/' + fq
+    tmpcwd = '%s/%s' % (tmpdir, 'tebreak.'+str(uuid4()))
+    os.mkdir(tmpcwd)
+    assert os.path.exists(tmpcwd), 'cannot create temp dir: %s' % tmpcwd
+
+    os.chdir(tmpcwd)
     ctgbase = tmpdir + '/tebreak.minia.%s' % str(uuid4())
-    cmd = ['minia', '-in', fq, '-abundance-min', '1', '-no-length-cutoff', '-out', ctgbase]
+    cmd = ['minia', '-in', fq, '-abundance-min', '1', '-no-length-cutoff', '-verbose', '0', '-out', ctgbase]
     subprocess.call(cmd)
     os.remove(ctgbase + '.h5')
+
+    os.chdir(oldcwd)
+    os.rmdir(tmpcwd)
+
     return ctgbase + '.contigs.fa'
 
 
@@ -1384,9 +1413,6 @@ def text_summary(insertions):
         bestmatch = ins['SR']['be1_avgmatch']
         if 'be2_avgmatch' in ins['SR']:
             bestmatch = max(ins['SR']['be1_avgmatch'], ins['SR']['be2_avgmatch'])
-
-        # if ins['DR']['dr_count'] > 4 and bestmatch >= 0.95:
-        #     print '%s\t%d\t%d\tINSCALL' % (ins['SR']['chrom'], ins['SR']['be1_breakpos'], ins['SR']['be2_breakpos'])
 
         print "\n"
 

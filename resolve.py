@@ -64,7 +64,7 @@ def lastal_cons(ins, ref_fa, tmpdir='/tmp'):
             fa.write('>%s|%s\n%s\n' % (ins['SR']['be1_obj_uuid'],str(i), dist_seq))
 
         if 'be2_dist_seq' in ins['SR'] and ins['SR']['be2_dist_seq'] is not None:
-            for i, dist_seq in enumerate(ins['SR']['be1_dist_seq'].split(',')):
+            for i, dist_seq in enumerate(ins['SR']['be2_dist_seq'].split(',')):
                 fa.write('>%s|%s\n%s\n' % (ins['SR']['be2_obj_uuid'], str(i), dist_seq))
 
     cmd = ['lastal', '-e 20', ref_fa, tmpfa]
@@ -165,17 +165,21 @@ def infer_orientation(ins):
     be1_distal_num = 0
     be2_distal_num = 0
 
-    if ins['SR']['be1_bestmatch'] is not None:
+    if 'be1_bestmatch' in ins['SR'] and ins['SR']['be1_bestmatch'] is not None:
         be1_distal_num = ins['SR']['be1_bestmatch'].query_distnum
 
-    if ins['SR']['be2_bestmatch'] is not None:
+    if 'be2_bestmatch' in ins['SR'] and ins['SR']['be2_bestmatch'] is not None:
         be1_distal_num = ins['SR']['be2_bestmatch'].query_distnum
 
     for be in ('be1', 'be2'):
         if be+'_prox_loc' in ins['SR'] and len(ins['SR'][be+'_prox_loc']) > 0:
             # work out which end of the consensus belongs to the distal sequence: _dist to proximal seq.
-            right_dist = len(ins['SR'][be+'_prox_seq']) - max(ins['SR'][be+'_prox_loc'][0])
-            left_dist  = min(ins['SR'][be+'_prox_loc'][0])
+            # more than one proximal mapping may indicate the insertion is completely assembled (but not always)
+            which_prox = 0
+            if be+'_use_prox' in ins['SR']: which_prox = ins['SR'][be+'_use_prox']
+
+            right_dist = len(ins['SR'][be+'_prox_seq']) - max(ins['SR'][be+'_prox_loc'][which_prox])
+            left_dist  = min(ins['SR'][be+'_prox_loc'][which_prox])
 
             distal_is_left = False
 

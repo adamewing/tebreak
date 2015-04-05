@@ -2,12 +2,14 @@
  
 import os
 import re
+import sys
 import pysam
+import random
 import argparse
 import logging
 import subprocess
-import random
 import itertools
+import traceback
 import cPickle as pickle
 import multiprocessing as mp
 
@@ -221,7 +223,8 @@ class LASTResult:
         self.target_seqsize = int(res[1].split()[5])
         self.target_align   = res[1].split()[6]
 
-        self.query_id      = res[2].split()[1]
+        self.query_id      = res[2].split()[1].split('|')[0]
+        self.query_distnum = int(res[2].split()[1].split('|')[-1]) # track which distal read this came from
         self.query_start   = int(res[2].split()[2])
         self.query_alnsize = int(res[2].split()[3])
         self.query_strand  = res[2].split()[4]
@@ -527,6 +530,12 @@ class Insertion:
         if be2 is not None:
             self.be2 = be2
  
+        self.be1_alt = None
+        self.be2_alt = None
+
+        self.be1_improved_cons = False
+        self.be2_improved_cons = False
+
         if self.paired():
             if self.be1.breakpos > self.be2.breakpos:
                 self.be1, self.be2 = self.be2, self.be1 # keep breakends in position order
@@ -642,16 +651,17 @@ class Insertion:
 
         self.discoreads = mapped.values() + unmapped.values()
 
+
     def improve_consensus(self, ctg_fa, bwaref):
+        ''' attempt to use assembly of all supporting reads to build a better consensus '''
         assert self.cons_fasta is not None, "need to write consensus fasta before trying to improve consensus"
 
         ctg_falib = load_falib(ctg_fa)
 
-        #logger.debug('Create LAST db for %s ...' % ctg_fa)
         subprocess.call(['lastdb', '-s', '4G', ctg_fa, ctg_fa])
         assert os.path.exists(ctg_fa + '.tis'), 'could not lastdb -4G %s %s' % (ctg_fa, ctg_fa)
 
-        last_cmd = ['lastal', '-e 20', ctg_fa, self.cons_fasta]
+        last_cmd = ['lastal', '-e', '20', ctg_fa, self.cons_fasta]
 
         la_lines   = []
         la_results = []
@@ -667,22 +677,32 @@ class Insertion:
                     la_results.append(LASTResult(la_lines))
                     la_lines = []
 
-        improved = False
+        if self.be1 is not None:
+            # find corresponding contig, if possible
+            be_name = 'tebreak:%s:%d' % (self.be1.chrom, self.be1.breakpos)
 
-        for be in (self.be1, self.be2):
-            if be is not None:
-                # find corresponding contig, if possible
-                be_name = 'tebreak:%s:%d' % (be.chrom, be.breakpos)
+            for res in la_results:
+                if res.query_id == be_name:
+                    # criteria for deciding the new consensus is better
+                    if res.target_seqsize > len(self.be1.consensus) and len(self.be1.consensus) - res.query_alnsize < 10 and res.pct_match() > 0.95:
+                        self.be1_alt = self.be1
+                        self.be1.consensus = ctg_falib[res.target_id]
+                        self.be1_improved_cons = True
 
-                for res in la_results:
-                    if res.query_id == be_name:
-                        # criteria for deciding the new consensus is better
-                        if res.target_seqsize > len(be.consensus) and len(be.consensus) - res.query_alnsize < 10 and res.pct_match() > 0.95:
-                            be.consensus = ctg_falib[res.target_id]
-                            be = map_breakends([be], bwaref)
-                            improved = True
 
-        return improved
+        if self.be2 is not None:
+            # find corresponding contig, if possible
+            be_name = 'tebreak:%s:%d' % (self.be2.chrom, self.be2.breakpos)
+
+            for res in la_results:
+                if res.query_id == be_name:
+                    # criteria for deciding the new consensus is better
+                    if res.target_seqsize > len(self.be2.consensus) and len(self.be2.consensus) - res.query_alnsize < 10 and res.pct_match() > 0.95:
+                        self.be2_alt = self.be2
+                        self.be2.consensus = ctg_falib[res.target_id]
+                        self.be2_improved_cons = True
+
+        return self.be1_improved_cons, self.be2_improved_cons
 
 
     def unmapped_fastq(self, outdir):
@@ -728,7 +748,17 @@ class Insertion:
                             name += '.%s/1' % rtype
                         if read.is_read2:
                             name += '.%s/2' % rtype
+
                         outreads[name] = read.seq + '\n+\n' + read.qual
+
+                        if rtype == 'DR' and r.mate_read is not None: # get discordant mates
+                            read = r.mate_read
+                            if read.is_read1:
+                                name += '.%s/1' % rtype
+                            if read.is_read2:
+                                name += '.%s/2' % rtype
+
+                            outreads[name] = read.seq + '\n+\n' + read.qual
 
             for name, data in outreads.iteritems():
                 out.write('@%s\n%s\n' % (name, data))
@@ -1173,82 +1203,131 @@ def minia(fq, tmpdir='/tmp'):
     subprocess.call(cmd)
     os.remove(ctgbase + '.h5')
     return ctgbase + '.contigs.fa'
- 
 
-def process_insertion(ins, bam, bwaref, outpath):
+
+def summarise_insertion(ins):
     ''' returns a pickleable version of the insertion information '''
     pi = dd(dict)
-
-    ins.fetch_discordant_reads(bam)
-    ins.compile_sr_info(bam)
-    ins.compile_dr_info()
-
-    # various FASTA/FASTQ outputs
-    ins.unmapped_fastq(outpath)
-    ins.consensus_fasta(outpath)
-    
-    support_fq  = ins.supportreads_fastq(outpath)
-    support_asm = minia(support_fq)
-
-    improved = ins.improve_consensus(support_asm, bwaref)
-    if improved:
-        ins.compile_sr_info(bam)
-        ins.compile_dr_info()
-    
-    print ins.be1.consensus
-    print ins.be2.consensus
 
     pi['SR'] = ins.sr_info
     pi['DR'] = ins.dr_info
     pi['READSTORE'] = ins.fastqrecs
 
-    pi['SR']['debug_support_asm'] = support_asm
-
     return pi
+
+
+def postprocess_insertions(insertions, bwaref, outpath, bam, tmpdir='/tmp'):
+    for ins in insertions:
+        support_fq  = ins.supportreads_fastq(outpath)
+        support_asm = minia(support_fq)
+
+        # unclear why this happens, sometimes minia fails on the first try and succeeds on the second...
+        while not os.path.exists(support_asm):
+            sys.stderr.write('***Trouble with assembly: %s:%d, filename: %s\n' % (ins.be1.chrom, ins.be1.breakpos, support_asm))
+            support_asm = minia(support_fq)
+
+        sys.stderr.write('***Assembled: %s:%d, filename: %s\n' % (ins.be1.chrom, ins.be1.breakpos, support_asm))
+
+        ins.improve_consensus(support_asm, bwaref)
+
+    # collect altered breakends
+    alt_be_list = []
+    for ins in insertions:
+        if ins.be1_improved_cons: alt_be_list.append(ins.be1)
+        if ins.be2_improved_cons: alt_be_list.append(ins.be2)
+
+    remap_be_dict = {}
+    for be in map_breakends(alt_be_list, bwaref, tmpdir=tmpdir):
+        remap_be_dict[be.uuid] = be
+
+    for ins in insertions:
+        # use previous mapping if new consensus did not map
+        if ins.be1_improved_cons:
+            if ins.be1.uuid in remap_be_dict:
+                if len(remap_be_dict[ins.be1.uuid].proximal_subread()) > 0:
+                    ins.be1 = remap_be_dict[ins.be1.uuid]
+                else:
+                    ins.be1 = ins.be1_alt
+                    ins.be1_improved_cons = False
+
+        if ins.be2_improved_cons:
+            if ins.be2.uuid in remap_be_dict:
+                if len(remap_be_dict[ins.be2.uuid].proximal_subread()) > 0:
+                    ins.be2 = remap_be_dict[ins.be2.uuid]
+                else:
+                    ins.be2 = ins.be2_alt
+                    ins.be2_improved_cons = False
+
+        if ins.be1_improved_cons or ins.be2_improved_cons:
+            ins.compile_sr_info(bam)
+            ins.compile_dr_info()
+            ins.consensus_fasta(outpath)
+
+    return insertions
+
 
 
 def run_chunk(args, chrom, start, end):
     logger = logging.getLogger(__name__)
     if args.verbose: logger.setLevel(logging.DEBUG)
 
-    bam = pysam.AlignmentFile(args.bam, 'rb')
-    minsr = int(args.minsplitreads)
-    mincs = float(args.min_consensus_score)
-    maxD  = float(args.maxD)
+    try:
+        bam = pysam.AlignmentFile(args.bam, 'rb')
+        minsr = int(args.minsplitreads)
+        mincs = float(args.min_consensus_score)
+        maxD  = float(args.maxD)
 
-    start = int(start)
-    end   = int(end)
+        start = int(start)
+        end   = int(end)
 
-    insertions = []
- 
-    chunkname = '%s:%d-%d' % (chrom, start, end)
+        insertions = []
+     
+        chunkname = '%s:%d-%d' % (chrom, start, end)
 
-    logger.debug('Processing chunk: %s ...' % chunkname)
-    logger.debug('Chunk %s: Parsing split reads from bam: %s ...' % (chunkname, args.bam))
-    sr = fetch_clipped_reads(bam, chrom, start, end, minclip=int(args.min_minclip), maxD=maxD)
- 
-    logger.debug('Chunk %s: Building clusters from %d split reads ...' % (chunkname, len(sr)))
-    clusters = build_sr_clusters(sr)
- 
-    breakends = []
-    for cluster in clusters:
-        breakends += build_breakends(cluster, minsr, mincs, min_maxclip=int(args.min_maxclip), tmpdir=args.tmpdir)
- 
-    logger.debug('Chunk %s: Mapping %d breakends ...' % (chunkname, len(breakends)))
-    breakends = map_breakends(breakends, args.bwaref, tmpdir=args.tmpdir)
- 
-    insertions = build_insertions(breakends)
-    logger.debug('Chunk %s: Processing %d insertions ...' % (chunkname, len(insertions)))
+        logger.debug('Processing chunk: %s ...' % chunkname)
+        logger.debug('Chunk %s: Parsing split reads from bam: %s ...' % (chunkname, args.bam))
+        sr = fetch_clipped_reads(bam, chrom, start, end, minclip=int(args.min_minclip), maxD=maxD)
+     
+        logger.debug('Chunk %s: Building clusters from %d split reads ...' % (chunkname, len(sr)))
+        clusters = build_sr_clusters(sr)
+     
+        breakends = []
+        for cluster in clusters:
+            breakends += build_breakends(cluster, minsr, mincs, min_maxclip=int(args.min_maxclip), tmpdir=args.tmpdir)
+     
+        logger.debug('Chunk %s: Mapping %d breakends ...' % (chunkname, len(breakends)))
+        breakends = map_breakends(breakends, args.bwaref, tmpdir=args.tmpdir)
+     
+        insertions = build_insertions(breakends)
+        logger.debug('Chunk %s: Processing %d insertions ...' % (chunkname, len(insertions)))
 
-    processed_insertions = []
+        insertions = [ins for ins in insertions if len(ins.be1.proximal_subread()) > 0]
 
-    for ins in insertions:
-        if len(ins.be1.proximal_subread()) > 0:
-            processed_insertions.append(process_insertion(ins, bam, args.bwaref, args.fasta_out_path))
+        for ins in insertions:
+            ins.fetch_discordant_reads(bam)
+            ins.compile_sr_info(bam)
+            ins.compile_dr_info()
 
-    logger.debug('Finished chunk: %s' % chunkname)
+            # various FASTA/FASTQ outputs
+            ins.unmapped_fastq(args.fasta_out_path)
+            ins.consensus_fasta(args.fasta_out_path)
 
-    return processed_insertions
+        logger.debug('Chunk %s: Postprocessing, trying to improve consensus breakend sequences ...' % chunkname)
+        processed_insertions  = postprocess_insertions(insertions, args.bwaref, args.fasta_out_path, bam, tmpdir=args.tmpdir)
+
+        logger.debug('Chunk %s: Summarising insertions ...' % chunkname)
+        summarised_insertions = [summarise_insertion(ins) for ins in processed_insertions]
+
+        logger.debug('Finished chunk: %s' % chunkname)
+
+        return summarised_insertions
+
+    except Exception, e:
+        sys.stderr.write('*'*60 + '\tencountered error in chunk: %s\n' % chunkname)
+        traceback.print_exc(file=sys.stderr)
+        sys.stderr.write("*"*60 + "\n")
+
+        return []
 
 
 def resolve_duplicates(insertions):
@@ -1340,8 +1419,8 @@ def main(args):
     reslist = []
 
     for chunk in chunks:
-    #     ins_info = run_chunk(args, *chunk) # uncomment for mp debug
-    #     text_summary(ins_info)             # uncomment for mp debug
+        # ins_info = run_chunk(args, *chunk) # uncomment for mp debug
+        # text_summary(ins_info)             # uncomment for mp debug
         res = pool.apply_async(run_chunk, [args, chunk[0], chunk[1], chunk[2]])
         reslist.append(res)
 

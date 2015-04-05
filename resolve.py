@@ -59,9 +59,13 @@ def prepare_ref(fasta, refoutdir='tebreak_refs', makeFAI=True, makeBWA=True, mak
 def lastal_cons(ins, ref_fa, tmpdir='/tmp'):
     tmpfa = tmpdir + '/' + 'tebreak.resolve.%s.fa' % str(uuid4())
     with open(tmpfa, 'w') as fa:
-        fa.write('>%s\n%s\n' % (ins['SR']['be1_obj_uuid'], ins['SR']['be1_dist_seq'].split(',')[0]))
+        # TODO handle multiple distal reads
+        for i, dist_seq in enumerate(ins['SR']['be1_dist_seq'].split(',')):
+            fa.write('>%s|%s\n%s\n' % (ins['SR']['be1_obj_uuid'],str(i), dist_seq))
+
         if 'be2_dist_seq' in ins['SR'] and ins['SR']['be2_dist_seq'] is not None:
-            fa.write('>%s\n%s\n' % (ins['SR']['be2_obj_uuid'], ins['SR']['be2_dist_seq'].split(',')[0]))
+            for i, dist_seq in enumerate(ins['SR']['be1_dist_seq'].split(',')):
+                fa.write('>%s|%s\n%s\n' % (ins['SR']['be2_obj_uuid'], str(i), dist_seq))
 
     cmd = ['lastal', '-e 20', ref_fa, tmpfa]
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
@@ -152,19 +156,23 @@ def assign_insertion_ends(ins):
 
 
 def infer_orientation(ins):
-    # # not sure if the prox. alignment must always be +, but it seems that way... testing assumption
-    # if 'be1_prox_str' in ins['SR']:
-    #     assert ins['SR']['be1_prox_str'] == '+', "be1 negative strand alignment in proximal sequence"
-
-    # if 'be2_prox_str' in ins['SR']:
-    #     assert ins['SR']['be2_prox_str'] == '+', "be2 negative strand alignment in proximal sequence"
 
     # defaults
     ins['SR']['be1_orient'] = None
     ins['SR']['be2_orient'] = None
     
+    # in case there is more than one distal mapping (e.g. transduced seq.)
+    be1_distal_num = 0
+    be2_distal_num = 0
+
+    if ins['SR']['be1_bestmatch'] is not None:
+        be1_distal_num = ins['SR']['be1_bestmatch'].query_distnum
+
+    if ins['SR']['be2_bestmatch'] is not None:
+        be1_distal_num = ins['SR']['be2_bestmatch'].query_distnum
+
     for be in ('be1', 'be2'):
-        if be+'_prox_loc' in ins['SR'] and len(ins['SR'][be+'_prox_loc']) == 1:
+        if be+'_prox_loc' in ins['SR'] and len(ins['SR'][be+'_prox_loc']) > 0:
             # work out which end of the consensus belongs to the distal sequence: _dist to proximal seq.
             right_dist = len(ins['SR'][be+'_prox_seq']) - max(ins['SR'][be+'_prox_loc'][0])
             left_dist  = min(ins['SR'][be+'_prox_loc'][0])
@@ -189,7 +197,8 @@ def infer_orientation(ins):
 
                 if ins['SR'][be+'_prox_str'] == '-': ins['SR'][be+'_orient'] = swapstrand(ins['SR'][be+'_orient'])
 
-    ins['SR']['inversion'] = ins['SR']['be1_orient'] != ins['SR']['be2_orient']
+    if None not in (ins['SR']['be1_orient'], ins['SR']['be2_orient']):
+        ins['SR']['inversion'] = ins['SR']['be1_orient'] != ins['SR']['be2_orient']
 
     return ins
 
@@ -283,7 +292,7 @@ def remap_discordant(ins, inslib_fa=None, useref=None, tmpdir='/tmp'):
         for dr in ins['READSTORE']:
             fq.write(dr)
 
-    sam_cmd = ['bwa', 'mem', '-k', '10', '-M', '-S', '-P', tmp_ref, tmp_fq]
+    sam_cmd = ['bwa', 'mem', '-v', '1', '-k', '10', '-M', '-S', '-P', tmp_ref, tmp_fq]
     bam_cmd = ['samtools', 'view', '-bt', tmp_ref + '.fai', '-o', tmp_bam, tmp_sam]
     srt_cmd = ['samtools', 'sort', tmp_bam, tmp_srt]
     idx_cmd = ['samtools', 'index', tmp_bam]
@@ -321,8 +330,11 @@ def resolve_insertion(args, ins, inslib_fa):
     if 'best_ins_matchpct' in ins['SR']:
         if ins['DR']['dr_count'] > 0 and ins['SR']['best_ins_matchpct'] > 0.90: # change to parameter
             tmp_bam = remap_discordant(ins, inslib_fa=inslib_fa, tmpdir=args.tmpdir)
-            bam = pysam.AlignmentFile(tmp_bam, 'rb')
-            ins['DR']['sr_mapped_target'] = bam.mapped
+
+            if tmp_bam is not None:
+                bam = pysam.AlignmentFile(tmp_bam, 'rb')
+                ins['DR']['support_bam_file'] = tmp_bam
+                ins['DR']['mapped_target'] = bam.mapped
 
     return ins
 

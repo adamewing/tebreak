@@ -556,9 +556,8 @@ class Insertion:
         return None not in (self.be1, self.be2)
  
     def breakend_overlap(self):
-        if not self.paired():
-            return None
- 
+        if not self.paired(): return None
+        if len(self.be1.proximal_subread()) == 0 or len(self.be2.proximal_subread()) == 0: return None
         return ref_dist(self.be1.proximal_subread()[0], self.be2.proximal_subread()[0])
  
     def min_supporting_base(self):
@@ -584,18 +583,17 @@ class Insertion:
  
         if self.breakend_overlap() > 0:
             return None
- 
+
         else:
+            if len(self.be1.distal_subread()) == 0 or len(self.be2.distal_subread()) == 0: return None
+            if len(self.be1.proximal_subread()) == 0 or len(self.be2.proximal_subread()) == 0: return None
+
             junc1 = self.be1.proximal_subread()[be1_use_prox]
             junc2 = self.be2.proximal_subread()[be2_use_prox]
  
             tsd_ref_interval = ref_overlap(junc1, junc2)
 
-            if tsd_ref_interval is None:
-                return None
-
-            if len(self.be1.distal_subread()) == 0 or len(self.be2.distal_subread()) == 0:
-                return None
+            if tsd_ref_interval is None: return None
 
             tsd_ref_interval[1] += 1
  

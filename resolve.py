@@ -353,14 +353,17 @@ def identify_transductions(ins, minmapq=10):
                         tr_seqs.append(ins['SR'][be+'_dist_seq'].split(',')[distnum])
                         tr_locs.append((tr_chrom, tr_start, tr_end, tr_side))
 
-                if ins['SR'][be+'_umap_seq'] is not None: # unmapped (maybe) transduced seqs
-                    for unmap_seq in ins['SR'][be+'_umap_seq'].split(','):
-                        tr_seqs.append(unmap_seq)
-                        tr_locs.append('unmap')
+            if num_segs > 0 and ins['SR'][be+'_umap_seq'] is not None: # unmapped (maybe) transduced seqs
+                for unmap_seq in ins['SR'][be+'_umap_seq'].split(','):
+                    tr_side  = '5p'
+                    if ins['SR'][be+'_is_3prime']: tr_side = '3p'
 
-                if len(tr_seqs) > 0:
-                    ins['SR'][be+'_trans_seq'] = tr_seqs
-                    ins['SR'][be+'_trans_loc'] = tr_locs
+                    tr_seqs.append(unmap_seq)
+                    tr_locs.append(('unmap',0,0,tr_side))
+
+            if len(tr_seqs) > 0:
+                ins['SR'][be+'_trans_seq'] = tr_seqs
+                ins['SR'][be+'_trans_loc'] = tr_locs
 
     return ins
 

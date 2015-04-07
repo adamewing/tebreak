@@ -301,12 +301,20 @@ class DiscoRead:
     def mate_mapped(self):
         return self.mate_chrom is not None
 
-    def sortable_pair(self):
-        ''' return mapped reads & mates as list of SortableRead reads '''
-        if self.mate_mapped():
-            return [SortableRead(self.chrom, self.read), SortableRead(self.mate_chrom, self.mate_read)]
-        else:
-            return [SortableRead(self.chrom, self.read)]
+    def getRG(self):
+        ''' return read group from RG aux tag '''
+        for tag, val in self.read.tags:
+            if tag == 'RG': return val
+        return None
+
+    def __gt__(self, other):
+        return self.read.get_reference_positions()[0] > other.read.get_reference_positions()[0]
+
+    def __lt__(self, other):
+        return self.read.get_reference_positions()[0] < other.read.get_reference_positions()[0]
+
+    def __eq__(self, other):
+        return self.read.get_reference_positions()[0] == other.read.get_reference_positions()[0]
 
     def __str__(self):
         return  ' '.join(map(str, (self.chrom, self.read, self.mate_chrom, self.mate_start)))
@@ -497,29 +505,6 @@ class BreakEnd:
  
     def __len__(self):
         return len(self.cluster)
- 
-
-class SortableRead:
-    ''' wrapper class to make pysam.AlignetSegment reads sortable '''
-    def __init__(self, chrom, read):
-        self.chrom = chrom
-        self.read  = read
-
-    def getRG(self):
-        ''' return read group from RG aux tag '''
-        for tag, val in self.read.tags:
-            if tag == 'RG': return val
-        return None
-
-    def __gt__(self, other):
-        return self.read.get_reference_positions()[0] > other.read.get_reference_positions()[0]
-
-    def __lt__(self, other):
-        return self.read.get_reference_positions()[0] < other.read.get_reference_positions()[0]
-
-    def __eq__(self, other):
-        return self.read.get_reference_positions()[0] == other.read.get_reference_positions()[0]
-
 
 class Insertion:
     ''' store and compile information about an insertion with 1 or 2 breakpoints '''
@@ -624,7 +609,7 @@ class Insertion:
         unmapped = {}
      
         for read in bam.fetch(chrom, start, end):
-            if not read.is_unmapped and not read.is_duplicate:
+            if read.is_paired and not read.is_unmapped and not read.is_duplicate:
                 chrom = str(bam.getrname(read.tid))
      
                 if read.mate_is_unmapped:
@@ -1082,14 +1067,9 @@ def build_sr_clusters(splitreads, searchdist=100): # TODO PARAM
 def build_dr_clusters(insertion, searchdist=100): # TODO PARAM
     ''' cluster discordant read ends assocaited with insertion '''
 
-    discoreads = []
-
-    for dr in insertion.discoreads:
-        discoreads += dr.sortable_pair()
-
     clusters  = []
  
-    for dr in sorted(discoreads):
+    for dr in sorted(insertion.discoreads):
         if len(clusters) == 0:
             clusters.append(DiscoCluster(dr))
  

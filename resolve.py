@@ -59,9 +59,10 @@ def prepare_ref(fasta, refoutdir='tebreak_refs', makeFAI=True, makeBWA=True, mak
 def lastal_cons(ins, ref_fa, tmpdir='/tmp'):
     tmpfa = tmpdir + '/' + 'tebreak.resolve.%s.fa' % str(uuid4())
     with open(tmpfa, 'w') as fa:
-        # TODO handle multiple distal reads
-        for i, dist_seq in enumerate(ins['SR']['be1_dist_seq'].split(',')):
-            fa.write('>%s|%s\n%s\n' % (ins['SR']['be1_obj_uuid'],str(i), dist_seq))
+        # handle multiple distal reads
+        if 'be1_dist_seq' in ins['SR'] and ins['SR']['be1_dist_seq'] is not None:
+            for i, dist_seq in enumerate(ins['SR']['be1_dist_seq'].split(',')):
+                fa.write('>%s|%s\n%s\n' % (ins['SR']['be1_obj_uuid'],str(i), dist_seq))
 
         if 'be2_dist_seq' in ins['SR'] and ins['SR']['be2_dist_seq'] is not None:
             for i, dist_seq in enumerate(ins['SR']['be2_dist_seq'].split(',')):
@@ -326,6 +327,44 @@ def remap_discordant(ins, inslib_fa=None, useref=None, tmpdir='/tmp'):
     return tmp_bam
 
 
+def identify_transductions(ins, minmapq=10):
+    bedict = {'be1': None, 'be2': None}
+
+    if 'be1_bestmatch' in ins['SR']: bedict['be1'] = ins['SR']['be1_bestmatch']
+    if 'be2_bestmatch' in ins['SR']: bedict['be2'] = ins['SR']['be2_bestmatch']
+
+    for be in ('be1','be2'):
+        if bedict[be] is not None:
+            tr_seqs = []
+            tr_locs = [] # chrom, start, end, 3p or 5p / unmap
+
+            num_segs = len(ins['SR'][be+'_dist_seq'].split(','))
+            if num_segs > 1:
+                for distnum in range(num_segs):
+                    seg_mapq = int(ins['SR'][be+'_dist_mpq'].split(',')[distnum])
+                    if distnum != bedict[be].query_distnum and seg_mapq >= minmapq:
+                        tr_chrom = ins['SR'][be+'_dist_chr'].split(',')[distnum]
+                        tr_start = ins['SR'][be+'_dist_pos'].split(',')[distnum]
+                        tr_end   = ins['SR'][be+'_dist_end'].split(',')[distnum]
+                        tr_side  = '5p'
+
+                        if ins['SR'][be+'_is_3prime']: tr_side = '3p'
+
+                        tr_seqs.append(ins['SR'][be+'_dist_seq'].split(',')[distnum])
+                        tr_locs.append((tr_chrom, tr_start, tr_end, tr_side))
+
+                if ins['SR'][be+'_umap_seq'] is not None: # unmapped (maybe) transduced seqs
+                    for unmap_seq in ins['SR'][be+'_umap_seq'].split(','):
+                        tr_seqs.append(unmap_seq)
+                        tr_locs.append('unmap')
+
+                if len(tr_seqs) > 0:
+                    ins['SR'][be+'_trans_seq'] = tr_seqs
+                    ins['SR'][be+'_trans_loc'] = tr_locs
+
+    return ins
+
+
 def resolve_insertion(args, ins, inslib_fa):
     ''' add data based on alignments of library to consensus '''
     last_res = lastal_cons(ins, inslib_fa)
@@ -339,6 +378,8 @@ def resolve_insertion(args, ins, inslib_fa):
                 bam = pysam.AlignmentFile(tmp_bam, 'rb')
                 ins['DR']['support_bam_file'] = tmp_bam
                 ins['DR']['mapped_target'] = bam.mapped
+
+        ins = identify_transductions(ins)
 
     return ins
 

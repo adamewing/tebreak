@@ -834,14 +834,15 @@ class Insertion:
         self.sr_info['be1_rg_count'] = self.be1.cluster.readgroups()
 
         if self.sr_info['be1_dist_seq'] == '':
-            self.sr_info['be1_dist_seq'] = 'NA'
+            self.sr_info['be1_dist_seq'] = None
         else:
             self.sr_info['be1_dist_chr'] = ','.join(map(lambda x : bam.getrname(x.tid), self.be1.distal_subread()))
             self.sr_info['be1_dist_pos'] = ','.join(map(lambda x : str(x.get_reference_positions()[0]), self.be1.distal_subread()))
             self.sr_info['be1_dist_end'] = ','.join(map(lambda x : str(x.get_reference_positions()[-1]), self.be1.distal_subread()))
+            self.sr_info['be1_dist_mpq'] = ','.join(map(lambda x : str(x.mapq), self.be1.distal_subread()))
 
         if self.sr_info['be1_umap_seq'] == '':
-            self.sr_info['be1_umap_seq'] = 'NA'
+            self.sr_info['be1_umap_seq'] = None
 
         if self.be2 is not None:
             self.sr_info['be2_breakpos'] = self.be2.breakpos
@@ -871,14 +872,15 @@ class Insertion:
 
 
             if self.sr_info['be2_dist_seq'] == '':
-                self.sr_info['be2_dist_seq'] = 'NA'
+                self.sr_info['be2_dist_seq'] = None
             else:
                 self.sr_info['be2_dist_chr'] = ','.join(map(lambda x: bam.getrname(x.tid), self.be2.distal_subread()))
                 self.sr_info['be2_dist_pos'] = ','.join(map(lambda x: str(x.get_reference_positions()[0]), self.be2.distal_subread()))
                 self.sr_info['be2_dist_end'] = ','.join(map(lambda x: str(x.get_reference_positions()[-1]), self.be2.distal_subread()))
+                self.sr_info['be2_dist_mpq'] = ','.join(map(lambda x : str(x.mapq), self.be2.distal_subread()))
 
             if self.sr_info['be2_umap_seq'] == '':
-                self.sr_info['be2_umap_seq'] = 'NA'
+                self.sr_info['be2_umap_seq'] = None
 
             self.sr_info['be1_use_prox'] = 0
             self.sr_info['be2_use_prox'] = 0
@@ -1215,12 +1217,15 @@ def minia(fq, tmpdir='/tmp'):
     ''' sequence assembly '''
     # minia temp files don't seem to be compatabile with concurrency, workaround w/ temp cwd
     oldcwd = os.getcwd()
-    fq = oldcwd + '/' + fq
     tmpcwd = '%s/%s' % (tmpdir, 'tebreak.'+str(uuid4()))
     os.mkdir(tmpcwd)
     assert os.path.exists(tmpcwd), 'cannot create temp dir: %s' % tmpcwd
 
     os.chdir(tmpcwd)
+
+    if not os.path.exists(fq):
+        fq = oldcwd + '/' + fq
+
     ctgbase = tmpdir + '/tebreak.minia.%s' % str(uuid4())
     cmd = ['minia', '-in', fq, '-abundance-min', '1', '-no-length-cutoff', '-verbose', '0', '-out', ctgbase]
     subprocess.call(cmd)
@@ -1246,14 +1251,9 @@ def summarise_insertion(ins):
 def postprocess_insertions(insertions, bwaref, outpath, bam, tmpdir='/tmp'):
     for ins in insertions:
         support_fq  = ins.supportreads_fastq(outpath)
-        support_asm = minia(support_fq)
+        support_asm = minia(support_fq, tmpdir=tmpdir)
 
-        # unclear why this happens, sometimes minia fails on the first try and succeeds on the second...
-        while not os.path.exists(support_asm):
-            sys.stderr.write('***Trouble with assembly: %s:%d, filename: %s\n' % (ins.be1.chrom, ins.be1.breakpos, support_asm))
-            support_asm = minia(support_fq)
-
-        sys.stderr.write('***Assembled: %s:%d, filename: %s\n' % (ins.be1.chrom, ins.be1.breakpos, support_asm))
+        sys.stderr.write('Assembled: %s:%d, filename: %s\n' % (ins.be1.chrom, ins.be1.breakpos, support_asm))
 
         ins.improve_consensus(support_asm, bwaref)
 

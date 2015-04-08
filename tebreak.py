@@ -295,7 +295,7 @@ class DiscoRead:
     def __init__(self, chrom, read, bamfn, mate_chrom=None):
         self.chrom = chrom
         self.read  = read
-        self.bamfn = bamfn
+        self.bamfn = os.path.basename(bamfn)
 
         self.mate_chrom = mate_chrom # can be None
         self.mate_read  = None  # set later
@@ -310,13 +310,10 @@ class DiscoRead:
         return None
 
     def __gt__(self, other):
-        return self.read.get_reference_positions()[0] > other.read.get_reference_positions()[0]
-
-    def __lt__(self, other):
-        return self.read.get_reference_positions()[0] < other.read.get_reference_positions()[0]
-
-    def __eq__(self, other):
-        return self.read.get_reference_positions()[0] == other.read.get_reference_positions()[0]
+        if self.mate_mapped():
+            return self.mate_read.get_reference_positions()[0] > other.mate_read.get_reference_positions()[0]
+        else:
+            return self.read.get_reference_positions()[0] > other.read.get_reference_positions()[0]
 
     def __str__(self):
         return  ' '.join(map(str, (self.chrom, self.read, self.mate_chrom, self.mate_start)))
@@ -448,8 +445,14 @@ class DiscoCluster(ReadCluster):
 
         return min(iv_ins[1], iv_dsc[1]) - max(iv_ins[0], iv_dsc[0]) > 0
 
+    def find_mate_extrema(self):
+        ''' return leftmost and rightmost aligned positions in cluster vs. reference '''
+        positions = []
+        positions += [pos for r in self.reads for pos in r.mate_read.positions]
+        return min(positions), max(positions)
+
     def summary_tuple(self):
-        return (self.chrom, self.find_extrema()[0], self.find_extrema()[1], self.readgroups(), len(self))
+        return (self.chrom, self.find_mate_extrema()[0], self.find_mate_extrema()[1], self.readgroups(), self.bamfiles())
 
  
 class BreakEnd:
@@ -535,8 +538,7 @@ class Insertion:
         self.sr_info = od() # split read info, set with self.compile_sr_info()
         self.dr_info = od() # discordant read info, set with self.compile_dr_info()
         self.discoreads = []
-        self.dr_prox_clusters = []
-        self.dr_dist_clusters = []
+        self.dr_clusters = []
         self.fastqrecs = []
         self.cons_fasta = None
 
@@ -774,18 +776,10 @@ class Insertion:
         return out_fasta
 
     def compile_dr_info(self):
-        self.dr_prox_clusters = []
-        self.dr_dist_clusters = []
-
-        for dc in build_dr_clusters(self):
-            if dc.overlap_insertion(self):
-                self.dr_prox_clusters.append(dc)
-            else:
-                self.dr_dist_clusters.append(dc)
+        self.dr_clusters = build_dr_clusters(self)
 
         self.dr_info['dr_count'] = len(self.discoreads)
-        self.dr_info['dr_prox_clusters']  = map(lambda x : x.summary_tuple(), self.dr_prox_clusters)
-        self.dr_info['dr_dist_clusters']  = map(lambda x : x.summary_tuple(), self.dr_dist_clusters)
+        self.dr_info['dr_clusters']  = map(lambda x : x.summary_tuple(), self.dr_clusters)
         self.dr_info['dr_unmapped_mates'] = len([dr for dr in self.discoreads if dr.mate_read is not None and dr.mate_read.is_unmapped])
 
     def compile_sr_info(self, bams):
@@ -1084,7 +1078,7 @@ def build_dr_clusters(insertion, searchdist=100): # TODO PARAM
             clusters.append(DiscoCluster(dr))
  
         else:
-            if ref_overlap(clusters[-1].reads[-1].read, dr.read) is None:
+            if ref_overlap(clusters[-1].reads[-1].mate_read, dr.mate_read) is None:
                 clusters.append(DiscoCluster(dr))
  
             else:

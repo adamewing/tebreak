@@ -254,7 +254,7 @@ class SplitRead:
         self.uuid  = str(uuid4())
         self.chrom = chrom
         self.read  = read
-        self.bamfn = bamfn
+        self.bamfn = os.path.basename(bamfn)
 
         self.cliplen = len(read.seq) - len(read.query_alignment_sequence)
 
@@ -399,9 +399,6 @@ class SplitCluster(ReadCluster):
         if self.chrom is None: self.chrom = sr.chrom
  
         assert self.chrom == sr.chrom # clusters can't include > 1 chromosome
- 
-        if self.median > 0 and (self.median - sr.breakpos) > 1000:
-            print "WARNING: Splitread", str(sr), "more than 1000 bases from median of cluster."
  
         ''' update statistics '''
         self.reads.sort()
@@ -1304,7 +1301,8 @@ def run_chunk(args, chrom, start, end):
         logger.debug('Processing chunk: %s ...' % chunkname)
         logger.debug('Chunk %s: Parsing split reads from bam(s): %s ...' % (chunkname, args.bam))
         sr = fetch_clipped_reads(bams, chrom, start, end, minclip=int(args.min_minclip), maxD=maxD)
-     
+        sr.sort()
+
         logger.debug('Chunk %s: Building clusters from %d split reads ...' % (chunkname, len(sr)))
         clusters = build_sr_clusters(sr)
      

@@ -301,7 +301,7 @@ class DiscoRead:
         self.mate_read  = None  # set later
  
     def mate_mapped(self):
-        return self.mate_chrom is not None
+        return self.mate_read is not None and not self.mate_read.is_unmapped
 
     def getRG(self):
         ''' return read group from RG aux tag '''
@@ -310,7 +310,7 @@ class DiscoRead:
         return None
 
     def __gt__(self, other):
-        if self.mate_mapped():
+        if self.mate_mapped() and other.mate_mapped():
             return self.mate_read.get_reference_positions()[0] > other.mate_read.get_reference_positions()[0]
         else:
             return self.read.get_reference_positions()[0] > other.read.get_reference_positions()[0]
@@ -448,7 +448,11 @@ class DiscoCluster(ReadCluster):
     def find_mate_extrema(self):
         ''' return leftmost and rightmost aligned positions in cluster vs. reference '''
         positions = []
-        positions += [pos for r in self.reads for pos in r.mate_read.positions]
+        for r in self.reads:
+            if r.mate_mapped():
+                positions += [pos for pos in r.mate_read.positions]
+
+        if len(positions) == 0: return -1, -1
         return min(positions), max(positions)
 
     def summary_tuple(self):
@@ -911,6 +915,9 @@ def ref_overlap(read1, read2):
     if read1 is None or read2 is None:
         return None
  
+    if read1.is_unmapped or read2.is_unmapped:
+        return None
+
     iv1 = sorted((read1.get_reference_positions()[0], read1.get_reference_positions()[-1]))
     iv2 = sorted((read2.get_reference_positions()[0], read2.get_reference_positions()[-1]))
  

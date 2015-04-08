@@ -635,7 +635,7 @@ class Insertion:
 
             # mate mapped
             for qname, dr in mapped.iteritems():
-                for read in bam.fetch(dr.mate_chrom, dr.read.next_reference_start-1, dr.read.next_reference_start+1):
+                for read in bam.fetch(dr.mate_chrom, dr.read.next_reference_start, dr.read.next_reference_start+1):
                     if read.qname == qname and not read.is_secondary and not is_supplementary(read):
                         if read.seq != mapped[qname].read.seq:
                             mapped[qname].mate_read = read

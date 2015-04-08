@@ -250,10 +250,11 @@ class LASTResult:
  
 class SplitRead:
     ''' store information about split read alignment '''
-    def __init__(self, chrom, read):
+    def __init__(self, chrom, read, bamfn):
         self.uuid  = str(uuid4())
         self.chrom = chrom
         self.read  = read
+        self.bamfn = bamfn
 
         self.cliplen = len(read.seq) - len(read.query_alignment_sequence)
 
@@ -291,10 +292,11 @@ class SplitRead:
  
 class DiscoRead:
     ''' store information about discordant pair alignment '''
-    def __init__(self, chrom, read, mate_chrom=None):
+    def __init__(self, chrom, read, bamfn, mate_chrom=None):
         self.chrom = chrom
         self.read  = read
- 
+        self.bamfn = bamfn
+
         self.mate_chrom = mate_chrom # can be None
         self.mate_read  = None  # set later
  
@@ -353,7 +355,11 @@ class ReadCluster:
     def readgroups(self):
         c = Counter([r.getRG() for r in self.reads])
         return [str(k[0]) + '|' + str(k[1]) for k in zip(c.keys(), c.values())]
- 
+
+    def bamfiles(self):
+        c = Counter([r.bamfn for r in self.reads])
+        return [str(k[0]) + '|' + str(k[1]) for k in zip(c.keys(), c.values())]
+
     def find_extrema(self):
         ''' return leftmost and rightmost aligned positions in cluster vs. reference '''
         positions = []
@@ -597,7 +603,7 @@ class Insertion:
  
             return tsdseq1, tsdseq2
 
-    def fetch_discordant_reads(self, bam, isize=10000):
+    def fetch_discordant_reads(self, bams, isize=10000):
         ''' Return list of DiscoRead objects '''
         chrom = self.be1.chrom
         start = self.min_supporting_base()
@@ -607,34 +613,35 @@ class Insertion:
 
         mapped   = {}
         unmapped = {}
-     
-        for read in bam.fetch(chrom, start, end):
-            if read.is_paired and not read.is_unmapped and not read.is_duplicate:
-                chrom = str(bam.getrname(read.tid))
-     
-                if read.mate_is_unmapped:
-                    unmapped[read.qname] = DiscoRead(chrom, read)
-     
-                else:
-                    pair_dist = abs(read.reference_start - read.next_reference_start)
-                    if read.tid != read.next_reference_id or pair_dist > isize:
-                        mate_chrom = str(bam.getrname(read.next_reference_id))
-                        mapped[read.qname] = DiscoRead(chrom, read, mate_chrom)
 
-        # get mate info
+        for bam in bams:
+            for read in bam.fetch(chrom, start, end):
+                if read.is_paired and not read.is_unmapped and not read.is_duplicate:
+                    chrom = str(bam.getrname(read.tid))
+         
+                    if read.mate_is_unmapped:
+                        unmapped[read.qname] = DiscoRead(chrom, read, bam.filename)
+         
+                    else:
+                        pair_dist = abs(read.reference_start - read.next_reference_start)
+                        if read.tid != read.next_reference_id or pair_dist > isize:
+                            mate_chrom = str(bam.getrname(read.next_reference_id))
+                            mapped[read.qname] = DiscoRead(chrom, read, bam.filename, mate_chrom)
 
-        # mate mapped
-        for qname, dr in mapped.iteritems():
-            for read in bam.fetch(dr.mate_chrom, dr.read.next_reference_start-1, dr.read.next_reference_start+1):
-                if read.qname == qname and not read.is_secondary and not is_supplementary(read):
-                    if read.seq != mapped[qname].read.seq:
-                        mapped[qname].mate_read = read
+            # get mate info
 
-        # mate unmapped
-        for read in bam.fetch(chrom, start, end):
-            if read.is_unmapped and read.qname in unmapped:
-                if not read.is_secondary and not is_supplementary(read):
-                    unmapped[read.qname].mate_read = read
+            # mate mapped
+            for qname, dr in mapped.iteritems():
+                for read in bam.fetch(dr.mate_chrom, dr.read.next_reference_start-1, dr.read.next_reference_start+1):
+                    if read.qname == qname and not read.is_secondary and not is_supplementary(read):
+                        if read.seq != mapped[qname].read.seq:
+                            mapped[qname].mate_read = read
+
+            # mate unmapped
+            for read in bam.fetch(chrom, start, end):
+                if read.is_unmapped and read.qname in unmapped:
+                    if not read.is_secondary and not is_supplementary(read):
+                        unmapped[read.qname].mate_read = read
 
         self.discoreads = mapped.values() + unmapped.values()
 
@@ -784,7 +791,7 @@ class Insertion:
         self.dr_info['dr_dist_clusters']  = map(lambda x : x.summary_tuple(), self.dr_dist_clusters)
         self.dr_info['dr_unmapped_mates'] = len([dr for dr in self.discoreads if dr.mate_read is not None and dr.mate_read.is_unmapped])
 
-    def compile_sr_info(self, bam):
+    def compile_sr_info(self, bams):
         ''' fill self.sr_info with summary info, needs original bam for chromosome lookup '''
         if self.be1 == None and self.be2 == None:
             return None
@@ -817,11 +824,12 @@ class Insertion:
         self.sr_info['be1_median_D'] = self.be1.cluster.median_D()
         self.sr_info['be1_avgmatch'] = self.be1.cluster.avg_matchpct()
         self.sr_info['be1_rg_count'] = self.be1.cluster.readgroups()
+        self.sr_info['be1_bf_count'] = self.be1.cluster.bamfiles()
 
         if self.sr_info['be1_dist_seq'] == '':
             self.sr_info['be1_dist_seq'] = None
         else:
-            self.sr_info['be1_dist_chr'] = ','.join(map(lambda x : bam.getrname(x.tid), self.be1.distal_subread()))
+            self.sr_info['be1_dist_chr'] = ','.join(map(lambda x : bams[0].getrname(x.tid), self.be1.distal_subread()))
             self.sr_info['be1_dist_pos'] = ','.join(map(lambda x : str(x.get_reference_positions()[0]), self.be1.distal_subread()))
             self.sr_info['be1_dist_end'] = ','.join(map(lambda x : str(x.get_reference_positions()[-1]), self.be1.distal_subread()))
             self.sr_info['be1_dist_mpq'] = ','.join(map(lambda x : str(x.mapq), self.be1.distal_subread()))
@@ -854,12 +862,13 @@ class Insertion:
             self.sr_info['be2_median_D'] = self.be2.cluster.median_D()
             self.sr_info['be2_avgmatch'] = self.be2.cluster.avg_matchpct()
             self.sr_info['be2_rg_count'] = self.be2.cluster.readgroups()
+            self.sr_info['be2_bf_count'] = self.be2.cluster.bamfiles()
 
 
             if self.sr_info['be2_dist_seq'] == '':
                 self.sr_info['be2_dist_seq'] = None
             else:
-                self.sr_info['be2_dist_chr'] = ','.join(map(lambda x: bam.getrname(x.tid), self.be2.distal_subread()))
+                self.sr_info['be2_dist_chr'] = ','.join(map(lambda x: bams[0].getrname(x.tid), self.be2.distal_subread()))
                 self.sr_info['be2_dist_pos'] = ','.join(map(lambda x: str(x.get_reference_positions()[0]), self.be2.distal_subread()))
                 self.sr_info['be2_dist_end'] = ','.join(map(lambda x: str(x.get_reference_positions()[-1]), self.be2.distal_subread()))
                 self.sr_info['be2_dist_mpq'] = ','.join(map(lambda x : str(x.mapq), self.be2.distal_subread()))
@@ -964,7 +973,7 @@ def is_supplementary(read):
     return bin(read.flag & 2048) == bin(2048)
  
  
-def fetch_clipped_reads(bam, chrom, start, end, minclip=3, maxaltclip=2, maxD=0.8):
+def fetch_clipped_reads(bams, chrom, start, end, minclip=3, maxaltclip=2, maxD=0.8):
     ''' Return list of SplitRead objects '''
     assert minclip > maxaltclip
  
@@ -975,18 +984,19 @@ def fetch_clipped_reads(bam, chrom, start, end, minclip=3, maxaltclip=2, maxD=0.
  
     assert start < end
  
-    for read in bam.fetch(chrom, start, end):
-        if not read.is_unmapped and not read.is_duplicate:
- 
-            if read.rlen - read.alen >= int(minclip): # 'soft' clipped?
- 
-                # length of 'minor' clip
-                altclip = min(read.qstart, read.rlen-read.qend)
- 
-                if altclip <= maxaltclip:
-                    if splitqual(read) <= maxD:
-                        chrom = str(bam.getrname(read.tid))
-                        splitreads.append(SplitRead(chrom, read))
+    for bam in bams:
+        for read in bam.fetch(chrom, start, end):
+            if not read.is_unmapped and not read.is_duplicate:
+     
+                if read.rlen - read.alen >= int(minclip): # 'soft' clipped?
+     
+                    # length of 'minor' clip
+                    altclip = min(read.qstart, read.rlen-read.qend)
+     
+                    if altclip <= maxaltclip:
+                        if splitqual(read) <= maxD:
+                            chrom = str(bam.getrname(read.tid))
+                            splitreads.append(SplitRead(chrom, read, bam.filename))
  
     return splitreads
  
@@ -1228,7 +1238,7 @@ def summarise_insertion(ins):
     return pi
 
 
-def postprocess_insertions(insertions, bwaref, outpath, bam, tmpdir='/tmp'):
+def postprocess_insertions(insertions, bwaref, outpath, bams, tmpdir='/tmp'):
     for ins in insertions:
         support_fq  = ins.supportreads_fastq(outpath)
         support_asm = minia(support_fq, tmpdir=tmpdir)
@@ -1266,7 +1276,7 @@ def postprocess_insertions(insertions, bwaref, outpath, bam, tmpdir='/tmp'):
                     ins.be2_improved_cons = False
 
         if ins.be1_improved_cons or ins.be2_improved_cons:
-            ins.compile_sr_info(bam)
+            ins.compile_sr_info(bams)
             ins.compile_dr_info()
             ins.consensus_fasta(outpath)
 
@@ -1279,7 +1289,7 @@ def run_chunk(args, chrom, start, end):
     if args.verbose: logger.setLevel(logging.DEBUG)
 
     try:
-        bam = pysam.AlignmentFile(args.bam, 'rb')
+        bams = [pysam.AlignmentFile(bam, 'rb') for bam in args.bam.split(',')]
         minsr = int(args.minsplitreads)
         mincs = float(args.min_consensus_score)
         maxD  = float(args.maxD)
@@ -1292,8 +1302,8 @@ def run_chunk(args, chrom, start, end):
         chunkname = '%s:%d-%d' % (chrom, start, end)
 
         logger.debug('Processing chunk: %s ...' % chunkname)
-        logger.debug('Chunk %s: Parsing split reads from bam: %s ...' % (chunkname, args.bam))
-        sr = fetch_clipped_reads(bam, chrom, start, end, minclip=int(args.min_minclip), maxD=maxD)
+        logger.debug('Chunk %s: Parsing split reads from bam(s): %s ...' % (chunkname, args.bam))
+        sr = fetch_clipped_reads(bams, chrom, start, end, minclip=int(args.min_minclip), maxD=maxD)
      
         logger.debug('Chunk %s: Building clusters from %d split reads ...' % (chunkname, len(sr)))
         clusters = build_sr_clusters(sr)
@@ -1311,8 +1321,8 @@ def run_chunk(args, chrom, start, end):
         insertions = [ins for ins in insertions if len(ins.be1.proximal_subread()) > 0]
 
         for ins in insertions:
-            ins.fetch_discordant_reads(bam)
-            ins.compile_sr_info(bam)
+            ins.fetch_discordant_reads(bams)
+            ins.compile_sr_info(bams)
             ins.compile_dr_info()
 
             # various FASTA/FASTQ outputs
@@ -1320,7 +1330,7 @@ def run_chunk(args, chrom, start, end):
             ins.consensus_fasta(args.fasta_out_path)
 
         logger.debug('Chunk %s: Postprocessing, trying to improve consensus breakend sequences ...' % chunkname)
-        processed_insertions  = postprocess_insertions(insertions, args.bwaref, args.fasta_out_path, bam, tmpdir=args.tmpdir)
+        processed_insertions  = postprocess_insertions(insertions, args.bwaref, args.fasta_out_path, bams, tmpdir=args.tmpdir)
 
         logger.debug('Chunk %s: Summarising insertions ...' % chunkname)
         summarised_insertions = [summarise_insertion(ins) for ins in processed_insertions]
@@ -1449,7 +1459,7 @@ if __name__ == '__main__':
     logging.basicConfig(format=FORMAT)
  
     parser = argparse.ArgumentParser(description='Find inserted sequences vs. reference')
-    parser.add_argument('-b', '--bam', required=True, help='target BAM')
+    parser.add_argument('-b', '--bam', required=True, help='target BAM(s): can be comma-delimited list')
     parser.add_argument('-r', '--bwaref', required=True, help='bwa/samtools indexed reference genome')
     parser.add_argument('-p', '--processes', default=1, help='split work across multiple processes')
     parser.add_argument('-i', '--interval_bed', default=None, help='BED file with intervals to scan')

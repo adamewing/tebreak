@@ -118,7 +118,6 @@ class MSA:
         if bases is not None and None not in bases:
             return ''.join(bases), np.mean(scores)
         else:
-            sys.stderr.write("ERROR\t" + now() + "\tNone found in consensus sequence\n")
             return '', np.mean(scores)
 
 
@@ -1111,7 +1110,7 @@ def build_breakends(cluster, minsr, mincs, min_maxclip=20, tmpdir='/tmp'):
                 os.remove(out_fa)
                 os.remove(align_fa)
  
-                if score >= mincs and min_maxclip <= maxclip:
+                if seq != '' and score >= mincs and min_maxclip <= maxclip:
                     breakends.append(BreakEnd(cluster.chrom, breakpos, subcluster, seq, score))
  
     return breakends
@@ -1344,7 +1343,7 @@ def run_chunk(args, chrom, start, end):
             logger.debug('Finished chunk: %s' % chunkname)
 
             return summarised_insertions
-            
+
         else:
             return []
 

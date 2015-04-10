@@ -812,6 +812,7 @@ class Insertion:
         self.info['be1_avgmatch'] = self.be1.cluster.avg_matchpct()
         self.info['be1_rg_count'] = self.be1.cluster.readgroups()
         self.info['be1_bf_count'] = self.be1.cluster.bamfiles()
+        self.info['be1_prox_mpq'] = ','.join(map(lambda x : str(x.mapq), self.be1.proximal_subread()))
 
         if self.info['be1_dist_seq'] == '':
             self.info['be1_dist_seq'] = None
@@ -819,7 +820,6 @@ class Insertion:
             self.info['be1_dist_chr'] = ','.join(map(lambda x : bams[0].getrname(x.tid), self.be1.distal_subread()))
             self.info['be1_dist_pos'] = ','.join(map(lambda x : str(x.get_reference_positions()[0]), self.be1.distal_subread()))
             self.info['be1_dist_end'] = ','.join(map(lambda x : str(x.get_reference_positions()[-1]), self.be1.distal_subread()))
-            self.info['be1_prox_mpq'] = ','.join(map(lambda x : str(x.mapq), self.be1.proximal_subread()))
             self.info['be1_dist_mpq'] = ','.join(map(lambda x : str(x.mapq), self.be1.distal_subread()))
 
         if self.info['be1_umap_seq'] == '':
@@ -851,7 +851,7 @@ class Insertion:
             self.info['be2_avgmatch'] = self.be2.cluster.avg_matchpct()
             self.info['be2_rg_count'] = self.be2.cluster.readgroups()
             self.info['be2_bf_count'] = self.be2.cluster.bamfiles()
-
+            self.info['be2_prox_mpq'] = ','.join(map(lambda x : str(x.mapq), self.be2.proximal_subread()))
 
             if self.info['be2_dist_seq'] == '':
                 self.info['be2_dist_seq'] = None
@@ -859,8 +859,7 @@ class Insertion:
                 self.info['be2_dist_chr'] = ','.join(map(lambda x: bams[0].getrname(x.tid), self.be2.distal_subread()))
                 self.info['be2_dist_pos'] = ','.join(map(lambda x: str(x.get_reference_positions()[0]), self.be2.distal_subread()))
                 self.info['be2_dist_end'] = ','.join(map(lambda x: str(x.get_reference_positions()[-1]), self.be2.distal_subread()))
-                self.info['be2_dist_mpq'] = ','.join(map(lambda x : str(x.mapq), self.be2.distal_subread()))
-                self.info['be2_prox_mpq'] = ','.join(map(lambda x : str(x.mapq), self.be2.proximal_subread()))
+                self.info['be2_dist_mpq'] = ','.join(map(lambda x : str(x.mapq), self.be2.distal_subread()))                
 
             if self.info['be2_umap_seq'] == '':
                 self.info['be2_umap_seq'] = None
@@ -1320,30 +1319,34 @@ def run_chunk(args, chrom, start, end):
             breakends += build_breakends(cluster, minsr, mincs, min_maxclip=int(args.min_maxclip), tmpdir=args.tmpdir)
      
         logger.debug('Chunk %s: Mapping %d breakends ...' % (chunkname, len(breakends)))
-        breakends = map_breakends(breakends, args.bwaref, tmpdir=args.tmpdir)
-     
-        insertions = build_insertions(breakends)
-        logger.debug('Chunk %s: Processing %d insertions ...' % (chunkname, len(insertions)))
+        if len(breakends) > 0:
+            breakends = map_breakends(breakends, args.bwaref, tmpdir=args.tmpdir)
+         
+            insertions = build_insertions(breakends)
+            logger.debug('Chunk %s: Processing %d insertions ...' % (chunkname, len(insertions)))
 
-        insertions = [ins for ins in insertions if len(ins.be1.proximal_subread()) > 0]
+            insertions = [ins for ins in insertions if len(ins.be1.proximal_subread()) > 0]
 
-        for ins in insertions:
-            ins.fetch_discordant_reads(bams)
-            ins.compile_info(bams)
+            for ins in insertions:
+                ins.fetch_discordant_reads(bams)
+                ins.compile_info(bams)
 
-            # various FASTA/FASTQ outputs
-            ins.unmapped_fastq(args.fasta_out_path)
-            ins.consensus_fasta(args.fasta_out_path)
+                # various FASTA/FASTQ outputs
+                ins.unmapped_fastq(args.fasta_out_path)
+                ins.consensus_fasta(args.fasta_out_path)
 
-        logger.debug('Chunk %s: Postprocessing, trying to improve consensus breakend sequences ...' % chunkname)
-        processed_insertions  = postprocess_insertions(insertions, args.bwaref, args.fasta_out_path, bams, tmpdir=args.tmpdir)
+            logger.debug('Chunk %s: Postprocessing, trying to improve consensus breakend sequences ...' % chunkname)
+            processed_insertions  = postprocess_insertions(insertions, args.bwaref, args.fasta_out_path, bams, tmpdir=args.tmpdir)
 
-        logger.debug('Chunk %s: Summarising insertions ...' % chunkname)
-        summarised_insertions = [summarise_insertion(ins) for ins in processed_insertions]
+            logger.debug('Chunk %s: Summarising insertions ...' % chunkname)
+            summarised_insertions = [summarise_insertion(ins) for ins in processed_insertions]
 
-        logger.debug('Finished chunk: %s' % chunkname)
+            logger.debug('Finished chunk: %s' % chunkname)
 
-        return summarised_insertions
+            return summarised_insertions
+            
+        else:
+            return []
 
     except Exception, e:
         sys.stderr.write('*'*60 + '\tencountered error in chunk: %s\n' % chunkname)

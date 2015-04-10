@@ -60,13 +60,13 @@ def lastal_cons(ins, ref_fa, tmpdir='/tmp'):
     tmpfa = tmpdir + '/' + 'tebreak.resolve.%s.fa' % str(uuid4())
     with open(tmpfa, 'w') as fa:
         # handle multiple distal reads
-        if 'be1_dist_seq' in ins['SR'] and ins['SR']['be1_dist_seq'] is not None:
-            for i, dist_seq in enumerate(ins['SR']['be1_dist_seq'].split(',')):
-                fa.write('>%s|%s\n%s\n' % (ins['SR']['be1_obj_uuid'],str(i), dist_seq))
+        if 'be1_dist_seq' in ins['INFO'] and ins['INFO']['be1_dist_seq'] is not None:
+            for i, dist_seq in enumerate(ins['INFO']['be1_dist_seq'].split(',')):
+                fa.write('>%s|%s\n%s\n' % (ins['INFO']['be1_obj_uuid'],str(i), dist_seq))
 
-        if 'be2_dist_seq' in ins['SR'] and ins['SR']['be2_dist_seq'] is not None:
-            for i, dist_seq in enumerate(ins['SR']['be2_dist_seq'].split(',')):
-                fa.write('>%s|%s\n%s\n' % (ins['SR']['be2_obj_uuid'], str(i), dist_seq))
+        if 'be2_dist_seq' in ins['INFO'] and ins['INFO']['be2_dist_seq'] is not None:
+            for i, dist_seq in enumerate(ins['INFO']['be2_dist_seq'].split(',')):
+                fa.write('>%s|%s\n%s\n' % (ins['INFO']['be2_obj_uuid'], str(i), dist_seq))
 
     cmd = ['lastal', '-e 20', ref_fa, tmpfa]
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
@@ -89,41 +89,41 @@ def lastal_cons(ins, ref_fa, tmpdir='/tmp'):
 
 
 def add_insdata(ins, last_res):
-    be1_bestmatch = best_match(last_res, ins['SR']['be1_obj_uuid'])
+    be1_bestmatch = best_match(last_res, ins['INFO']['be1_obj_uuid'])
     be2_bestmatch = None
-    if 'be2_obj_uuid' in ins['SR'] and ins['SR']['be2_obj_uuid'] != ins['SR']['be1_obj_uuid']:
-        be2_bestmatch = best_match(last_res, ins['SR']['be2_obj_uuid'])
+    if 'be2_obj_uuid' in ins['INFO'] and ins['INFO']['be2_obj_uuid'] != ins['INFO']['be1_obj_uuid']:
+        be2_bestmatch = best_match(last_res, ins['INFO']['be2_obj_uuid'])
 
     if None not in (be1_bestmatch, be2_bestmatch):
         if be1_bestmatch.target_id != be2_bestmatch.target_id:
             if be1_bestmatch.score > be2_bestmatch.score:
                 # try to get be2 target to match be1 target
-                newmatch = best_match(last_res, ins['SR']['be2_obj_uuid'], req_target=be1_bestmatch.target_id)
+                newmatch = best_match(last_res, ins['INFO']['be2_obj_uuid'], req_target=be1_bestmatch.target_id)
                 if newmatch is not None and be2_bestmatch.score - newmatch.score < 5:
                     be2_bestmatch = newmatch
 
             else:
                 # try to get be1 target to match be2 target
-                newmatch = best_match(last_res, ins['SR']['be1_obj_uuid'], req_target=be2_bestmatch.target_id)
+                newmatch = best_match(last_res, ins['INFO']['be1_obj_uuid'], req_target=be2_bestmatch.target_id)
                 if newmatch is not None and be1_bestmatch.score - newmatch.score < 5:
                     be1_bestmatch = newmatch
 
-    if be1_bestmatch is not None: ins['SR']['be1_bestmatch'] = be1_bestmatch
-    if be2_bestmatch is not None: ins['SR']['be2_bestmatch'] = be2_bestmatch
+    if be1_bestmatch is not None: ins['INFO']['be1_bestmatch'] = be1_bestmatch
+    if be2_bestmatch is not None: ins['INFO']['be2_bestmatch'] = be2_bestmatch
 
     ins = assign_insertion_ends(ins)
 
-    ins['SR']['ins_length'] = infer_length(ins)
+    ins['INFO']['ins_length'] = infer_length(ins)
 
     ins = infer_orientation(ins)
 
-    if be1_bestmatch is not None: ins['SR']['best_ins_matchpct'] = be1_bestmatch.pct_match()
+    if be1_bestmatch is not None: ins['INFO']['best_ins_matchpct'] = be1_bestmatch.pct_match()
 
     if be2_bestmatch is not None:
-        if 'best_ins_matchpct' in ins['SR'] and be2_bestmatch.pct_match() > be1_bestmatch.pct_match():
-            ins['SR']['best_ins_matchpct'] = be2_bestmatch.pct_match()
-        elif 'best_ins_matchpct' not in ins['SR']:
-            ins['SR']['best_ins_matchpct'] = be2_bestmatch.pct_match()
+        if 'best_ins_matchpct' in ins['INFO'] and be2_bestmatch.pct_match() > be1_bestmatch.pct_match():
+            ins['INFO']['best_ins_matchpct'] = be2_bestmatch.pct_match()
+        elif 'best_ins_matchpct' not in ins['INFO']:
+            ins['INFO']['best_ins_matchpct'] = be2_bestmatch.pct_match()
 
     return ins
 
@@ -132,26 +132,26 @@ def assign_insertion_ends(ins):
     be1 = None
     be2 = None
 
-    if 'be1_bestmatch' in ins['SR']: be1 = ins['SR']['be1_bestmatch']
-    if 'be2_bestmatch' in ins['SR']: be2 = ins['SR']['be2_bestmatch']
+    if 'be1_bestmatch' in ins['INFO']: be1 = ins['INFO']['be1_bestmatch']
+    if 'be2_bestmatch' in ins['INFO']: be2 = ins['INFO']['be2_bestmatch']
 
     if None not in (be1, be2): # compare to decide 3' end
-        ins['SR']['be1_is_3prime'] = be1.target_start > be2.target_start
-        ins['SR']['be2_is_3prime'] = not ins['SR']['be1_is_3prime']
+        ins['INFO']['be1_is_3prime'] = be1.target_start > be2.target_start
+        ins['INFO']['be2_is_3prime'] = not ins['INFO']['be1_is_3prime']
 
     else: # for single end evidence, use coordinates to decide 3' end
         if be1 is not None:
             # 10bp to end of elt reference or has >= 10bp polyA we'll call it 3 prime
-            ins['SR']['be1_is_3prime'] = be1.target_seqsize - (be1.target_start+be1.target_alnsize) < 10
-            if not ins['SR']['be1_is_3prime']: ins['SR']['be1_is_3prime'] = be1.query_align.endswith('A'*10)
-            if not ins['SR']['be1_is_3prime']: ins['SR']['be1_is_3prime'] = be1.target_align.endswith('A'*10)
-            ins['SR']['be2_is_3prime'] = not ins['SR']['be1_is_3prime']
+            ins['INFO']['be1_is_3prime'] = be1.target_seqsize - (be1.target_start+be1.target_alnsize) < 10
+            if not ins['INFO']['be1_is_3prime']: ins['INFO']['be1_is_3prime'] = be1.query_align.endswith('A'*10)
+            if not ins['INFO']['be1_is_3prime']: ins['INFO']['be1_is_3prime'] = be1.target_align.endswith('A'*10)
+            ins['INFO']['be2_is_3prime'] = not ins['INFO']['be1_is_3prime']
 
         elif be2 is not None:
-            ins['SR']['be2_is_3prime'] = be2.target_seqsize - (be2.target_start+be2.target_alnsize) < 10
-            if not ins['SR']['be2_is_3prime']: ins['SR']['be2_is_3prime'] = be2.query_align.endswith('A'*10)
-            if not ins['SR']['be2_is_3prime']: ins['SR']['be2_is_3prime'] = be2.target_align.endswith('A'*10)
-            ins['SR']['be1_is_3prime'] = not ins['SR']['be2_is_3prime']
+            ins['INFO']['be2_is_3prime'] = be2.target_seqsize - (be2.target_start+be2.target_alnsize) < 10
+            if not ins['INFO']['be2_is_3prime']: ins['INFO']['be2_is_3prime'] = be2.query_align.endswith('A'*10)
+            if not ins['INFO']['be2_is_3prime']: ins['INFO']['be2_is_3prime'] = be2.target_align.endswith('A'*10)
+            ins['INFO']['be1_is_3prime'] = not ins['INFO']['be2_is_3prime']
 
     return ins
 
@@ -159,51 +159,51 @@ def assign_insertion_ends(ins):
 def infer_orientation(ins):
 
     # defaults
-    ins['SR']['be1_orient'] = None
-    ins['SR']['be2_orient'] = None
+    ins['INFO']['be1_orient'] = None
+    ins['INFO']['be2_orient'] = None
     
     # in case there is more than one distal mapping (e.g. transduced seq.)
     be1_distal_num = 0
     be2_distal_num = 0
 
-    if 'be1_bestmatch' in ins['SR'] and ins['SR']['be1_bestmatch'] is not None:
-        be1_distal_num = ins['SR']['be1_bestmatch'].query_distnum
+    if 'be1_bestmatch' in ins['INFO'] and ins['INFO']['be1_bestmatch'] is not None:
+        be1_distal_num = ins['INFO']['be1_bestmatch'].query_distnum
 
-    if 'be2_bestmatch' in ins['SR'] and ins['SR']['be2_bestmatch'] is not None:
-        be1_distal_num = ins['SR']['be2_bestmatch'].query_distnum
+    if 'be2_bestmatch' in ins['INFO'] and ins['INFO']['be2_bestmatch'] is not None:
+        be1_distal_num = ins['INFO']['be2_bestmatch'].query_distnum
 
     for be in ('be1', 'be2'):
-        if be+'_prox_loc' in ins['SR'] and len(ins['SR'][be+'_prox_loc']) > 0:
+        if be+'_prox_loc' in ins['INFO'] and len(ins['INFO'][be+'_prox_loc']) > 0:
             # work out which end of the consensus belongs to the distal sequence: _dist to proximal seq.
             # more than one proximal mapping may indicate the insertion is completely assembled (but not always)
             which_prox = 0
-            if be+'_use_prox' in ins['SR']: which_prox = ins['SR'][be+'_use_prox']
+            if be+'_use_prox' in ins['INFO']: which_prox = ins['INFO'][be+'_use_prox']
 
-            right_dist = len(ins['SR'][be+'_prox_seq']) - max(ins['SR'][be+'_prox_loc'][which_prox])
-            left_dist  = min(ins['SR'][be+'_prox_loc'][which_prox])
+            right_dist = len(ins['INFO'][be+'_prox_seq']) - max(ins['INFO'][be+'_prox_loc'][which_prox])
+            left_dist  = min(ins['INFO'][be+'_prox_loc'][which_prox])
 
             distal_is_left = False
 
             if left_dist > right_dist:
                 distal_is_left = True
 
-            if be+'_is_3prime' in ins['SR']:
-                if ins['SR'][be+'_is_3prime']:
+            if be+'_is_3prime' in ins['INFO']:
+                if ins['INFO'][be+'_is_3prime']:
                     if distal_is_left:
-                        ins['SR'][be+'_orient'] = '+'
+                        ins['INFO'][be+'_orient'] = '+'
                     else:
-                        ins['SR'][be+'_orient'] = '-'
+                        ins['INFO'][be+'_orient'] = '-'
 
                 else:
                     if distal_is_left:
-                        ins['SR'][be+'_orient'] = '-'
+                        ins['INFO'][be+'_orient'] = '-'
                     else:
-                        ins['SR'][be+'_orient'] = '+'
+                        ins['INFO'][be+'_orient'] = '+'
 
-                if ins['SR'][be+'_prox_str'] == '-': ins['SR'][be+'_orient'] = swapstrand(ins['SR'][be+'_orient'])
+                if ins['INFO'][be+'_prox_str'] == '-': ins['INFO'][be+'_orient'] = swapstrand(ins['INFO'][be+'_orient'])
 
-    if None not in (ins['SR']['be1_orient'], ins['SR']['be2_orient']):
-        ins['SR']['inversion'] = ins['SR']['be1_orient'] != ins['SR']['be2_orient']
+    if None not in (ins['INFO']['be1_orient'], ins['INFO']['be2_orient']):
+        ins['INFO']['inversion'] = ins['INFO']['be1_orient'] != ins['INFO']['be2_orient']
 
     return ins
 
@@ -217,8 +217,8 @@ def infer_length(ins):
     be1 = None
     be2 = None
 
-    if 'be1_bestmatch' in ins['SR']: be1 = ins['SR']['be1_bestmatch']
-    if 'be2_bestmatch' in ins['SR']: be2 = ins['SR']['be2_bestmatch']
+    if 'be1_bestmatch' in ins['INFO']: be1 = ins['INFO']['be1_bestmatch']
+    if 'be2_bestmatch' in ins['INFO']: be2 = ins['INFO']['be2_bestmatch']
 
     # length is known if both ends are known
     if None not in (be1, be2):
@@ -226,10 +226,10 @@ def infer_length(ins):
         return max(coords) - min(coords)
 
     # can reasonably approximate length if only 5' end is known
-    if be1 is not None and not ins['SR']['be1_is_3prime']:
+    if be1 is not None and not ins['INFO']['be1_is_3prime']:
         return be1.target_seqsize - min(be1.target_start+be1.target_alnsize, be1.target_start)
 
-    if be2 is not None and not ins['SR']['be2_is_3prime']:
+    if be2 is not None and not ins['INFO']['be2_is_3prime']:
         return be2.target_seqsize - min(be2.target_start+be2.target_alnsize, be2.target_start)
 
     # no idea
@@ -240,8 +240,8 @@ def best_ref(ins):
     be1 = None
     be2 = None
 
-    if 'be1_bestmatch' in ins['SR']: be1 = ins['SR']['be1_bestmatch']
-    if 'be2_bestmatch' in ins['SR']: be2 = ins['SR']['be2_bestmatch']
+    if 'be1_bestmatch' in ins['INFO']: be1 = ins['INFO']['be1_bestmatch']
+    if 'be2_bestmatch' in ins['INFO']: be2 = ins['INFO']['be2_bestmatch']
 
     if None not in (be1, be2):
         if be1.target_id == be2.target_id:
@@ -330,40 +330,40 @@ def remap_discordant(ins, inslib_fa=None, useref=None, tmpdir='/tmp'):
 def identify_transductions(ins, minmapq=10):
     bedict = {'be1': None, 'be2': None}
 
-    if 'be1_bestmatch' in ins['SR']: bedict['be1'] = ins['SR']['be1_bestmatch']
-    if 'be2_bestmatch' in ins['SR']: bedict['be2'] = ins['SR']['be2_bestmatch']
+    if 'be1_bestmatch' in ins['INFO']: bedict['be1'] = ins['INFO']['be1_bestmatch']
+    if 'be2_bestmatch' in ins['INFO']: bedict['be2'] = ins['INFO']['be2_bestmatch']
 
     for be in ('be1','be2'):
         if bedict[be] is not None:
             tr_seqs = []
             tr_locs = [] # chrom, start, end, 3p or 5p / unmap
 
-            num_segs = len(ins['SR'][be+'_dist_seq'].split(','))
+            num_segs = len(ins['INFO'][be+'_dist_seq'].split(','))
             if num_segs > 1:
                 for distnum in range(num_segs):
-                    seg_mapq = int(ins['SR'][be+'_dist_mpq'].split(',')[distnum])
+                    seg_mapq = int(ins['INFO'][be+'_dist_mpq'].split(',')[distnum])
                     if distnum != bedict[be].query_distnum and seg_mapq >= minmapq:
-                        tr_chrom = ins['SR'][be+'_dist_chr'].split(',')[distnum]
-                        tr_start = ins['SR'][be+'_dist_pos'].split(',')[distnum]
-                        tr_end   = ins['SR'][be+'_dist_end'].split(',')[distnum]
+                        tr_chrom = ins['INFO'][be+'_dist_chr'].split(',')[distnum]
+                        tr_start = ins['INFO'][be+'_dist_pos'].split(',')[distnum]
+                        tr_end   = ins['INFO'][be+'_dist_end'].split(',')[distnum]
                         tr_side  = '5p'
 
-                        if ins['SR'][be+'_is_3prime']: tr_side = '3p'
+                        if ins['INFO'][be+'_is_3prime']: tr_side = '3p'
 
-                        tr_seqs.append(ins['SR'][be+'_dist_seq'].split(',')[distnum])
+                        tr_seqs.append(ins['INFO'][be+'_dist_seq'].split(',')[distnum])
                         tr_locs.append((tr_chrom, tr_start, tr_end, tr_side))
 
-            if num_segs > 0 and ins['SR'][be+'_umap_seq'] is not None: # unmapped (maybe) transduced seqs
-                for unmap_seq in ins['SR'][be+'_umap_seq'].split(','):
+            if num_segs > 0 and ins['INFO'][be+'_umap_seq'] is not None: # unmapped (maybe) transduced seqs
+                for unmap_seq in ins['INFO'][be+'_umap_seq'].split(','):
                     tr_side  = '5p'
-                    if ins['SR'][be+'_is_3prime']: tr_side = '3p'
+                    if ins['INFO'][be+'_is_3prime']: tr_side = '3p'
 
                     tr_seqs.append(unmap_seq)
                     tr_locs.append(('unmap',0,0,tr_side))
 
             if len(tr_seqs) > 0:
-                ins['SR'][be+'_trans_seq'] = tr_seqs
-                ins['SR'][be+'_trans_loc'] = tr_locs
+                ins['INFO'][be+'_trans_seq'] = tr_seqs
+                ins['INFO'][be+'_trans_loc'] = tr_locs
 
     return ins
 
@@ -373,14 +373,14 @@ def resolve_insertion(args, ins, inslib_fa):
     last_res = lastal_cons(ins, inslib_fa)
     ins = add_insdata(ins, last_res)
 
-    if 'best_ins_matchpct' in ins['SR']:
-        if ins['DR']['dr_count'] > 0 and ins['SR']['best_ins_matchpct'] > 0.90: # change to parameter
+    if 'best_ins_matchpct' in ins['INFO'] and not args.skip_align:
+        if ins['INFO']['dr_count'] > 0 and ins['INFO']['best_ins_matchpct'] > 0.90: # change to parameter
             tmp_bam = remap_discordant(ins, inslib_fa=inslib_fa, tmpdir=args.tmpdir)
 
             if tmp_bam is not None:
                 bam = pysam.AlignmentFile(tmp_bam, 'rb')
-                ins['DR']['support_bam_file'] = tmp_bam
-                ins['DR']['mapped_target'] = bam.mapped
+                ins['INFO']['support_bam_file'] = tmp_bam
+                ins['INFO']['mapped_target'] = bam.mapped
 
         ins = identify_transductions(ins)
 
@@ -422,6 +422,7 @@ if __name__ == '__main__':
     parser.add_argument('--refoutdir', default='tebreak_refs')
 
     parser.add_argument('--tmpdir', default='/tmp')
+    parser.add_argument('--skip_align', action='store_true', default=False)
     parser.add_argument('-v', '--verbose', action='store_true', default=False)
     args = parser.parse_args()
     main(args)

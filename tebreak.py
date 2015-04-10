@@ -539,8 +539,7 @@ class Insertion:
             if self.be1.breakpos > self.be2.breakpos:
                 self.be1, self.be2 = self.be2, self.be1 # keep breakends in position order
 
-        self.sr_info = od() # split read info, set with self.compile_sr_info()
-        self.dr_info = od() # discordant read info, set with self.compile_dr_info()
+        self.info = od() # set with self.compile_info()
         self.discoreads = []
         self.dr_clusters = []
         self.fastqrecs = []
@@ -779,117 +778,119 @@ class Insertion:
 
         return out_fasta
 
-    def compile_dr_info(self):
-        self.dr_clusters = build_dr_clusters(self)
-
-        self.dr_info['dr_count'] = len(self.discoreads)
-        self.dr_info['dr_clusters']  = map(lambda x : x.summary_tuple(), self.dr_clusters)
-        self.dr_info['dr_unmapped_mates'] = len([dr for dr in self.discoreads if dr.mate_read is not None and dr.mate_read.is_unmapped])
-
-    def compile_sr_info(self, bams):
-        ''' fill self.sr_info with summary info, needs original bam for chromosome lookup '''
+    def compile_info(self, bams):
+        ''' fill self.info with summary info, needs original bam for chromosome lookup '''
         if self.be1 == None and self.be2 == None:
             return None
 
-        self.sr_info['ins_uuid'] = self.uuid
-        self.sr_info['chrom'] = self.be1.chrom
+        self.info['ins_uuid'] = self.uuid
+        self.info['chrom'] = self.be1.chrom
 
-        self.sr_info['be1_breakpos'] = self.be1.breakpos
-        self.sr_info['be1_obj_uuid'] = self.be1.uuid
+        self.info['be1_breakpos'] = self.be1.breakpos
+        self.info['be1_obj_uuid'] = self.be1.uuid
         
         #seqs
-        self.sr_info['be1_cons_seq'] = self.be1.consensus
-        self.sr_info['be1_prox_seq'] = ','.join(map(lambda x : x.query_alignment_sequence, self.be1.proximal_subread()))
-        self.sr_info['be1_dist_seq'] = ','.join(map(lambda x : x.query_alignment_sequence, self.be1.distal_subread()))
-        self.sr_info['be1_umap_seq'] = ','.join(self.be1.unmapped_subread()[1])
+        self.info['be1_cons_seq'] = self.be1.consensus
+        self.info['be1_prox_seq'] = ','.join(map(lambda x : x.query_alignment_sequence, self.be1.proximal_subread()))
+        self.info['be1_dist_seq'] = ','.join(map(lambda x : x.query_alignment_sequence, self.be1.distal_subread()))
+        self.info['be1_umap_seq'] = ','.join(self.be1.unmapped_subread()[1])
 
         if self.be1.proximal_subread() and self.be1.proximal_subread()[0].is_reverse:
-            self.sr_info['be1_prox_str'] = '-'
+            self.info['be1_prox_str'] = '-'
         else:
-            self.sr_info['be1_prox_str'] = '+'
+            self.info['be1_prox_str'] = '+'
 
-        self.sr_info['be1_prox_loc'] = []
-        for subseq in self.sr_info['be1_prox_seq'].split(','):
-            self.sr_info['be1_prox_loc'].append(locate_subseq(self.be1.consensus, orient_subseq(self.be1.consensus, subseq)))
+        self.info['be1_prox_loc'] = []
+        for subseq in self.info['be1_prox_seq'].split(','):
+            self.info['be1_prox_loc'].append(locate_subseq(self.be1.consensus, orient_subseq(self.be1.consensus, subseq)))
 
         # stats
-        self.sr_info['be1_sr_count'] = len(self.be1)
-        self.sr_info['be1_num_maps'] = len(self.be1.mappings)
-        self.sr_info['be1_cons_scr'] = self.be1.consscore
-        self.sr_info['be1_median_D'] = self.be1.cluster.median_D()
-        self.sr_info['be1_avgmatch'] = self.be1.cluster.avg_matchpct()
-        self.sr_info['be1_rg_count'] = self.be1.cluster.readgroups()
-        self.sr_info['be1_bf_count'] = self.be1.cluster.bamfiles()
+        self.info['be1_sr_count'] = len(self.be1)
+        self.info['be1_num_maps'] = len(self.be1.mappings)
+        self.info['be1_cons_scr'] = self.be1.consscore
+        self.info['be1_median_D'] = self.be1.cluster.median_D()
+        self.info['be1_avgmatch'] = self.be1.cluster.avg_matchpct()
+        self.info['be1_rg_count'] = self.be1.cluster.readgroups()
+        self.info['be1_bf_count'] = self.be1.cluster.bamfiles()
 
-        if self.sr_info['be1_dist_seq'] == '':
-            self.sr_info['be1_dist_seq'] = None
+        if self.info['be1_dist_seq'] == '':
+            self.info['be1_dist_seq'] = None
         else:
-            self.sr_info['be1_dist_chr'] = ','.join(map(lambda x : bams[0].getrname(x.tid), self.be1.distal_subread()))
-            self.sr_info['be1_dist_pos'] = ','.join(map(lambda x : str(x.get_reference_positions()[0]), self.be1.distal_subread()))
-            self.sr_info['be1_dist_end'] = ','.join(map(lambda x : str(x.get_reference_positions()[-1]), self.be1.distal_subread()))
-            self.sr_info['be1_dist_mpq'] = ','.join(map(lambda x : str(x.mapq), self.be1.distal_subread()))
+            self.info['be1_dist_chr'] = ','.join(map(lambda x : bams[0].getrname(x.tid), self.be1.distal_subread()))
+            self.info['be1_dist_pos'] = ','.join(map(lambda x : str(x.get_reference_positions()[0]), self.be1.distal_subread()))
+            self.info['be1_dist_end'] = ','.join(map(lambda x : str(x.get_reference_positions()[-1]), self.be1.distal_subread()))
+            self.info['be1_prox_mpq'] = ','.join(map(lambda x : str(x.mapq), self.be1.proximal_subread()))
+            self.info['be1_dist_mpq'] = ','.join(map(lambda x : str(x.mapq), self.be1.distal_subread()))
 
-        if self.sr_info['be1_umap_seq'] == '':
-            self.sr_info['be1_umap_seq'] = None
+        if self.info['be1_umap_seq'] == '':
+            self.info['be1_umap_seq'] = None
 
         if self.be2 is not None:
-            self.sr_info['be2_breakpos'] = self.be2.breakpos
-            self.sr_info['be2_obj_uuid'] = self.be2.uuid
-            self.sr_info['be2_cons_seq'] = self.be2.consensus
-            self.sr_info['be2_prox_seq'] = ','.join(map(lambda x : x.query_alignment_sequence, self.be2.proximal_subread()))
-            self.sr_info['be2_dist_seq'] = ','.join(map(lambda x : x.query_alignment_sequence, self.be2.distal_subread()))
-            self.sr_info['be2_umap_seq'] = ','.join(self.be2.unmapped_subread()[1])
+            self.info['be2_breakpos'] = self.be2.breakpos
+            self.info['be2_obj_uuid'] = self.be2.uuid
+            self.info['be2_cons_seq'] = self.be2.consensus
+            self.info['be2_prox_seq'] = ','.join(map(lambda x : x.query_alignment_sequence, self.be2.proximal_subread()))
+            self.info['be2_dist_seq'] = ','.join(map(lambda x : x.query_alignment_sequence, self.be2.distal_subread()))
+            self.info['be2_umap_seq'] = ','.join(self.be2.unmapped_subread()[1])
 
             if self.be2.proximal_subread() and self.be2.proximal_subread()[0].is_reverse:
-                self.sr_info['be2_prox_str'] = '-'
+                self.info['be2_prox_str'] = '-'
             else:
-                self.sr_info['be2_prox_str'] = '+'
+                self.info['be2_prox_str'] = '+'
 
 
-            self.sr_info['be2_prox_loc'] = []
-            for subseq in self.sr_info['be2_prox_seq'].split(','):
-                self.sr_info['be2_prox_loc'].append(locate_subseq(self.be2.consensus, orient_subseq(self.be2.consensus, subseq)))
+            self.info['be2_prox_loc'] = []
+            for subseq in self.info['be2_prox_seq'].split(','):
+                self.info['be2_prox_loc'].append(locate_subseq(self.be2.consensus, orient_subseq(self.be2.consensus, subseq)))
 
             # stats
-            self.sr_info['be2_sr_count'] = len(self.be2)
-            self.sr_info['be2_num_maps'] = len(self.be2.mappings)
-            self.sr_info['be2_cons_scr'] = self.be2.consscore
-            self.sr_info['be2_median_D'] = self.be2.cluster.median_D()
-            self.sr_info['be2_avgmatch'] = self.be2.cluster.avg_matchpct()
-            self.sr_info['be2_rg_count'] = self.be2.cluster.readgroups()
-            self.sr_info['be2_bf_count'] = self.be2.cluster.bamfiles()
+            self.info['be2_sr_count'] = len(self.be2)
+            self.info['be2_num_maps'] = len(self.be2.mappings)
+            self.info['be2_cons_scr'] = self.be2.consscore
+            self.info['be2_median_D'] = self.be2.cluster.median_D()
+            self.info['be2_avgmatch'] = self.be2.cluster.avg_matchpct()
+            self.info['be2_rg_count'] = self.be2.cluster.readgroups()
+            self.info['be2_bf_count'] = self.be2.cluster.bamfiles()
 
 
-            if self.sr_info['be2_dist_seq'] == '':
-                self.sr_info['be2_dist_seq'] = None
+            if self.info['be2_dist_seq'] == '':
+                self.info['be2_dist_seq'] = None
             else:
-                self.sr_info['be2_dist_chr'] = ','.join(map(lambda x: bams[0].getrname(x.tid), self.be2.distal_subread()))
-                self.sr_info['be2_dist_pos'] = ','.join(map(lambda x: str(x.get_reference_positions()[0]), self.be2.distal_subread()))
-                self.sr_info['be2_dist_end'] = ','.join(map(lambda x: str(x.get_reference_positions()[-1]), self.be2.distal_subread()))
-                self.sr_info['be2_dist_mpq'] = ','.join(map(lambda x : str(x.mapq), self.be2.distal_subread()))
+                self.info['be2_dist_chr'] = ','.join(map(lambda x: bams[0].getrname(x.tid), self.be2.distal_subread()))
+                self.info['be2_dist_pos'] = ','.join(map(lambda x: str(x.get_reference_positions()[0]), self.be2.distal_subread()))
+                self.info['be2_dist_end'] = ','.join(map(lambda x: str(x.get_reference_positions()[-1]), self.be2.distal_subread()))
+                self.info['be2_dist_mpq'] = ','.join(map(lambda x : str(x.mapq), self.be2.distal_subread()))
+                self.info['be2_prox_mpq'] = ','.join(map(lambda x : str(x.mapq), self.be2.proximal_subread()))
 
-            if self.sr_info['be2_umap_seq'] == '':
-                self.sr_info['be2_umap_seq'] = None
+            if self.info['be2_umap_seq'] == '':
+                self.info['be2_umap_seq'] = None
 
-            self.sr_info['be1_use_prox'] = 0
-            self.sr_info['be2_use_prox'] = 0
+            self.info['be1_use_prox'] = 0
+            self.info['be2_use_prox'] = 0
 
-            if self.sr_info['be1_prox_loc'] == self.sr_info['be2_prox_loc']: # insertion may be completely assembled
-                if len(self.sr_info['be1_prox_loc']) > 1:
-                    self.sr_info['be1_use_prox'] = 1
+            if self.info['be1_prox_loc'] == self.info['be2_prox_loc']: # insertion may be completely assembled
+                if len(self.info['be1_prox_loc']) > 1:
+                    self.info['be1_use_prox'] = 1
 
-                elif len(self.sr_info['be2_prox_loc']) > 1:
-                    self.sr_info['be2_use_prox'] = 1
+                elif len(self.info['be2_prox_loc']) > 1:
+                    self.info['be2_use_prox'] = 1
 
-            tsdpair = self.tsd(be1_use_prox=self.sr_info['be1_use_prox'], be2_use_prox=self.sr_info['be2_use_prox'])
+            tsdpair = self.tsd(be1_use_prox=self.info['be1_use_prox'], be2_use_prox=self.info['be2_use_prox'])
             if tsdpair is not None:
-                self.sr_info['be1_end_over'], self.sr_info['be2_end_over'] = tsdpair
+                self.info['be1_end_over'], self.info['be2_end_over'] = tsdpair
 
-        if 'be2_breakpos' not in self.sr_info:
-            self.sr_info['be2_breakpos'] = self.sr_info['be1_breakpos']
+        if 'be2_breakpos' not in self.info:
+            self.info['be2_breakpos'] = self.info['be1_breakpos']
 
-        if 'be2_sr_count' not in self.sr_info:
-            self.sr_info['be2_sr_count'] = 0
+        if 'be2_sr_count' not in self.info:
+            self.info['be2_sr_count'] = 0
+
+        # discordant read info
+        self.dr_clusters = build_dr_clusters(self)
+
+        self.info['dr_count'] = len(self.discoreads)
+        self.info['dr_clusters']  = map(lambda x : x.summary_tuple(), self.dr_clusters)
+        self.info['dr_unmapped_mates'] = len([dr for dr in self.discoreads if dr.mate_read is not None and dr.mate_read.is_unmapped])
 
  
 #######################################
@@ -1229,8 +1230,7 @@ def summarise_insertion(ins):
     ''' returns a pickleable version of the insertion information '''
     pi = dd(dict)
 
-    pi['SR'] = ins.sr_info
-    pi['DR'] = ins.dr_info
+    pi['INFO'] = ins.info
     pi['READSTORE'] = ins.fastqrecs
 
     return pi
@@ -1241,9 +1241,18 @@ def postprocess_insertions(insertions, bwaref, outpath, bams, tmpdir='/tmp'):
         support_fq  = ins.supportreads_fastq(outpath)
         support_asm = minia(support_fq, tmpdir=tmpdir)
 
-        sys.stderr.write('Assembled: %s:%d, filename: %s\n' % (ins.be1.chrom, ins.be1.breakpos, support_asm))
+        retry_counter = 0 # minia might not be the most reliable option...
+        while not os.path.exists(support_asm) and retry_counter < 10:
+            retry_counter += 1
+            sys.stderr.write('***Assembly retry: %s:%d\n' % (ins.be1.chrom, ins.be1.breakpos))
+            support_asm = minia(support_fq, tmpdir=tmpdir)
 
-        ins.improve_consensus(support_asm, bwaref)
+        if not os.path.exists(support_asm):
+            sys.stderr.write('***Assembly failed!: %s:%d\n' % (ins.be1.chrom, ins.be1.breakpos))
+
+        else:
+            sys.stderr.write('Assembled: %s:%d, filename: %s\n' % (ins.be1.chrom, ins.be1.breakpos, support_asm))
+            ins.improve_consensus(support_asm, bwaref)
 
     # collect altered breakends
     alt_be_list = []
@@ -1274,8 +1283,7 @@ def postprocess_insertions(insertions, bwaref, outpath, bams, tmpdir='/tmp'):
                     ins.be2_improved_cons = False
 
         if ins.be1_improved_cons or ins.be2_improved_cons:
-            ins.compile_sr_info(bams)
-            ins.compile_dr_info()
+            ins.compile_info(bams)
             ins.consensus_fasta(outpath)
 
     return insertions
@@ -1321,8 +1329,7 @@ def run_chunk(args, chrom, start, end):
 
         for ins in insertions:
             ins.fetch_discordant_reads(bams)
-            ins.compile_sr_info(bams)
-            ins.compile_dr_info()
+            ins.compile_info(bams)
 
             # various FASTA/FASTQ outputs
             ins.unmapped_fastq(args.fasta_out_path)
@@ -1353,8 +1360,8 @@ def resolve_duplicates(insertions):
     insdict = {} # --> index in insertions
 
     for n, ins in enumerate(insertions):
-        be1 = ins['SR']['chrom'] + ':' + str(ins['SR']['be1_breakpos'])
-        be2 = ins['SR']['chrom'] + ':' + str(ins['SR']['be2_breakpos'])
+        be1 = ins['INFO']['chrom'] + ':' + str(ins['INFO']['be1_breakpos'])
+        be2 = ins['INFO']['chrom'] + ':' + str(ins['INFO']['be2_breakpos'])
         
         if be1 not in insdict:
             insdict[be1] = n 
@@ -1373,15 +1380,15 @@ def resolve_duplicates(insertions):
 def prefer_insertion(ins1, ins2):
     ''' return true if ins1 has more evidence than ins2, false otherwise '''
     # prefer two-end support over one end
-    if ins1['SR']['be1_breakpos'] != ins1['SR']['be2_breakpos'] and ins2['SR']['be1_breakpos'] == ins2['SR']['be2_breakpos']:
+    if ins1['INFO']['be1_breakpos'] != ins1['INFO']['be2_breakpos'] and ins2['INFO']['be1_breakpos'] == ins2['INFO']['be2_breakpos']:
         return True
 
     # prefer higher split read count
-    if ins1['SR']['be1_sr_count'] + ins1['SR']['be2_sr_count'] > ins2['SR']['be1_sr_count'] + ins2['SR']['be2_sr_count']:
+    if ins1['INFO']['be1_sr_count'] + ins1['INFO']['be2_sr_count'] > ins2['INFO']['be1_sr_count'] + ins2['INFO']['be2_sr_count']:
         return True
 
     # prefer higher discordant read count
-    if ins1['DR']['dr_count'] > ins2['DR']['dr_count']:
+    if ins1['INFO']['dr_count'] > ins2['INFO']['dr_count']:
         return True
 
     return False
@@ -1390,16 +1397,14 @@ def prefer_insertion(ins1, ins2):
 def text_summary(insertions):
     for ins in insertions:
         print '#BEGIN'
-        for label, value in ins['SR'].iteritems():
-            print '%s: %s' % (label, str(value))
-        for label, value in ins['DR'].iteritems():
+        for label, value in ins['INFO'].iteritems():
             print '%s: %s' % (label, str(value))
         print '#END'
 
         # some test filters...
-        bestmatch = ins['SR']['be1_avgmatch']
-        if 'be2_avgmatch' in ins['SR']:
-            bestmatch = max(ins['SR']['be1_avgmatch'], ins['SR']['be2_avgmatch'])
+        bestmatch = ins['INFO']['be1_avgmatch']
+        if 'be2_avgmatch' in ins['INFO']:
+            bestmatch = max(ins['INFO']['be1_avgmatch'], ins['INFO']['be2_avgmatch'])
 
         print "\n"
 

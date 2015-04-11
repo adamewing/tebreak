@@ -544,6 +544,14 @@ class Insertion:
         self.fastqrecs = []
         self.cons_fasta = None
 
+    def __len__(self):
+        ''' return total number of reads (sr+dr) associated with insertion '''
+        l = 0
+        if self.be1 is not None: l += len(self.be1.cluster)
+        if self.be2 is not None: l += len(self.be2.cluster)
+        return l + len(self.discoreads)
+
+
     def paired(self):
         return None not in (self.be1, self.be2)
  
@@ -1234,6 +1242,36 @@ def summarise_insertion(ins):
     return pi
 
 
+def filter_insertions(insertions, filters):
+    filtered = []
+    for ins in insertions:
+        exclude = False
+
+        mapq = map(lambda x : str(x.mapq), ins.be1.proximal_subread())
+        rgs  = [rg.split('|')[0] for rg in ins.be1.cluster.readgroups()]
+        bams = [bam.split('|')[0] for bam in ins.be1.cluster.bamfiles()]
+
+        if ins.be2 is not None and len(ins.be2.proximal_subread()) > 0:
+            mapq += map(lambda x : str(x.mapq), ins.be2.proximal_subread())
+            rgs  += [rg.split('|')[0] for rg in ins.be2.cluster.readgroups()]
+            bams += [bam.split('|')[0] for bam in ins.be2.cluster.bamfiles()]
+
+        if len(ins) >= filters['max_ins_reads']: exclude = True
+        if max(mapq) < filters['min_prox_mapq']: exclude = True
+
+        if len(ins.discoreads) < filters['min_discordant_reads']: exclude = True
+
+        if filters['restrict_to_bam'] is not None:
+            if len(bams) > 1 or filters['restrict_to_bam'] not in bams: exclude = True
+
+        if filters['restrict_to_readgroup'] is not None:
+            if len(rgs) > 1 or filters['restrict_to_readgroup'] not in rgs: exclude = True
+
+        if not exclude: filtered.append(ins)
+
+    return filtered
+
+
 def postprocess_insertions(insertions, bwaref, outpath, bams, tmpdir='/tmp'):
     for ins in insertions:
         support_fq  = ins.supportreads_fastq(outpath)
@@ -1301,6 +1339,14 @@ def run_chunk(args, chrom, start, end):
         start = int(start)
         end   = int(end)
 
+        filters = {
+            'max_ins_reads': int(args.max_ins_reads),
+            'min_discordant_reads': int(args.min_discordant_reads),
+            'min_prox_mapq': int(args.min_prox_mapq),
+            'restrict_to_bam': args.restrict_to_bam,
+            'restrict_to_readgroup': args.restrict_to_readgroup
+        }
+
         insertions = []
      
         chunkname = '%s:%d-%d' % (chrom, start, end)
@@ -1324,12 +1370,15 @@ def run_chunk(args, chrom, start, end):
             insertions = build_insertions(breakends)
             logger.debug('Chunk %s: Processing %d insertions ...' % (chunkname, len(insertions)))
 
-            insertions = [ins for ins in insertions if len(ins.be1.proximal_subread()) > 0]
+            insertions = [ins for ins in insertions if len(ins.be1.proximal_subread()) > 0] # remove bogus insertions
 
             for ins in insertions:
                 ins.fetch_discordant_reads(bams)
                 ins.compile_info(bams)
 
+            insertions = filter_insertions(insertions, filters)
+
+            for ins in insertions:
                 # various FASTA/FASTQ outputs
                 ins.unmapped_fastq(args.fasta_out_path)
                 ins.consensus_fasta(args.fasta_out_path)
@@ -1474,6 +1523,12 @@ if __name__ == '__main__':
     parser.add_argument('--min_maxclip', default=20, help='min. longest clipped bases per cluster (default = 20)')
     parser.add_argument('--minsplitreads', default=4, help='minimum split reads per breakend (default = 4)')
     parser.add_argument('--min_consensus_score', default=0.95, help='quality of consensus alignment (default = 0.95)')
+
+    parser.add_argument('--max_ins_reads', default=1000)
+    parser.add_argument('--min_discordant_reads', default=4)
+    parser.add_argument('--min_prox_mapq', default=10)
+    parser.add_argument('--restrict_to_bam', default=None)
+    parser.add_argument('--restrict_to_readgroup', default=None)
 
     parser.add_argument('--tmpdir', default='/tmp', help='temporary directory (default = /tmp)')
     parser.add_argument('-o', '--fasta_out_path', default='tebreak_seqdata', help='path for FASTA output')

@@ -1135,11 +1135,6 @@ def build_breakends(cluster, minsr_break, mincs, min_maxclip=10, tmpdir='/tmp'):
 
                     os.remove(out_fa)
                     os.remove(align_fa)
-
-                #print '*'*60
-                #print subcluster
-                #print seq
-                #print score, maxclip
  
                 if seq != '' and score >= mincs and min_maxclip <= maxclip:
                     breakends.append(BreakEnd(cluster.chrom, breakpos, subcluster, seq, score))
@@ -1192,12 +1187,6 @@ def score_breakend_pair(be1, be2, k=2.5, s=3.0):
         if overlap == 0: distance_penalty = abs(be1.breakpos-be2.breakpos) # no TSD
 
         score = weighted_overlap - distance_penalty + len(be1) + len(be2)
-
-        print "prox1, prox2: (%d-%d) vs (%d-%d) " % (prox1.get_reference_positions()[0], prox1.get_reference_positions()[-1], prox2.get_reference_positions()[0], prox2.get_reference_positions()[-1])
-        print "overlap:", overlap
-        print "weighted_overlap:", weighted_overlap
-        print "distance_penalty:", distance_penalty
-        print "score:",score
         return score
  
     return 0
@@ -1398,7 +1387,6 @@ def run_chunk(args, chrom, start, end):
      
         breakends = []
         for cluster in clusters:
-            print cluster
             breakends += build_breakends(cluster, minsr_break, mincs, min_maxclip=int(args.min_maxclip), tmpdir=args.tmpdir)
      
         logger.debug('Chunk %s: Mapping %d breakends ...' % (chunkname, len(breakends)))

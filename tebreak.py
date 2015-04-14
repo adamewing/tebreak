@@ -286,7 +286,9 @@ class SplitRead:
             return self.chrom > other.chrom
  
     def __str__(self):
-        return ' '.join(map(str, ('SplitRead:', self.chrom, self.breakpos, self.read.qname)))
+        dir = 'left'
+        if self.breakright: dir='right'
+        return ' '.join(map(str, ('SplitRead:', self.chrom, self.breakpos, self.cliplen, self.read.qname, dir)))
  
  
 class DiscoRead:
@@ -414,7 +416,7 @@ class SplitCluster(ReadCluster):
             [new.add_splitread(sr) for sr in self.reads if sr.breakpos in breakends and sr.breakleft]
  
         if direction == 'right':
-            [new.add_splitread(sr) for sr in self.reads if sr.breakpos in breakends and sr.breakright]           
+            [new.add_splitread(sr) for sr in self.reads if sr.breakpos in breakends and sr.breakright]
  
         return new
  
@@ -432,7 +434,8 @@ class SplitCluster(ReadCluster):
         return max([sr.cliplen for sr in self.reads])
  
     def __str__(self):
-        return '\t'.join(map(str, (self.chrom, self.start, self.end, len(self.reads), self.all_breakpoints())))
+        break_count = Counter([read.breakpos for read in self.reads])
+        return '\t'.join(map(str, ('SplitCluster:', self.chrom, self.start, self.end, len(self.reads), break_count)))
 
 
 class DiscoCluster(ReadCluster):
@@ -455,7 +458,7 @@ class DiscoCluster(ReadCluster):
         return min(positions), max(positions)
 
     def summary_tuple(self):
-        return (self.chrom, self.find_mate_extrema()[0], self.find_mate_extrema()[1], self.readgroups(), self.bamfiles())
+        return (self.reads[0].mate_chrom, self.find_mate_extrema()[0], self.find_mate_extrema()[1], self.readgroups(), self.bamfiles())
 
  
 class BreakEnd:
@@ -515,6 +518,10 @@ class BreakEnd:
     def __len__(self):
         return len(self.cluster)
 
+    def __str__(self):
+        return '%s\t%d' % (self.chrom, self.breakpos)
+
+
 class Insertion:
     ''' store and compile information about an insertion with 1 or 2 breakpoints '''
     def __init__(self, be1=None, be2=None):
@@ -546,11 +553,14 @@ class Insertion:
 
     def __len__(self):
         ''' return total number of reads (sr+dr) associated with insertion '''
+        return self.num_sr() + len(self.discoreads)
+
+    def num_sr(self):
+        ''' return number of split reads supporting insertion '''
         l = 0
         if self.be1 is not None: l += len(self.be1.cluster)
         if self.be2 is not None: l += len(self.be2.cluster)
-        return l + len(self.discoreads)
-
+        return l
 
     def paired(self):
         return None not in (self.be1, self.be2)
@@ -686,6 +696,7 @@ class Insertion:
 
             for res in la_results:
                 if res.query_id == be_name:
+                    print "LASTres:", res
                     # criteria for deciding the new consensus is better
                     if res.target_seqsize > len(self.be1.consensus) and len(self.be1.consensus) - res.query_alnsize < 10 and res.pct_match() > 0.95:
                         self.be1_alt = self.be1
@@ -707,6 +718,7 @@ class Insertion:
 
         for ext in ('','.amb','.ann','.bck','.bwt','.des','.fai','.pac','.prj','.sa','.sds','.ssp','.suf','.tis'):
             if os.path.exists(ctg_fa+ext): os.remove(ctg_fa+ext)
+
 
         return self.be1_improved_cons, self.be2_improved_cons
 
@@ -820,6 +832,7 @@ class Insertion:
         self.info['be1_rg_count'] = self.be1.cluster.readgroups()
         self.info['be1_bf_count'] = self.be1.cluster.bamfiles()
         self.info['be1_prox_mpq'] = ','.join(map(lambda x : str(x.mapq), self.be1.proximal_subread()))
+        self.info['be1_improved'] = self.be1_improved_cons
 
         if self.info['be1_dist_seq'] == '':
             self.info['be1_dist_seq'] = None
@@ -859,6 +872,7 @@ class Insertion:
             self.info['be2_rg_count'] = self.be2.cluster.readgroups()
             self.info['be2_bf_count'] = self.be2.cluster.bamfiles()
             self.info['be2_prox_mpq'] = ','.join(map(lambda x : str(x.mapq), self.be2.proximal_subread()))
+            self.info['be2_improved'] = self.be2_improved_cons
 
             if self.info['be2_dist_seq'] == '':
                 self.info['be2_dist_seq'] = None
@@ -1075,7 +1089,7 @@ def build_sr_clusters(splitreads, searchdist=100): # TODO PARAM
  
             else:
                 clusters[-1].add_splitread(sr)
- 
+
     return clusters
 
 
@@ -1088,7 +1102,7 @@ def build_dr_clusters(insertion, searchdist=100): # TODO PARAM
         if len(clusters) == 0:
             clusters.append(DiscoCluster(dr))
  
-        elif clusters[-1].chrom != dr.chrom:
+        elif clusters[-1].chrom != dr.mate_chrom:
             clusters.append(DiscoCluster(dr))
  
         else:
@@ -1101,22 +1115,31 @@ def build_dr_clusters(insertion, searchdist=100): # TODO PARAM
     return clusters
  
  
-def build_breakends(cluster, minsr, mincs, min_maxclip=20, tmpdir='/tmp'):
+def build_breakends(cluster, minsr_break, mincs, min_maxclip=10, tmpdir='/tmp'):
     ''' returns list of breakends from cluster '''
     breakends = []
  
     for breakpos in cluster.all_breakpoints():
         subclusters = (cluster.subcluster_by_breakend([breakpos], direction='left'), cluster.subcluster_by_breakend([breakpos], direction='right'))
         for subcluster in subclusters:
-            if len(subcluster) > minsr:
-                out_fa     = subcluster.make_fasta(tmpdir)
-                align_fa   = mafft(out_fa, tmpdir=tmpdir)
-                msa        = MSA(align_fa)
-                seq, score = msa.consensus()
-                maxclip    = subcluster.max_cliplen()
- 
-                os.remove(out_fa)
-                os.remove(align_fa)
+            if len(subcluster) >= minsr_break:
+                seq     = subcluster.reads[0].read.seq
+                score   = 1.0
+                maxclip = subcluster.max_cliplen()
+
+                if len(subcluster) > 1:
+                    out_fa     = subcluster.make_fasta(tmpdir)
+                    align_fa   = mafft(out_fa, tmpdir=tmpdir)
+                    msa        = MSA(align_fa)
+                    seq, score = msa.consensus()
+
+                    os.remove(out_fa)
+                    os.remove(align_fa)
+
+                #print '*'*60
+                #print subcluster
+                #print seq
+                #print score, maxclip
  
                 if seq != '' and score >= mincs and min_maxclip <= maxclip:
                     breakends.append(BreakEnd(cluster.chrom, breakpos, subcluster, seq, score))
@@ -1159,10 +1182,14 @@ def score_breakend_pair(be1, be2):
     ''' assign a score to a breakend, higher is "better" '''
     prox1 = be1.proximal_subread()[0]
     prox2 = be2.proximal_subread()[0]
+
+    score =  (1.0 - ref_dist(prox1, prox2)) + np.sqrt(len(be1.cluster) + len(be2.cluster))
  
     if prox1 and prox2:
         # prefer overlapping breakend reads (TSDs), but small TSDs can be overridden with high enough read counts
-        return (1.0 - ref_dist(prox1, prox2)) + np.sqrt(len(be1.cluster) + len(be2.cluster))
+        print "prox1, prox2: (%d-%d) vs (%d-%d) " % (prox1.get_reference_positions()[0], prox1.get_reference_positions()[-1], prox2.get_reference_positions()[0], prox2.get_reference_positions()[-1])
+        print "score       :",score
+        return score 
  
     return 0
  
@@ -1260,6 +1287,7 @@ def filter_insertions(insertions, filters):
         if max(mapq) < filters['min_prox_mapq']: exclude = True
 
         if len(ins.discoreads) < filters['min_discordant_reads']: exclude = True
+        if ins.num_sr() < filters['min_split_reads']: exclude = True
 
         if filters['restrict_to_bam'] is not None:
             if len(bams) > 1 or filters['restrict_to_bam'] not in bams: exclude = True
@@ -1332,7 +1360,7 @@ def run_chunk(args, chrom, start, end):
 
     try:
         bams = [pysam.AlignmentFile(bam, 'rb') for bam in args.bam.split(',')]
-        minsr = int(args.minsplitreads)
+        minsr_break = int(args.min_sr_per_break)
         mincs = float(args.min_consensus_score)
         maxD  = float(args.maxD)
 
@@ -1340,10 +1368,11 @@ def run_chunk(args, chrom, start, end):
         end   = int(end)
 
         filters = {
-            'max_ins_reads': int(args.max_ins_reads),
-            'min_discordant_reads': int(args.min_discordant_reads),
-            'min_prox_mapq': int(args.min_prox_mapq),
-            'restrict_to_bam': args.restrict_to_bam,
+            'max_ins_reads':         int(args.max_ins_reads),
+            'min_split_reads':       int(args.min_split_reads),
+            'min_discordant_reads':  int(args.min_discordant_reads),
+            'min_prox_mapq':         int(args.min_prox_mapq),
+            'restrict_to_bam':       args.restrict_to_bam,
             'restrict_to_readgroup': args.restrict_to_readgroup
         }
 
@@ -1361,7 +1390,8 @@ def run_chunk(args, chrom, start, end):
      
         breakends = []
         for cluster in clusters:
-            breakends += build_breakends(cluster, minsr, mincs, min_maxclip=int(args.min_maxclip), tmpdir=args.tmpdir)
+            print cluster
+            breakends += build_breakends(cluster, minsr_break, mincs, min_maxclip=int(args.min_maxclip), tmpdir=args.tmpdir)
      
         logger.debug('Chunk %s: Mapping %d breakends ...' % (chunkname, len(breakends)))
         if len(breakends) > 0:
@@ -1408,7 +1438,7 @@ def resolve_duplicates(insertions):
     ''' resolve instances where breakpoints occur > 1x in the insertion list '''
     ''' this can happen if intervals overlap, e.g. in  genome chunking '''
 
-    insdict = {} # --> index in insertions
+    insdict = od() # --> index in insertions
 
     for n, ins in enumerate(insertions):
         be1 = ins['INFO']['chrom'] + ':' + str(ins['INFO']['be1_breakpos'])
@@ -1520,11 +1550,12 @@ if __name__ == '__main__':
     parser.add_argument('-i', '--interval_bed', default=None, help='BED file with intervals to scan')
     parser.add_argument('-D', '--maxD', default=0.8, help='maximum value of KS D statistic for split qualities (default = 0.8)')
     parser.add_argument('--min_minclip', default=3, help='min. shortest clipped bases per cluster (default = 3)')
-    parser.add_argument('--min_maxclip', default=20, help='min. longest clipped bases per cluster (default = 20)')
-    parser.add_argument('--minsplitreads', default=4, help='minimum split reads per breakend (default = 4)')
+    parser.add_argument('--min_maxclip', default=10, help='min. longest clipped bases per cluster (default = 10)')
+    parser.add_argument('--min_sr_per_break', default=1, help='minimum split reads per breakend (default = 1)')
     parser.add_argument('--min_consensus_score', default=0.95, help='quality of consensus alignment (default = 0.95)')
 
     parser.add_argument('--max_ins_reads', default=1000)
+    parser.add_argument('--min_split_reads', default=4)
     parser.add_argument('--min_discordant_reads', default=4)
     parser.add_argument('--min_prox_mapq', default=10)
     parser.add_argument('--restrict_to_bam', default=None)

@@ -696,7 +696,6 @@ class Insertion:
 
             for res in la_results:
                 if res.query_id == be_name:
-                    print "LASTres:", res
                     # criteria for deciding the new consensus is better
                     if res.target_seqsize > len(self.be1.consensus) and len(self.be1.consensus) - res.query_alnsize < 10 and res.pct_match() > 0.95:
                         self.be1_alt = self.be1
@@ -1212,34 +1211,28 @@ def checkref(ref_fasta):
 def build_insertions(breakends, maxdist=100):
     ''' return list of Insertion objects '''
     insertions = []
-    paired = {}
+    be_dict = [(be.uuid, be) for be in breakends]
+
+    pair_scores = dd(dict)
+
     for be1 in breakends:
-        best_match = None
-        best_pair  = None
- 
         for be2 in breakends:
             if be1.proximal_subread() and be2.proximal_subread():
                 dist = ref_dist(be1.proximal_subread()[0], be2.proximal_subread()[0])
+                if be1.uuid != be2.uuid and dist <= maxdist:
+                    pair_scores[be1.uuid][be2.uuid] = score_breakend_pair(be1, be2)
+
+        # WORKING
  
-                if be1.uuid != be2.uuid and dist <= maxdist and be2.uuid not in paired and be1.uuid not in paired:
-                    if best_match is None:
-                        best_match = score_breakend_pair(be1, be2)
-                        best_pair  = (be1, be2)
+        # if best_pair is not None:
+        #     paired[best_pair[0].uuid] = True
+        #     paired[best_pair[1].uuid] = True
+        #     insertions.append(Insertion(*best_pair))
  
-                    else:
-                        if score_breakend_pair(be1, be2) > best_match:
-                            best_match = score_breakend_pair(be1, be2)
-                            best_pair  = (be1, be2)
- 
-        if best_pair is not None:
-            paired[best_pair[0].uuid] = True
-            paired[best_pair[1].uuid] = True
-            insertions.append(Insertion(*best_pair))
- 
-        else:
-            if be1.uuid not in paired:
-                paired[be1.uuid] = True
-                insertions.append(Insertion(be1))
+        # else:
+        #     if be1.uuid not in paired:
+        #         paired[be1.uuid] = True
+        #         insertions.append(Insertion(be1))
      
     return insertions
 

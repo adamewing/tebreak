@@ -1178,18 +1178,27 @@ def map_breakends(breakends, db, tmpdir='/tmp'):
     return breakdict.values()
  
  
-def score_breakend_pair(be1, be2):
+def score_breakend_pair(be1, be2, k=2.5, s=3.0):
     ''' assign a score to a breakend, higher is "better" '''
     prox1 = be1.proximal_subread()[0]
     prox2 = be2.proximal_subread()[0]
-
-    score =  (1.0 - ref_dist(prox1, prox2)) + np.sqrt(len(be1.cluster) + len(be2.cluster))
  
     if prox1 and prox2:
-        # prefer overlapping breakend reads (TSDs), but small TSDs can be overridden with high enough read counts
+        overlap = abs(min(0, ref_dist(prox1, prox2))) # overlap = negative distance between proximal read mappings i.e. potential TSD
+        weighted_overlap = ss.gamma(k, scale=s).pdf(overlap) * float(overlap)**2 # TSD length distribution taken into account
+        distance_penalty = 0
+
+        if overlap > 0:  distance_penalty = abs(abs(be1.breakpos-be2.breakpos) - overlap) # disagreement in TSD length
+        if overlap == 0: distance_penalty = abs(be1.breakpos-be2.breakpos) # no TSD
+
+        score = weighted_overlap - distance_penalty + len(be1) + len(be2)
+
         print "prox1, prox2: (%d-%d) vs (%d-%d) " % (prox1.get_reference_positions()[0], prox1.get_reference_positions()[-1], prox2.get_reference_positions()[0], prox2.get_reference_positions()[-1])
-        print "score       :",score
-        return score 
+        print "overlap:", overlap
+        print "weighted_overlap:", weighted_overlap
+        print "distance_penalty:", distance_penalty
+        print "score:",score
+        return score
  
     return 0
  

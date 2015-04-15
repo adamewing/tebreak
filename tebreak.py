@@ -1141,7 +1141,7 @@ def build_breakends(cluster, minsr_break, mincs, min_maxclip=10, tmpdir='/tmp'):
     return breakends
  
  
-def map_breakends(breakends, db, tmpdir='/tmp'):
+def map_breakends(breakends, db, tmpdir='/tmp', shared_mem=True):
     ''' remap consensus sequences stored in BreakEnd objects '''
     tmp_fa = tmpdir + '/' + '.'.join(('tebreak', str(uuid4()), 'be.fa'))
     breakdict = {} # for faster lookup
@@ -1154,7 +1154,7 @@ def map_breakends(breakends, db, tmpdir='/tmp'):
             out.write('>%s\n%s\n+\n%s\n' % (be.uuid, be.consensus, qual))
  
     tmp_sam = '.'.join(tmp_fa.split('.')[:-1]) + '.sam'
- 
+
     with open(tmp_sam, 'w') as out:
         sam_cmd  = ['bwa', 'mem', '-k', '10', '-w', '500', '-M', '-v', '0', db, tmp_fa]
         p = subprocess.Popen(sam_cmd, stdout=subprocess.PIPE)
@@ -1165,7 +1165,7 @@ def map_breakends(breakends, db, tmpdir='/tmp'):
  
     for read in sam.fetch(until_eof=True):
         breakdict[read.qname].mappings.append(read)
- 
+
     os.remove(tmp_fa)
     os.remove(tmp_sam)
  
@@ -1492,6 +1492,11 @@ def main(args):
 
     checkref(args.bwaref)
 
+    sys.stderr.write("loading bwa index %s into shared memory ...\n" % args.bwaref)
+    p = subprocess.Popen(['bwa', 'shm', args.bwaref], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    for line in p.stdout: pass # wait for bwa to load
+
+
     if not os.path.exists(args.fasta_out_path):
         os.mkdir(args.fasta_out_path)
         assert os.path.exists(args.fasta_out_path), "could not create directory: %s" % args.fasta_out_path
@@ -1529,6 +1534,10 @@ def main(args):
 
     with open(pickoutfn, 'w') as pickout:
         pickle.dump(insertions, pickout)
+
+    sys.stderr.write("unloading bwa index %s from shared memory ...\n" % args.bwaref)
+    p = subprocess.Popen(['bwa', 'shm', '-d'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    for line in p.stdout: pass # wait for bwa to load
 
     logger.debug('Pickled to %s' % pickoutfn)
 

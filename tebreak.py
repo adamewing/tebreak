@@ -1504,12 +1504,18 @@ def main(args):
     ''' Chunk genome or use input BED '''
     
     procs = int(args.processes)
+    chunk_count = int(args.chunks)
+
+    if chunk_count < procs: chunks = procs
+
     pool = mp.Pool(processes=procs)
     chunks = []
 
     if args.interval_bed is None:
         genome = Genome(args.bwaref + '.fai')
-        chunks = genome.chunk(procs, sorted=True, pad=5000)
+        chunks = genome.chunk(chunk_count, sorted=True, pad=5000)
+
+        print chunks
 
     else:
         with open(args.interval_bed, 'r') as bed:
@@ -1551,6 +1557,7 @@ if __name__ == '__main__':
     parser.add_argument('-b', '--bam', required=True, help='target BAM(s): can be comma-delimited list')
     parser.add_argument('-r', '--bwaref', required=True, help='bwa/samtools indexed reference genome')
     parser.add_argument('-p', '--processes', default=1, help='split work across multiple processes')
+    parser.add_argument('-c', '--chunks', default=1, help='split genome into chunks (default = # processes), helps control memory usage')
     parser.add_argument('-i', '--interval_bed', default=None, help='BED file with intervals to scan')
     parser.add_argument('-D', '--maxD', default=0.8, help='maximum value of KS D statistic for split qualities (default = 0.8)')
     parser.add_argument('--min_minclip', default=3, help='min. shortest clipped bases per cluster (default = 3)')

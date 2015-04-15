@@ -56,10 +56,10 @@ def prepare_ref(fasta, refoutdir='tebreak_refs', makeFAI=True, makeBWA=True, mak
     return ref_fa
 
 
-def lastal_cons(ins, ref_fa, tmpdir='/tmp'):
+def last_alignment(ins, ref_fa, tmpdir='/tmp'):
     tmpfa = tmpdir + '/' + 'tebreak.resolve.%s.fa' % str(uuid4())
     with open(tmpfa, 'w') as fa:
-        # handle multiple distal reads
+        # realign all distal sequences
         if 'be1_dist_seq' in ins['INFO'] and ins['INFO']['be1_dist_seq'] is not None:
             for i, dist_seq in enumerate(ins['INFO']['be1_dist_seq'].split(',')):
                 fa.write('>%s|%s\n%s\n' % (ins['INFO']['be1_obj_uuid'],str(i), dist_seq))
@@ -68,7 +68,16 @@ def lastal_cons(ins, ref_fa, tmpdir='/tmp'):
             for i, dist_seq in enumerate(ins['INFO']['be2_dist_seq'].split(',')):
                 fa.write('>%s|%s\n%s\n' % (ins['INFO']['be2_obj_uuid'], str(i), dist_seq))
 
-    cmd = ['lastal', '-e 20', ref_fa, tmpfa]
+        # realign all unmapped sequences
+        if 'be1_umap_seq' in ins['INFO'] and ins['INFO']['be1_umap_seq'] is not None:
+            for i, umap_seq in enumerate(ins['INFO']['be1_umap_seq'].split(',')):
+                fa.write('>%s|%s\n%s\n' % (ins['INFO']['be1_obj_uuid'],str(i), umap_seq))
+
+        if 'be2_umap_seq' in ins['INFO'] and ins['INFO']['be2_umap_seq'] is not None:
+            for i, umap_seq in enumerate(ins['INFO']['be2_umap_seq'].split(',')):
+                fa.write('>%s|%s\n%s\n' % (ins['INFO']['be2_obj_uuid'], str(i), umap_seq))
+
+    cmd = ['lastal', '-e', '20', ref_fa, tmpfa]
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
 
     la_lines   = []
@@ -370,7 +379,7 @@ def identify_transductions(ins, minmapq=10):
 
 def resolve_insertion(args, ins, inslib_fa):
     ''' add data based on alignments of library to consensus '''
-    last_res = lastal_cons(ins, inslib_fa)
+    last_res = last_alignment(ins, inslib_fa)
     ins = add_insdata(ins, last_res)
 
     if 'best_ins_matchpct' in ins['INFO'] and not args.skip_align:

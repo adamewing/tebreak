@@ -596,7 +596,6 @@ class Insertion:
             return None
 
         else:
-            if len(self.be1.distal_subread()) == 0 or len(self.be2.distal_subread()) == 0: return None
             if len(self.be1.proximal_subread()) == 0 or len(self.be2.proximal_subread()) == 0: return None
 
             junc1 = self.be1.proximal_subread()[be1_use_prox]

@@ -1092,7 +1092,7 @@ def build_sr_clusters(splitreads, searchdist=100): # TODO PARAM
     return clusters
 
 
-def build_dr_clusters(insertion, searchdist=100): # TODO PARAM
+def build_dr_clusters(insertion):
     ''' cluster discordant read ends assocaited with insertion '''
 
     clusters  = []

@@ -22,6 +22,7 @@ from operator import itemgetter
 from collections import Counter
 from collections import OrderedDict as od
 from collections import defaultdict as dd
+from bx.intervals.intersection import Intersecter, Interval # pip install bx-python
 
 
  
@@ -1116,19 +1117,18 @@ def build_dr_clusters(insertion):
     return clusters
  
  
-def build_breakends(cluster, minsr_break, mincs, min_maxclip=10, tmpdir='/tmp'):
+def build_breakends(cluster, filters, tmpdir='/tmp'):
     ''' returns list of breakends from cluster '''
     breakends = []
  
     for breakpos in cluster.all_breakpoints():
         subclusters = (cluster.subcluster_by_breakend([breakpos], direction='left'), cluster.subcluster_by_breakend([breakpos], direction='right'))
         for subcluster in subclusters:
-            if len(subcluster) >= minsr_break:
+            if len(subcluster) >= filters['min_sr_per_break'] and subcluster.max_cliplen() >= filters['min_maxclip']:
                 seq     = subcluster.reads[0].read.seq
                 score   = 1.0
-                maxclip = subcluster.max_cliplen()
 
-                if len(subcluster) > 1:
+                if len(subcluster) > 1 :
                     out_fa     = subcluster.make_fasta(tmpdir)
                     align_fa   = mafft(out_fa, tmpdir=tmpdir)
                     msa        = MSA(align_fa)
@@ -1137,13 +1137,13 @@ def build_breakends(cluster, minsr_break, mincs, min_maxclip=10, tmpdir='/tmp'):
                     os.remove(out_fa)
                     os.remove(align_fa)
  
-                if seq != '' and score >= mincs and min_maxclip <= maxclip:
+                if seq != '' and score >= filters['min_consensus_score']:
                     breakends.append(BreakEnd(cluster.chrom, breakpos, subcluster, seq, score))
  
     return breakends
  
  
-def map_breakends(breakends, db, tmpdir='/tmp', shared_mem=True):
+def map_breakends(breakends, db, tmpdir='/tmp'):
     ''' remap consensus sequences stored in BreakEnd objects '''
     tmp_fa = tmpdir + '/' + '.'.join(('tebreak', str(uuid4()), 'be.fa'))
     breakdict = {} # for faster lookup
@@ -1157,9 +1157,11 @@ def map_breakends(breakends, db, tmpdir='/tmp', shared_mem=True):
  
     tmp_sam = '.'.join(tmp_fa.split('.')[:-1]) + '.sam'
 
+    FNULL = open(os.devnull, 'w')
+
     with open(tmp_sam, 'w') as out:
         sam_cmd  = ['bwa', 'mem', '-k', '10', '-w', '500', '-M', '-v', '0', db, tmp_fa]
-        p = subprocess.Popen(sam_cmd, stdout=subprocess.PIPE)
+        p = subprocess.Popen(sam_cmd, stdout=subprocess.PIPE, stderr=FNULL)
         for line in p.stdout:
             out.write(line)
  
@@ -1176,10 +1178,12 @@ def map_breakends(breakends, db, tmpdir='/tmp', shared_mem=True):
  
 def score_breakend_pair(be1, be2, k=2.5, s=3.0):
     ''' assign a score to a breakend, higher is "better" '''
-    prox1 = be1.proximal_subread()[0]
-    prox2 = be2.proximal_subread()[0]
- 
+    prox1 = be1.proximal_subread()
+    prox2 = be2.proximal_subread()
+
     if prox1 and prox2:
+        prox1 = prox1[0]
+        prox2 = prox2[0]
         overlap = abs(min(0, ref_dist(prox1, prox2))) # overlap = negative distance between proximal read mappings i.e. potential TSD
         weighted_overlap = ss.gamma(k, scale=s).pdf(overlap) * float(overlap)**2 # TSD length distribution taken into account
         distance_penalty = 0
@@ -1190,7 +1194,7 @@ def score_breakend_pair(be1, be2, k=2.5, s=3.0):
         score = weighted_overlap - distance_penalty + len(be1) + len(be2)
         return score
  
-    return 0
+    return None
  
  
 def checkref(ref_fasta):
@@ -1204,16 +1208,32 @@ def build_insertions(breakends, maxdist=100):
     insertions = []
     be_dict = dict([(be.uuid, be) for be in breakends])
 
+    be_itree = Intersecter() # interval tree
+    be_idict = {} # interval dictionary 'start-end' --> uuid
+
+    for be in breakends:
+        be_itree.add_interval(Interval(be.breakpos-maxdist, be.breakpos+maxdist))
+        be_idict['%d-%d' % (be.breakpos-maxdist, be.breakpos+maxdist)] = be.uuid
+
     pair_scores = []
 
+    checked_pairs = {}
+
     for be1 in breakends:
-        for be2 in breakends:
-            if be1.proximal_subread() and be2.proximal_subread():
-                dist = abs(ref_dist(be1.proximal_subread()[0], be2.proximal_subread()[0]))
-                if be1.uuid != be2.uuid and dist <= maxdist: # no self-comparisons, limit distance for sanity
+        for be2_coords in be_itree.find(be1.breakpos, be1.breakpos+1):
+            be2_uuid = be_idict['%d-%d' % (be2_coords.start, be2_coords.end)]
+            be2 = be_dict[be2_uuid]
+
+            pair_name = '-'.join(sorted((be1.uuid, be2.uuid)))
+
+            if be1.uuid != be2.uuid and pair_name not in checked_pairs:
+                if abs(be1.breakpos-be2.breakpos) <= maxdist:
                     pair_scores.append((be1.uuid, be2.uuid, score_breakend_pair(be1, be2)))
 
+            checked_pairs[pair_name] = True
+
     # sort breakends by score, descending
+    pair_scores = [score for score in pair_scores if score[2] is not None]
     pair_scores.sort(key=itemgetter(2),reverse=True)
 
     used = {} # each breakend can only be used once
@@ -1247,8 +1267,13 @@ def minia(fq, tmpdir='/tmp'):
         fq = oldcwd + '/' + fq
 
     ctgbase = tmpdir + '/tebreak.minia.%s' % str(uuid4())
+    
     cmd = ['minia', '-in', fq, '-abundance-min', '1', '-no-length-cutoff', '-verbose', '0', '-out', ctgbase]
-    subprocess.call(cmd)
+
+    FNULL = open(os.devnull, 'w')
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=FNULL)
+    for line in p.stdout: pass
+
     os.remove(ctgbase + '.h5')
 
     os.chdir(oldcwd)
@@ -1313,7 +1338,7 @@ def postprocess_insertions(insertions, bwaref, outpath, bams, tmpdir='/tmp'):
             sys.stderr.write('***Assembly failed!: %s:%d\n' % (ins.be1.chrom, ins.be1.breakpos))
 
         else:
-            sys.stderr.write('Assembled: %s:%d, filename: %s\n' % (ins.be1.chrom, ins.be1.breakpos, support_asm))
+            #sys.stderr.write('Assembled: %s:%d, filename: %s\n' % (ins.be1.chrom, ins.be1.breakpos, support_asm))
             ins.improve_consensus(support_asm, bwaref)
 
     # collect altered breakends
@@ -1358,14 +1383,16 @@ def run_chunk(args, chrom, start, end):
 
     try:
         bams = [pysam.AlignmentFile(bam, 'rb') for bam in args.bam.split(',')]
-        minsr_break = int(args.min_sr_per_break)
-        mincs = float(args.min_consensus_score)
-        maxD  = float(args.maxD)
 
         start = int(start)
         end   = int(end)
 
         filters = {
+            'min_maxclip':           int(args.min_maxclip),
+            'min_minclip':           int(args.min_minclip),
+            'min_sr_per_break':      int(args.min_sr_per_break),
+            'min_consensus_score':   int(args.min_consensus_score),
+            'max_D_score':           float(args.maxD),
             'max_ins_reads':         int(args.max_ins_reads),
             'min_split_reads':       int(args.min_split_reads),
             'min_discordant_reads':  int(args.min_discordant_reads),
@@ -1380,22 +1407,25 @@ def run_chunk(args, chrom, start, end):
 
         logger.debug('Processing chunk: %s ...' % chunkname)
         logger.debug('Chunk %s: Parsing split reads from bam(s): %s ...' % (chunkname, args.bam))
-        sr = fetch_clipped_reads(bams, chrom, start, end, minclip=int(args.min_minclip), maxD=maxD)
+        sr = fetch_clipped_reads(bams, chrom, start, end, minclip=filters['min_minclip'], maxD=filters['max_D_score'])
         sr.sort()
 
         logger.debug('Chunk %s: Building clusters from %d split reads ...' % (chunkname, len(sr)))
-        clusters = build_sr_clusters(sr) # possible cull on SR params to reduce clustering time?
+        clusters = build_sr_clusters(sr)
      
+        logger.debug('Chunk %s: Building breakends...' % chunkname)
         breakends = []
         for cluster in clusters:
-            breakends += build_breakends(cluster, minsr_break, mincs, min_maxclip=int(args.min_maxclip), tmpdir=args.tmpdir)
+            breakends += build_breakends(cluster, filters, tmpdir=args.tmpdir)
      
         logger.debug('Chunk %s: Mapping %d breakends ...' % (chunkname, len(breakends)))
         if len(breakends) > 0:
             breakends = map_breakends(breakends, args.bwaref, tmpdir=args.tmpdir)
          
-            insertions = build_insertions(breakends)
-            logger.debug('Chunk %s: Processing %d insertions ...' % (chunkname, len(insertions)))
+            logger.debug('Chunk %s: Building insertions...' % chunkname)
+
+            insertions = build_insertions(breakends) #####
+            logger.debug('Chunk %s: Processing and filtering %d insertions ...' % (chunkname, len(insertions)))
 
             insertions = [ins for ins in insertions if len(ins.be1.proximal_subread()) > 0] # remove bogus insertions
 
@@ -1410,7 +1440,7 @@ def run_chunk(args, chrom, start, end):
                 ins.unmapped_fastq(args.fasta_out_path)
                 ins.consensus_fasta(args.fasta_out_path)
 
-            logger.debug('Chunk %s: Postprocessing, trying to improve consensus breakend sequences ...' % chunkname)
+            logger.debug('Chunk %s: Postprocessing %d insertions, trying to improve consensus breakend sequences ...' % (chunkname, len(insertions)))
             processed_insertions  = postprocess_insertions(insertions, args.bwaref, args.fasta_out_path, bams, tmpdir=args.tmpdir)
 
             logger.debug('Chunk %s: Summarising insertions ...' % chunkname)
@@ -1539,9 +1569,9 @@ def main(args):
     with open(pickoutfn, 'w') as pickout:
         pickle.dump(insertions, pickout)
 
-    sys.stderr.write("unloading bwa index %s from shared memory ...\n" % args.bwaref)
-    p = subprocess.Popen(['bwa', 'shm', '-d'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    for line in p.stdout: pass # wait for bwa to load
+    # sys.stderr.write("unloading bwa index %s from shared memory ...\n" % args.bwaref)
+    # p = subprocess.Popen(['bwa', 'shm', '-d'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    # for line in p.stdout: pass # wait for bwa to load
 
     logger.debug('Pickled to %s' % pickoutfn)
 

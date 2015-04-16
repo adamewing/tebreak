@@ -22,53 +22,54 @@ logger = logging.getLogger(__name__)
 
 class TEIns:
     def __init__(self, ins):
-        self.ins = ins
+        self.ins = ins['INFO']
         self.out = od()
         self.end3 = None
         self.end5 = None
 
         self._fill_out()
 
-
     def _fill_out(self):
-        self.out['Chromosome'] = self.ins['INFO']['chrom']
-        self.out['Left_Junction'] = min(self.junctions().values())
-        self.out['Right_Junction'] = max(self.junctions().values())
+        self.out['Chromosome']     = self.ins['chrom']
+        self.out['Left_Junction']  = min(self.junctions())
+        self.out['Right_Junction'] = max(self.junctions())
         self.assign35ends()
-
+        self.elt_coords()
 
     def assign35ends(self):
         self.out['3_Prime_End'] = 'NA'
         self.out['5_Prime_End'] = 'NA'
 
-        if 'be1_is_3prime' in self.ins['INFO']:
-            if self.ins['INFO']['be1_is_3prime']:
-                self.out['3_Prime_End'] = self.ins['INFO']['be1_breakpos']
-                self.out['5_Prime_End'] = self.ins['INFO']['be2_breakpos']
+        if 'be1_is_3prime' in self.ins:
+            if self.ins['be1_is_3prime']:
+                self.out['3_Prime_End'] = self.ins['be1_breakpos']
+                self.out['5_Prime_End'] = self.ins['be2_breakpos']
                 self.end3 = 'be1'
                 self.end5 = 'be2'
             else:
-                self.out['3_Prime_End'] = self.ins['INFO']['be2_breakpos']
-                self.out['5_Prime_End'] = self.ins['INFO']['be1_breakpos']
+                self.out['3_Prime_End'] = self.ins['be2_breakpos']
+                self.out['5_Prime_End'] = self.ins['be1_breakpos']
                 self.end3 = 'be2'
                 self.end5 = 'be1'
 
-
     def elt_coords(self):
-        assert None not in (self.end3, self.end5), 'need to run self.assign35ends() first'
+        self.out['TE_Align_Start'] = 'NA'
+        self.out['TE_Align_End']   = 'NA'
 
-
+        if None not in (self.end3, self.end5):
+            if self.end3 + '_bestmatch' in self.ins: self.out['TE_Align_End']   = self.ins[self.end3 + '_bestmatch'].target_end
+            if self.end5 + '_bestmatch' in self.ins: self.out['TE_Align_Start'] = self.ins[self.end5 + '_bestmatch'].target_start
 
     def junctions(self):
-        j = {}
-        if 'be1_breakpos' in self.ins['INFO']: j['be1'] = self.ins['INFO']['be1_breakpos']
-        if 'be2_breakpos' in self.ins['INFO']: j['be2'] = self.ins['INFO']['be2_breakpos']
+        j = []
+        if 'be1_breakpos' in self.ins: j.append(self.ins['be1_breakpos'])
+        if 'be2_breakpos' in self.ins: j.append(self.ins['be2_breakpos'])
         return j
 
     def pass_filter(self):
         passed = True
-        if 'best_ins_matchpct' in self.ins['INFO']:
-            if self.ins['INFO']['best_ins_matchpct'] < 0.9: passed = False
+        if 'best_ins_matchpct' in self.ins:
+            if self.ins['best_ins_matchpct'] < 0.9: passed = False
         else: passed = False
 
         return passed

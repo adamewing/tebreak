@@ -219,6 +219,7 @@ class LASTResult:
         self.target_id      = res[1].split()[1]
         self.target_start   = int(res[1].split()[2])
         self.target_alnsize = int(res[1].split()[3])
+        self.target_end     = self.target_start + self.target_alnsize
         self.target_strand  = res[1].split()[4]
         self.target_seqsize = int(res[1].split()[5])
         self.target_align   = res[1].split()[6]
@@ -231,6 +232,7 @@ class LASTResult:
 
         self.query_start   = int(res[2].split()[2])
         self.query_alnsize = int(res[2].split()[3])
+        self.query_end     = self.query_start + self.query_alnsize
         self.query_strand  = res[2].split()[4]
         self.query_seqsize = int(res[2].split()[5])
         self.query_align   = res[2].split()[6]
@@ -1071,7 +1073,7 @@ def load_falib(infa):
     return seqdict
  
 
-def build_sr_clusters(splitreads, searchdist=100): # TODO PARAM
+def build_sr_clusters(splitreads, searchdist=100): # TODO PARAM, 
     ''' cluster SplitRead objects into Cluster objects and return a list of them '''
     clusters  = []
  
@@ -1207,7 +1209,7 @@ def build_insertions(breakends, maxdist=100):
     for be1 in breakends:
         for be2 in breakends:
             if be1.proximal_subread() and be2.proximal_subread():
-                dist = ref_dist(be1.proximal_subread()[0], be2.proximal_subread()[0])
+                dist = abs(ref_dist(be1.proximal_subread()[0], be2.proximal_subread()[0]))
                 if be1.uuid != be2.uuid and dist <= maxdist: # no self-comparisons, limit distance for sanity
                     pair_scores.append((be1.uuid, be2.uuid, score_breakend_pair(be1, be2)))
 
@@ -1382,7 +1384,7 @@ def run_chunk(args, chrom, start, end):
         sr.sort()
 
         logger.debug('Chunk %s: Building clusters from %d split reads ...' % (chunkname, len(sr)))
-        clusters = build_sr_clusters(sr)
+        clusters = build_sr_clusters(sr) # possible cull on SR params to reduce clustering time?
      
         breakends = []
         for cluster in clusters:

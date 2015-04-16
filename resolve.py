@@ -10,8 +10,74 @@ import pysam
 import subprocess
 
 from uuid import uuid4
+from collections import OrderedDict as od
 
 logger = logging.getLogger(__name__)
+
+
+#######################################
+## Classes                           ##
+#######################################
+
+
+class TEIns:
+    def __init__(self, ins):
+        self.ins = ins
+        self.out = od()
+        self.end3 = None
+        self.end5 = None
+
+        self._fill_out()
+
+
+    def _fill_out(self):
+        self.out['Chromosome'] = self.ins['INFO']['chrom']
+        self.out['Left_Junction'] = min(self.junctions().values())
+        self.out['Right_Junction'] = max(self.junctions().values())
+        self.assign35ends()
+
+
+    def assign35ends(self):
+        self.out['3_Prime_End'] = 'NA'
+        self.out['5_Prime_End'] = 'NA'
+
+        if 'be1_is_3prime' in self.ins['INFO']:
+            if self.ins['INFO']['be1_is_3prime']:
+                self.out['3_Prime_End'] = self.ins['INFO']['be1_breakpos']
+                self.out['5_Prime_End'] = self.ins['INFO']['be2_breakpos']
+                self.end3 = 'be1'
+                self.end5 = 'be2'
+            else:
+                self.out['3_Prime_End'] = self.ins['INFO']['be2_breakpos']
+                self.out['5_Prime_End'] = self.ins['INFO']['be1_breakpos']
+                self.end3 = 'be2'
+                self.end5 = 'be1'
+
+
+    def elt_coords(self):
+        assert None not in (self.end3, self.end5), 'need to run self.assign35ends() first'
+
+
+
+    def junctions(self):
+        j = {}
+        if 'be1_breakpos' in self.ins['INFO']: j['be1'] = self.ins['INFO']['be1_breakpos']
+        if 'be2_breakpos' in self.ins['INFO']: j['be2'] = self.ins['INFO']['be2_breakpos']
+        return j
+
+    def pass_filter(self):
+        passed = True
+        if 'best_ins_matchpct' in self.ins['INFO']:
+            if self.ins['INFO']['best_ins_matchpct'] < 0.9: passed = False
+        else: passed = False
+
+        return passed
+
+    def header(self):
+        return '\t'.join(self.out.keys())
+
+    def __str__(self):
+        return '\t'.join(map(str, self.out.values()))
 
 
 #######################################
@@ -77,7 +143,8 @@ def last_alignment(ins, ref_fa, tmpdir='/tmp'):
             for i, umap_seq in enumerate(ins['INFO']['be2_umap_seq'].split(',')):
                 fa.write('>%s|%s\n%s\n' % (ins['INFO']['be2_obj_uuid'], str(i), umap_seq))
 
-    cmd = ['lastal', '-e', '20', ref_fa, tmpfa]
+    # increasing -m accounts for poly-A tails
+    cmd = ['lastal', '-e', '20', '-m', '100', ref_fa, tmpfa]
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
 
     la_lines   = []
@@ -97,24 +164,43 @@ def last_alignment(ins, ref_fa, tmpdir='/tmp'):
     return la_results
 
 
+def poly_A_frac(seq):
+    ''' home much of the sequence is A '''
+    if seq is None: return 0.0
+
+    f = []
+    for b in ('A', 'T'):
+        f.append(len([base for base in list(seq.upper()) if base == b]))
+
+    return float(max(f)) / float(len(seq))
+
+
 def add_insdata(ins, last_res):
     be1_bestmatch = best_match(last_res, ins['INFO']['be1_obj_uuid'])
     be2_bestmatch = None
     if 'be2_obj_uuid' in ins['INFO'] and ins['INFO']['be2_obj_uuid'] != ins['INFO']['be1_obj_uuid']:
         be2_bestmatch = best_match(last_res, ins['INFO']['be2_obj_uuid'])
 
+    better_match_maxdiff = 5
+
     if None not in (be1_bestmatch, be2_bestmatch):
         if be1_bestmatch.target_id != be2_bestmatch.target_id:
             if be1_bestmatch.score > be2_bestmatch.score:
                 # try to get be2 target to match be1 target
+                if max(poly_A_frac(ins['INFO']['be2_dist_seq']), poly_A_frac(ins['INFO']['be2_umap_seq'])) > 0.75:
+                    better_match_maxdiff = 20 # if seq is poly_A make it easy to match
+
                 newmatch = best_match(last_res, ins['INFO']['be2_obj_uuid'], req_target=be1_bestmatch.target_id)
-                if newmatch is not None and be2_bestmatch.score - newmatch.score < 5:
+                if newmatch is not None and be2_bestmatch.score - newmatch.score < better_match_maxdiff:
                     be2_bestmatch = newmatch
 
             else:
                 # try to get be1 target to match be2 target
+                if max(poly_A_frac(ins['INFO']['be1_dist_seq']), poly_A_frac(ins['INFO']['be1_umap_seq'])) > 0.75:
+                    better_match_maxdiff = 20
+
                 newmatch = best_match(last_res, ins['INFO']['be1_obj_uuid'], req_target=be2_bestmatch.target_id)
-                if newmatch is not None and be1_bestmatch.score - newmatch.score < 5:
+                if newmatch is not None and be1_bestmatch.score - newmatch.score < better_match_maxdiff:
                     be1_bestmatch = newmatch
 
     if be1_bestmatch is not None: ins['INFO']['be1_bestmatch'] = be1_bestmatch
@@ -347,7 +433,8 @@ def identify_transductions(ins, minmapq=10):
             tr_seqs = []
             tr_locs = [] # chrom, start, end, 3p or 5p / unmap
 
-            num_segs = len(ins['INFO'][be+'_dist_seq'].split(','))
+            num_segs = 0
+            if ins['INFO'][be+'_dist_seq'] is not None: num_segs = len(ins['INFO'][be+'_dist_seq'].split(','))
             if num_segs > 1:
                 for distnum in range(num_segs):
                     seg_mapq = int(ins['INFO'][be+'_dist_mpq'].split(',')[distnum])
@@ -391,7 +478,7 @@ def resolve_insertion(args, ins, inslib_fa):
                 ins['INFO']['support_bam_file'] = tmp_bam
                 ins['INFO']['mapped_target'] = bam.mapped
 
-        ins = identify_transductions(ins)
+    if 'best_ins_matchpct' in ins['INFO']: ins = identify_transductions(ins)
 
     return ins
 
@@ -417,7 +504,11 @@ def main(args):
     for ins in insertions:
         results.append(resolve_insertion(args, ins, inslib_fa))
 
-    tebreak.text_summary(results) # debug
+    tebreak.text_summary(results, outfile=args.detail_out) # debug
+
+    for ins in insertions:
+        te_ins = TEIns(ins)
+        if te_ins.pass_filter(): print te_ins
 
 
 if __name__ == '__main__':
@@ -433,5 +524,6 @@ if __name__ == '__main__':
     parser.add_argument('--tmpdir', default='/tmp')
     parser.add_argument('--skip_align', action='store_true', default=False)
     parser.add_argument('-v', '--verbose', action='store_true', default=False)
+    parser.add_argument('--detail_out', default='tebreak.out', help='file to write detailed output')
     args = parser.parse_args()
     main(args)

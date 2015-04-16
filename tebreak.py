@@ -1470,19 +1470,15 @@ def prefer_insertion(ins1, ins2):
     return False
 
 
-def text_summary(insertions):
-    for ins in insertions:
-        print '#BEGIN'
-        for label, value in ins['INFO'].iteritems():
-            print '%s: %s' % (label, str(value))
-        print '#END'
+def text_summary(insertions, outfile='tebreak.out'):
+    with open(outfile, 'w') as out:
+        for ins in insertions:
+            out.write('#BEGIN\n')
+            for label, value in ins['INFO'].iteritems():
+                out.write('%s: %s\n' % (label, str(value)))
+            out.write('#END\n')
 
-        # some test filters...
-        bestmatch = ins['INFO']['be1_avgmatch']
-        if 'be2_avgmatch' in ins['INFO']:
-            bestmatch = max(ins['INFO']['be1_avgmatch'], ins['INFO']['be2_avgmatch'])
-
-        print "\n"
+            out.write('\n')
 
  
 def main(args):
@@ -1573,7 +1569,8 @@ if __name__ == '__main__':
     parser.add_argument('--restrict_to_readgroup', default=None)
 
     parser.add_argument('--tmpdir', default='/tmp', help='temporary directory (default = /tmp)')
-    parser.add_argument('-o', '--fasta_out_path', default='tebreak_seqdata', help='path for FASTA output')
+    parser.add_argument('--fasta_out_path', default='tebreak_seqdata', help='path for FASTA output')
+    parser.add_argument('--detail_out', default='tebreak.out', help='file to write detailed output')
  
     parser.add_argument('-v', '--verbose', action='store_true')
  

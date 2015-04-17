@@ -1209,11 +1209,9 @@ def build_insertions(breakends, maxdist=100):
     be_dict = dict([(be.uuid, be) for be in breakends])
 
     be_itree = Intersecter() # interval tree
-    be_idict = {} # interval dictionary 'start-end' --> uuid
 
     for be in breakends:
-        be_itree.add_interval(Interval(be.breakpos-maxdist, be.breakpos+maxdist))
-        be_idict['%d-%d' % (be.breakpos-maxdist, be.breakpos+maxdist)] = be.uuid
+        be_itree.add_interval(Interval(be.breakpos-maxdist, be.breakpos+maxdist, value=be.uuid))
 
     pair_scores = []
 
@@ -1221,8 +1219,7 @@ def build_insertions(breakends, maxdist=100):
 
     for be1 in breakends:
         for be2_coords in be_itree.find(be1.breakpos, be1.breakpos+1):
-            be2_uuid = be_idict['%d-%d' % (be2_coords.start, be2_coords.end)]
-            be2 = be_dict[be2_uuid]
+            be2 = be_dict[be2_coords.value]
 
             pair_name = '-'.join(sorted((be1.uuid, be2.uuid)))
 

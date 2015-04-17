@@ -13,6 +13,8 @@ import multiprocessing as mp
 
 from uuid import uuid4
 from collections import OrderedDict as od
+from collections import defaultdict as dd
+from bx.intervals.intersection import Intersecter, Interval # pip install bx-python
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +38,7 @@ class TEIns:
         self.out['Left_Junction']  = min(self.junctions())
         self.out['Right_Junction'] = max(self.junctions())
         self.assign35ends()
+        self.te_family()
         self.elt_coords()
         self.out['TE_Match_Pct'] = self.be_avg_pctmatch()
 
@@ -54,6 +57,20 @@ class TEIns:
                 self.out['5_Prime_End'] = self.ins['be1_breakpos']
                 self.end3 = 'be2'
                 self.end5 = 'be1'
+
+    def te_family(self):
+        ''' inslib input should have headers superfamily:subfamily e.g. L1:L1Ta or Alu:AluYa5 '''
+        self.out['Superfamily'] = []
+        self.out['Subfamily']   = []
+
+        for be in ('be1', 'be2'):
+            if be + '_bestmatch' in self.ins:
+                superfam, subfam = self.ins[be + '_bestmatch'].target_id.split(':')
+                self.out['Superfamily'].append(superfam)
+                self.out['Subfamily'].append(subfam)
+
+        self.out['Superfamily'] = ','.join(list(set(self.out['Superfamily'])))
+        self.out['Subfamily']   = ','.join(list(set(self.out['Subfamily'])))
 
     def elt_coords(self):
         self.out['TE_Align_Start'] = 'NA'
@@ -89,7 +106,18 @@ class TEIns:
 
         return not found_non_pA
 
-    def pass_filter(self):
+    def genome_location_filter(self, forest):
+        if self.ins['chrom'] in forest:
+            hits = forest[self.ins['chrom']].find(self.out['Left_Junction'], self.out['Right_Junction']+1)
+            for hit in hits:
+                superfamily = hit.query_id.split(':')[0]
+                if superfamily in self.out['Superfamily'].split(','):
+                    return True
+
+        return False
+
+
+    def pass_filter(self, forest):
         passed = True
         if 'best_ins_matchpct' in self.ins:
             if self.ins['best_ins_matchpct'] < 0.9: passed = False
@@ -97,6 +125,9 @@ class TEIns:
         else: passed = False
 
         if len(self.ins['be1_prox_seq']) < 20: passed = False
+
+        if forest is not None:
+            if self.genome_location_filter(forest): passed = False
 
         return passed
 
@@ -175,21 +206,44 @@ def last_alignment(ins, ref_fa, tmpdir='/tmp'):
     cmd = ['lastal', '-e', '20', '-m', '100', ref_fa, tmpfa]
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
 
-    la_lines   = []
-    la_results = []
+    maf_lines   = []
+    maf_results = []
 
     for line in p.stdout:
         if not line.startswith('#'):
             if line.strip() != '':
-                la_lines.append(line.strip())
+                maf_lines.append(line.strip())
 
             else:
-                la_results.append(tebreak.LASTResult(la_lines))
-                la_lines = []
+                maf_results.append(tebreak.LASTResult(maf_lines))
+                maf_lines = []
 
     os.remove(tmpfa)
 
-    return la_results
+    return maf_results
+
+
+def last_interval_forest(maf_file, padding=100):
+    ''' build dictionary of interval trees; value=LASTResult '''
+    forest = dd(Intersecter)
+
+    maf_lines   = []
+    maf_results = []
+
+    with open(maf_file, 'r') as maf:
+        for line in maf:
+            if not line.startswith('#'):
+                if line.strip() != '':
+                    maf_lines.append(line.strip())
+
+                else:
+                    maf_results.append(tebreak.LASTResult(maf_lines))
+                    maf_lines = []
+
+    for res in maf_results:
+        forest[res.target_id].add_interval(Interval(res.target_start, res.target_end, value=res))
+
+    return forest
 
 
 def poly_A_frac(seq):
@@ -397,6 +451,23 @@ def make_tmp_ref(ins, ref_fa, tmpdir='/tmp'):
     return prepare_ref(tmp_ref, refoutdir=tmpdir, makeLAST=False)
 
 
+def make_inslib_mask(ref_fa, lastdb, refoutdir):
+    outmaf = refoutdir + '/' + '.'.join(os.path.basename(ref_fa).split('.')[:-1]) + '.last.maf'
+
+    if os.path.exists(outmaf):
+        sys.stderr.write('inslib mask MAF already exists, using %s\n' % outmaf)
+        return outmaf
+
+    cmd = ['lastal', '-e', '100', lastdb, ref_fa]
+
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+    with open(outmaf, 'w') as maf:
+        for line in p:
+            maf.write(line)
+
+    return outfn
+
+
 def remap_discordant(ins, inslib_fa=None, useref=None, tmpdir='/tmp'):
     ''' will build temporary ref from inslib_fasta unless useref is specified '''
     if len(ins['READSTORE']) == 0:
@@ -528,7 +599,16 @@ def main(args):
 
     inslib_fa = prepare_ref(args.inslib_fasta, refoutdir=args.refoutdir, makeFAI=False, makeBWA=False)
 
-    # parallelise insertions[]
+    forest = None
+    # set up reference mask MAF if available
+    if args.filter_ref_maf is not None:
+        logger.debug('using MAF as genome reference filter: %s' % args.filter_ref_maf)
+        forest = last_interval_forest(args.filter_ref_maf)
+
+    elif args.filter_ref_last_db is not None:
+        logger.debug('building genome reference filter MAF from: %s vs %s' %(args.inslib_fasta, args.filter_ref_last_db))
+        assert os.path.exists(args.filter_ref_last_db + '.suf'), 'reference %s not indexed with lastdb' % args.filter_ref_last_db
+        filter_ref_maf = make_inslib_mask(args.inslib_fasta, args.filter_ref_last_db, args.refoutdir)
 
     results = []
 
@@ -544,7 +624,7 @@ def main(args):
 
     for ins in insertions:
         te_ins = TEIns(ins)
-        if te_ins.pass_filter(): print te_ins
+        if te_ins.pass_filter(forest): print te_ins
 
 
 if __name__ == '__main__':
@@ -556,6 +636,10 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--pickle', required=True)
     parser.add_argument('-t', '--processes', default=1, help='split work across multiple processes')
     parser.add_argument('-i', '--inslib_fasta', required=True, help='reference for insertions (not genome)')
+
+    parser.add_argument('-d', '--filter_ref_last_db', default=None, help='reference LAST db')
+    parser.add_argument('-m', '--filter_ref_maf', default=None, help='MAF of -i/--inslib_fasta lastal vs. -d/--filter_ref_last_db')
+
     parser.add_argument('--refoutdir', default='tebreak_refs')
 
     parser.add_argument('--tmpdir', default='/tmp')

@@ -8,9 +8,11 @@ Contact: adam.ewing@mater.uq.edu.au
 
 |what     | where | why |
 |---------|-------|-----|
-|bwa      | http://bio-bwa.sourceforge.net/  | sequence alignments |
+|bwa      | http://bio-bwa.sourceforge.net/  | bulk sequence alignments |
 |samtools | http://samtools.sourceforge.net/ | BAM manipulation |
-|pysam    | https://github.com/pysam-developers/pysam | parsing SAM/BAM formatted alignments |
-|MAFFT    | http://mafft.cbrc.jp/alignment/software/ | needed if using the consensus sequence option |
+|LAST     | http://last.cbrc.jp/ | fine-scale realignment |
+|MAFFT    | http://mafft.cbrc.jp/alignment/software/ | initial consensus sequences option |
+|minia    | http://minia.genouest.org/ | https://github.com/adamewing/tebreak |
+
 
 (latest versions unless otherwise specified)

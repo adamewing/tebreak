@@ -66,10 +66,23 @@ class TEIns:
         if 'be2_breakpos' in self.ins: j.append(self.ins['be2_breakpos'])
         return j
 
+    def polyA_filter(self):
+        ''' return true if only supported by poly-A matches '''
+        found_non_pA = False
+
+        if 'be1_bestmatch' in self.ins:
+            if poly_A_frac(self.ins['be1_bestmatch'].target_align) < 0.95: found_non_pA = True
+
+        if 'be2_bestmatch' in self.ins:
+            if poly_A_frac(self.ins['be2_bestmatch'].target_align) < 0.95: found_non_pA = True
+
+        return not found_non_pA
+
     def pass_filter(self):
         passed = True
         if 'best_ins_matchpct' in self.ins:
             if self.ins['best_ins_matchpct'] < 0.9: passed = False
+            if self.polyA_filter(): passed = False
         else: passed = False
 
         return passed

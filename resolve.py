@@ -37,8 +37,7 @@ class TEIns:
         self.out['Right_Junction'] = max(self.junctions())
         self.assign35ends()
         self.elt_coords()
-        self.out['TE_Match_Pct'] = 0.0
-        if 'best_ins_matchpct' in self.ins: self.out['TE_Match_Pct'] = self.ins['best_ins_matchpct']
+        self.out['TE_Match_Pct'] = self.be_avg_pctmatch()
 
     def assign35ends(self):
         self.out['3_Prime_End'] = 'NA'
@@ -69,6 +68,14 @@ class TEIns:
         if 'be1_breakpos' in self.ins: j.append(self.ins['be1_breakpos'])
         if 'be2_breakpos' in self.ins: j.append(self.ins['be2_breakpos'])
         return j
+
+    def be_avg_pctmatch(self):
+        m = []
+        if 'be1_bestmatch' in self.ins: m.append(self.ins['be1_bestmatch'].pct_match())
+        if 'be2_bestmatch' in self.ins: m.append(self.ins['be2_bestmatch'].pct_match())
+        if len(m) == 0: return 0.0
+        return float(sum(m)) / float(len(m))
+
 
     def polyA_filter(self):
         ''' return true if only supported by poly-A matches '''

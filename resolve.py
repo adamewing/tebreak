@@ -37,6 +37,8 @@ class TEIns:
         self.out['Right_Junction'] = max(self.junctions())
         self.assign35ends()
         self.elt_coords()
+        self.out['TE_Match_Pct'] = 0.0
+        if 'best_ins_matchpct' in self.ins: self.out['TE_Match_Pct'] = self.ins['best_ins_matchpct']
 
     def assign35ends(self):
         self.out['3_Prime_End'] = 'NA'

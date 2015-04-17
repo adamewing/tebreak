@@ -9,6 +9,8 @@ import tebreak
 import pysam
 import subprocess
 
+import multiprocessing as mp
+
 from uuid import uuid4
 from collections import OrderedDict as od
 
@@ -85,6 +87,8 @@ class TEIns:
             if self.polyA_filter(): passed = False
         else: passed = False
 
+        if len(self.ins['be1_prox_seq']) < 20: passed = False
+
         return passed
 
     def header(self):
@@ -125,7 +129,8 @@ def prepare_ref(fasta, refoutdir='tebreak_refs', makeFAI=True, makeBWA=True, mak
 
     if not os.path.exists(ref_fa + '.bwt') and makeBWA:
         logger.debug('Create BWA db for %s ...' % ref_fa)
-        subprocess.call(['bwa', 'index', ref_fa])
+        p = subprocess.Popen(['bwa', 'index', ref_fa], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        for line in p.stdout: pass
         assert os.path.exists(ref_fa + '.bwt'), 'could not bwa index %s' % ref_fa
 
     if not os.path.exists(ref_fa + '.tis') and makeLAST:
@@ -411,8 +416,10 @@ def remap_discordant(ins, inslib_fa=None, useref=None, tmpdir='/tmp'):
     srt_cmd = ['samtools', 'sort', tmp_bam, tmp_srt]
     idx_cmd = ['samtools', 'index', tmp_bam]
 
+    FNULL = open(os.devnull, 'w')
+
     with open(tmp_sam, 'w') as sam:
-        p = subprocess.Popen(sam_cmd, stdout=subprocess.PIPE)
+        p = subprocess.Popen(sam_cmd, stdout=subprocess.PIPE, stderr=FNULL)
         for line in p.stdout:
             if not line.startswith('@'):
                 if bin(int(line.split('\t')[1]) & 4) != bin(4): # not unmapped
@@ -420,7 +427,8 @@ def remap_discordant(ins, inslib_fa=None, useref=None, tmpdir='/tmp'):
             else:
                 sam.write(line)
 
-    subprocess.call(bam_cmd)
+    p = subprocess.Popen(bam_cmd, stdout=subprocess.PIPE, stderr=FNULL)
+    for line in p.stdout: pass
     
     subprocess.call(srt_cmd)
     shutil.move(tmp_srt+'.bam', tmp_bam)
@@ -515,10 +523,15 @@ def main(args):
 
     results = []
 
-    for ins in insertions:
-        results.append(resolve_insertion(args, ins, inslib_fa))
+    pool = mp.Pool(processes=int(args.processes))
 
-    tebreak.text_summary(results, outfile=args.detail_out) # debug
+    for ins in insertions:
+        res = pool.apply_async(resolve_insertion, [args, ins, inslib_fa])
+        results.append(res)
+
+    insertions = [res.get() for res in results]
+
+    tebreak.text_summary(insertions, outfile=args.detail_out) # debug
 
     for ins in insertions:
         te_ins = TEIns(ins)
@@ -532,6 +545,7 @@ if __name__ == '__main__':
  
     parser = argparse.ArgumentParser(description='Resolve TE insertions from TEbreak data')
     parser.add_argument('-p', '--pickle', required=True)
+    parser.add_argument('-t', '--processes', default=1, help='split work across multiple processes')
     parser.add_argument('-i', '--inslib_fasta', required=True, help='reference for insertions (not genome)')
     parser.add_argument('--refoutdir', default='tebreak_refs')
 

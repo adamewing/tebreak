@@ -110,7 +110,7 @@ class TEIns:
         if self.ins['chrom'] in forest:
             hits = forest[self.ins['chrom']].find(self.out['Left_Junction'], self.out['Right_Junction']+1)
             for hit in hits:
-                superfamily = hit.query_id.split(':')[0]
+                superfamily = hit.value.query_id.split(':')[0]
                 if superfamily in self.out['Superfamily'].split(','):
                     return True
 
@@ -241,7 +241,7 @@ def last_interval_forest(maf_file, padding=100):
                     maf_lines = []
 
     for res in maf_results:
-        forest[res.target_id].add_interval(Interval(res.target_start, res.target_end, value=res))
+        forest[res.target_id].add_interval(Interval(res.target_start-padding, res.target_end+padding, value=res))
 
     return forest
 

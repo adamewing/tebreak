@@ -41,6 +41,7 @@ class TEIns:
         self.te_family()
         self.elt_coords()
         self.out['TE_Match_Pct'] = self.be_avg_pctmatch()
+        self.get_tsd()
 
     def assign35ends(self):
         self.out['3_Prime_End'] = 'NA'
@@ -85,6 +86,13 @@ class TEIns:
         if 'be1_breakpos' in self.ins: j.append(self.ins['be1_breakpos'])
         if 'be2_breakpos' in self.ins: j.append(self.ins['be2_breakpos'])
         return j
+
+    def get_tsd(self):
+        self.out['TSD_3prime'] = 'NA'
+        self.out['TSD_5prime'] = 'NA'
+        if None not in (self.end3, self.end5):
+            if self.end3 + '_end_over' in self.ins: self.out['TSD_3prime'] = self.ins[self.end3 + '_end_over']
+            if self.end5 + '_end_over' in self.ins: self.out['TSD_5prime'] = self.ins[self.end5 + '_end_over']
 
     def be_avg_pctmatch(self):
         m = []
@@ -133,6 +141,12 @@ class TEIns:
 
     def header(self):
         return '\t'.join(self.out.keys())
+
+    def __lt__(self, other):
+        if self.out['Chromosome'] == other.out['Chromosome']:
+            return self.out['Left_Junction'] < other.out['Left_Junction']
+
+        return self.out['Chromosome'] < other.out['Chromosome']
 
     def __str__(self):
         return '\t'.join(map(str, self.out.values()))
@@ -622,8 +636,9 @@ def main(args):
 
     tebreak.text_summary(insertions, outfile=args.detail_out) # debug
 
-    for ins in insertions:
-        te_ins = TEIns(ins)
+    te_insertions = [TEIns(ins) for ins in insertions]
+
+    for te_ins in sorted(te_insertions):
         if te_ins.pass_filter(forest): print te_ins
 
 

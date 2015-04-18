@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import pysam
+import align
 import random
 import argparse
 import logging
@@ -31,96 +32,96 @@ from bx.intervals.intersection import Intersecter, Interval # pip install bx-pyt
 #######################################
  
  
-class AlignedColumn:
-    ''' used by MSA class to store aligned bases '''
-    def __init__(self):
-        self.bases = od() # species name --> base
-        self.annotations = od() # metadata
+# class AlignedColumn:
+#     ''' used by MSA class to store aligned bases '''
+#     def __init__(self):
+#         self.bases = od() # species name --> base
+#         self.annotations = od() # metadata
  
-    def gap(self):
-        if '-' in self.bases.values(): return True
-        return False
+#     def gap(self):
+#         if '-' in self.bases.values(): return True
+#         return False
  
-    def subst(self):
-        if self.gap(): return False
-        if len(set(self.bases.values())) > 1: return True
-        return False
+#     def subst(self):
+#         if self.gap(): return False
+#         if len(set(self.bases.values())) > 1: return True
+#         return False
  
-    def cons(self):
-        ''' consensus prefers bases over gaps '''
-        for base, count in Counter(map(str.upper, self.bases.values())).most_common():
-            if base != '-': return base
+#     def cons(self):
+#         ''' consensus prefers bases over gaps '''
+#         for base, count in Counter(map(str.upper, self.bases.values())).most_common():
+#             if base != '-': return base
  
-    def score(self):
-        topbase = self.cons()
-        nongaps = [b for b in map(str.upper, self.bases.values()) if b != '-']
-        matches = [b for b in map(str.upper, self.bases.values()) if b == topbase]
+#     def score(self):
+#         topbase = self.cons()
+#         nongaps = [b for b in map(str.upper, self.bases.values()) if b != '-']
+#         matches = [b for b in map(str.upper, self.bases.values()) if b == topbase]
 
-        if len(nongaps) == 0: return 0.0
+#         if len(nongaps) == 0: return 0.0
  
-        return float(len(matches)) / float(len(nongaps))
- 
- 
-    def __str__(self):
-        return str(self.bases)
+#         return float(len(matches)) / float(len(nongaps))
  
  
-class MSA:
-    ''' multiple sequence alignment class '''
-    def __init__(self, infile=None):
-        self.columns = []
-        self.ids     = []
-        self.seqs    = od()
+#     def __str__(self):
+#         return str(self.bases)
  
-        if infile is not None: self.readFastaMSA(infile)
  
-    def __len__(self):
-        return len(self.columns)
+# class MSA:
+#     ''' multiple sequence alignment class '''
+#     def __init__(self, infile=None):
+#         self.columns = []
+#         self.ids     = []
+#         self.seqs    = od()
  
-    def readFastaMSA(self, infile):
-        id   = None
-        seq  = ''
+#         if infile is not None: self.readFastaMSA(infile)
  
-        with open(infile, 'r') as fasta:
-            for line in fasta:
-                line = line.strip()
-                if line.startswith('>'):
-                    if id is not None:
-                        self.seqs[id] = seq
-                    seq = ''
-                    id = line.lstrip('>')
-                    self.ids.append(id)
-                else:
-                    seq += line
-            self.seqs[id] = seq
+#     def __len__(self):
+#         return len(self.columns)
  
-        first = True
-        colen = 0
-        for ID, seq in self.seqs.iteritems():
-            if first:
-                colen = len(seq)
-                for base in list(seq):
-                    ac = AlignedColumn()
-                    ac.bases[ID] = base
-                    self.columns.append(ac)
-                first = False
-            else:
-                assert len(seq) == colen
-                pos = 0
-                for base in list(seq):
-                    ac = self.columns[pos]
-                    ac.bases[ID] = base
-                    pos += 1
+#     def readFastaMSA(self, infile):
+#         id   = None
+#         seq  = ''
  
-    def consensus(self):
-        ''' compute consensus '''
-        bases  = [column.cons() for column in self.columns]
-        scores = [column.score() for column in self.columns]
+#         with open(infile, 'r') as fasta:
+#             for line in fasta:
+#                 line = line.strip()
+#                 if line.startswith('>'):
+#                     if id is not None:
+#                         self.seqs[id] = seq
+#                     seq = ''
+#                     id = line.lstrip('>')
+#                     self.ids.append(id)
+#                 else:
+#                     seq += line
+#             self.seqs[id] = seq
  
-        if bases is not None and None not in bases:
-            return ''.join(bases), np.mean(scores)
-        else:
-            return '', np.mean(scores)
+#         first = True
+#         colen = 0
+#         for ID, seq in self.seqs.iteritems():
+#             if first:
+#                 colen = len(seq)
+#                 for base in list(seq):
+#                     ac = AlignedColumn()
+#                     ac.bases[ID] = base
+#                     self.columns.append(ac)
+#                 first = False
+#             else:
+#                 assert len(seq) == colen
+#                 pos = 0
+#                 for base in list(seq):
+#                     ac = self.columns[pos]
+#                     ac.bases[ID] = base
+#                     pos += 1
+ 
+#     def consensus(self):
+#         ''' compute consensus '''
+#         bases  = [column.cons() for column in self.columns]
+#         scores = [column.score() for column in self.columns]
+ 
+#         if bases is not None and None not in bases:
+#             return ''.join(bases), np.mean(scores)
+#         else:
+#             return '', np.mean(scores)
 
 
 class Genome:
@@ -250,6 +251,19 @@ class LASTResult:
     def __str__(self):
         return "\n".join(self.raw)
 
+
+class SortableRead:
+    def __init__(self, read):
+        self.read = read
+        self.seq  = read.seq
+        self.seqstart = read.reference_start-read.query_alignment_start
+
+    def __gt__(self, other):
+        if self.read.tid == other.read.tid:
+            return self.seqstart > other.seqstart
+        else:
+            return self.read.tid > other.read.tid
+
  
 class SplitRead:
     ''' store information about split read alignment '''
@@ -371,21 +385,21 @@ class ReadCluster:
     def avg_matchpct(self):
         return np.mean([read_matchpct(r.read) for r in self.reads])
 
-    def make_fasta(self, outdir):
-        ''' for downstream consensus building '''
-        out_fasta = outdir + '/' + '.'.join(('tebreak', str(uuid4()), 'fasta'))
-        with open(out_fasta, 'w') as out:
-            for sr in self.reads:
-                read = sr.read
-                name = read.qname
-                if read.is_read1:
-                    name += '/1'
-                if read.is_read2:
-                    name += '/2'
+    # def make_fasta(self, outdir):
+    #     ''' for downstream consensus building '''
+    #     out_fasta = outdir + '/' + '.'.join(('tebreak', str(uuid4()), 'fasta'))
+    #     with open(out_fasta, 'w') as out:
+    #         for sr in self.reads:
+    #             read = sr.read
+    #             name = read.qname
+    #             if read.is_read1:
+    #                 name += '/1'
+    #             if read.is_read2:
+    #                 name += '/2'
  
-                out.write('>%s\n%s\n' % (name, read.seq))
+    #             out.write('>%s\n%s\n' % (name, read.seq))
  
-        return out_fasta
+    #     return out_fasta
  
     def __len__(self):
         return len(self.reads)
@@ -423,7 +437,42 @@ class SplitCluster(ReadCluster):
             [new.add_splitread(sr) for sr in self.reads if sr.breakpos in breakends and sr.breakright]
  
         return new
- 
+
+    def consensus(self, minscore = 0.9):
+        ''' build consensus from sorted aligned reads iteratively '''
+
+        S = -np.ones((256, 256)) + 2 * np.identity(256)
+        S = S.astype(np.int16)
+
+        sortable_reads = [SortableRead(sr.read) for sr in self.reads]
+        seqs = [sorted_read.seq for sorted_read in sorted(sortable_reads)]
+
+        cons = seqs[0]
+        scores = []
+
+        for seq in seqs[1:]:
+
+            s1 = align.string_to_alignment(cons)
+            s2 = align.string_to_alignment(seq)
+
+            (s, a1, a2) = align.align(s1, s2, -2, -2, S, local=True)
+            a1 = align.alignment_to_string(a1)
+            a2 = ''.join([b for b in list(align.alignment_to_string(a2)) if b != '-'])
+
+            score = float(len(a1) - (len(a1)-s)) / float(len(a1))
+            scores.append(score)
+
+            # print('%s\n%s\nScore: %f' % (a1, a2, score))
+
+            if score < minscore and len(cons) == len(seq):
+                cons = seq
+
+            if score >= minscore:
+                align_end = locate_subseq(seq, a2)[1]
+                cons += seq[align_end:]
+
+        return cons, np.mean(score)
+
     def all_breakpoints(self):
         ''' returns uniquified list of breakpoints '''
         return list(set([read.breakpos for read in self.reads]))
@@ -623,6 +672,9 @@ class Insertion:
                     if qrypos is not None:
                         tsdseq2 += junc2.seq[qrypos+junc2.qstart]
  
+            if tsdseq1 == junc1.seq: tsdseq1 = 'full_match'
+            if tsdseq2 == junc2.seq: tsdseq2 = 'full_match'
+
             return tsdseq1, tsdseq2
 
     def fetch_discordant_reads(self, bams, isize=10000):
@@ -1035,21 +1087,21 @@ def splitqual(read):
     return ss.ks_2samp(q1, q2)[0]
  
  
-def mafft(infafn, iterations=100, threads=1, tmpdir='/tmp'):
-    ''' use MAFFT to create MSA '''
+# def mafft(infafn, iterations=100, threads=1, tmpdir='/tmp'):
+#     ''' use MAFFT to create MSA '''
  
-    outfafn = tmpdir + '/' + str(uuid4()) + '.aln.fa'
+#     outfafn = tmpdir + '/' + str(uuid4()) + '.aln.fa'
  
-    args = ['mafft', '--localpair', '--maxiterate', str(iterations), '--thread', str(threads), infafn]
+#     args = ['mafft', '--localpair', '--maxiterate', str(iterations), '--thread', str(threads), infafn]
  
-    FNULL = open(os.devnull, 'w')
+#     FNULL = open(os.devnull, 'w')
  
-    with open(outfafn, 'w') as outfa:
-        p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=FNULL)
-        for line in p.stdout:
-            outfa.write(line)
+#     with open(outfafn, 'w') as outfa:
+#         p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=FNULL)
+#         for line in p.stdout:
+#             outfa.write(line)
  
-    return outfafn
+#     return outfafn
  
 
 def load_falib(infa):
@@ -1115,8 +1167,8 @@ def build_dr_clusters(insertion):
                 clusters[-1].add_read(dr)
 
     return clusters
- 
- 
+
+
 def build_breakends(cluster, filters, tmpdir='/tmp'):
     ''' returns list of breakends from cluster '''
     breakends = []
@@ -1129,20 +1181,21 @@ def build_breakends(cluster, filters, tmpdir='/tmp'):
                 score   = 1.0
 
                 if len(subcluster) > 1 :
-                    out_fa     = subcluster.make_fasta(tmpdir)
-                    align_fa   = mafft(out_fa, tmpdir=tmpdir)
-                    msa        = MSA(align_fa)
-                    seq, score = msa.consensus()
+                    #out_fa     = subcluster.make_fasta(tmpdir)
+                    seq, score = subcluster.consensus()
+                    # align_fa   = mafft(out_fa, tmpdir=tmpdir)
+                    # msa        = MSA(align_fa)
+                    # seq, score = msa.consensus()
 
-                    os.remove(out_fa)
-                    os.remove(align_fa)
+                    #os.remove(out_fa)
+                    #os.remove(align_fa)
  
                 if seq != '' and score >= filters['min_consensus_score']:
                     breakends.append(BreakEnd(cluster.chrom, breakpos, subcluster, seq, score))
  
     return breakends
- 
- 
+
+
 def map_breakends(breakends, db, tmpdir='/tmp'):
     ''' remap consensus sequences stored in BreakEnd objects '''
     tmp_fa = tmpdir + '/' + '.'.join(('tebreak', str(uuid4()), 'be.fa'))
@@ -1174,8 +1227,8 @@ def map_breakends(breakends, db, tmpdir='/tmp'):
     os.remove(tmp_sam)
  
     return breakdict.values()
- 
- 
+
+
 def score_breakend_pair(be1, be2, k=2.5, s=3.0):
     ''' assign a score to a breakend, higher is "better" '''
     prox1 = be1.proximal_subread()
@@ -1195,14 +1248,14 @@ def score_breakend_pair(be1, be2, k=2.5, s=3.0):
         return score
  
     return None
- 
- 
+
+
 def checkref(ref_fasta):
     assert os.path.exists(ref_fasta), 'reference not found: %s' % ref_fasta
     assert os.path.exists(ref_fasta + '.fai'), 'please run samtools faidx on %s' % ref_fasta
     assert os.path.exists(ref_fasta + '.bwt'), 'please run bwa index on %s' % ref_fasta
- 
- 
+
+
 def build_insertions(breakends, maxdist=100):
     ''' return list of Insertion objects '''
     insertions = []
@@ -1422,7 +1475,7 @@ def run_chunk(args, chrom, start, end):
             logger.debug('Chunk %s: Building insertions...' % chunkname)
 
             insertions = build_insertions(breakends) #####
-            logger.debug('Chunk %s: Processing and filtering %d insertions ...' % (chunkname, len(insertions)))
+            logger.debug('Chunk %s: Processing and filtering %d potential insertions ...' % (chunkname, len(insertions)))
 
             insertions = [ins for ins in insertions if len(ins.be1.proximal_subread()) > 0] # remove bogus insertions
 
@@ -1437,7 +1490,7 @@ def run_chunk(args, chrom, start, end):
                 ins.unmapped_fastq(args.fasta_out_path)
                 ins.consensus_fasta(args.fasta_out_path)
 
-            logger.debug('Chunk %s: Postprocessing %d insertions, trying to improve consensus breakend sequences ...' % (chunkname, len(insertions)))
+            logger.debug('Chunk %s: Postprocessing %d filtered insertions, trying to improve consensus breakend sequences ...' % (chunkname, len(insertions)))
             processed_insertions  = postprocess_insertions(insertions, args.bwaref, args.fasta_out_path, bams, tmpdir=args.tmpdir)
 
             logger.debug('Chunk %s: Summarising insertions ...' % chunkname)
@@ -1517,9 +1570,10 @@ def main(args):
 
     checkref(args.bwaref)
 
-    sys.stderr.write("loading bwa index %s into shared memory ...\n" % args.bwaref)
-    p = subprocess.Popen(['bwa', 'shm', args.bwaref], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    for line in p.stdout: pass # wait for bwa to load
+    if not args.no_shared_mem:
+        sys.stderr.write("loading bwa index %s into shared memory ...\n" % args.bwaref)
+        p = subprocess.Popen(['bwa', 'shm', args.bwaref], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        for line in p.stdout: pass # wait for bwa to load
 
 
     if not os.path.exists(args.fasta_out_path):
@@ -1566,9 +1620,10 @@ def main(args):
     with open(pickoutfn, 'w') as pickout:
         pickle.dump(insertions, pickout)
 
-    # sys.stderr.write("unloading bwa index %s from shared memory ...\n" % args.bwaref)
-    # p = subprocess.Popen(['bwa', 'shm', '-d'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    # for line in p.stdout: pass # wait for bwa to load
+    # if not args.no_shared_mem:
+    #     sys.stderr.write("unloading bwa index %s from shared memory ...\n" % args.bwaref)
+    #     p = subprocess.Popen(['bwa', 'shm', '-d'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    #     for line in p.stdout: pass # wait for bwa to load
 
     logger.debug('Pickled to %s' % pickoutfn)
 
@@ -1602,6 +1657,7 @@ if __name__ == '__main__':
     parser.add_argument('--detail_out', default='tebreak.out', help='file to write detailed output')
  
     parser.add_argument('-v', '--verbose', action='store_true')
+    parser.add_argument('--no_shared_mem', action='store_true')
  
     args = parser.parse_args()
     main(args)

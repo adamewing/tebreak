@@ -30,98 +30,6 @@ from bx.intervals.intersection import Intersecter, Interval # pip install bx-pyt
 #######################################
 ## Classes                           ##
 #######################################
- 
- 
-# class AlignedColumn:
-#     ''' used by MSA class to store aligned bases '''
-#     def __init__(self):
-#         self.bases = od() # species name --> base
-#         self.annotations = od() # metadata
- 
-#     def gap(self):
-#         if '-' in self.bases.values(): return True
-#         return False
- 
-#     def subst(self):
-#         if self.gap(): return False
-#         if len(set(self.bases.values())) > 1: return True
-#         return False
- 
-#     def cons(self):
-#         ''' consensus prefers bases over gaps '''
-#         for base, count in Counter(map(str.upper, self.bases.values())).most_common():
-#             if base != '-': return base
- 
-#     def score(self):
-#         topbase = self.cons()
-#         nongaps = [b for b in map(str.upper, self.bases.values()) if b != '-']
-#         matches = [b for b in map(str.upper, self.bases.values()) if b == topbase]
-
-#         if len(nongaps) == 0: return 0.0
- 
-#         return float(len(matches)) / float(len(nongaps))
- 
- 
-#     def __str__(self):
-#         return str(self.bases)
- 
- 
-# class MSA:
-#     ''' multiple sequence alignment class '''
-#     def __init__(self, infile=None):
-#         self.columns = []
-#         self.ids     = []
-#         self.seqs    = od()
- 
-#         if infile is not None: self.readFastaMSA(infile)
- 
-#     def __len__(self):
-#         return len(self.columns)
- 
-#     def readFastaMSA(self, infile):
-#         id   = None
-#         seq  = ''
- 
-#         with open(infile, 'r') as fasta:
-#             for line in fasta:
-#                 line = line.strip()
-#                 if line.startswith('>'):
-#                     if id is not None:
-#                         self.seqs[id] = seq
-#                     seq = ''
-#                     id = line.lstrip('>')
-#                     self.ids.append(id)
-#                 else:
-#                     seq += line
-#             self.seqs[id] = seq
- 
-#         first = True
-#         colen = 0
-#         for ID, seq in self.seqs.iteritems():
-#             if first:
-#                 colen = len(seq)
-#                 for base in list(seq):
-#                     ac = AlignedColumn()
-#                     ac.bases[ID] = base
-#                     self.columns.append(ac)
-#                 first = False
-#             else:
-#                 assert len(seq) == colen
-#                 pos = 0
-#                 for base in list(seq):
-#                     ac = self.columns[pos]
-#                     ac.bases[ID] = base
-#                     pos += 1
- 
-#     def consensus(self):
-#         ''' compute consensus '''
-#         bases  = [column.cons() for column in self.columns]
-#         scores = [column.score() for column in self.columns]
- 
-#         if bases is not None and None not in bases:
-#             return ''.join(bases), np.mean(scores)
-#         else:
-#             return '', np.mean(scores)
 
 
 class Genome:
@@ -384,22 +292,6 @@ class ReadCluster:
  
     def avg_matchpct(self):
         return np.mean([read_matchpct(r.read) for r in self.reads])
-
-    # def make_fasta(self, outdir):
-    #     ''' for downstream consensus building '''
-    #     out_fasta = outdir + '/' + '.'.join(('tebreak', str(uuid4()), 'fasta'))
-    #     with open(out_fasta, 'w') as out:
-    #         for sr in self.reads:
-    #             read = sr.read
-    #             name = read.qname
-    #             if read.is_read1:
-    #                 name += '/1'
-    #             if read.is_read2:
-    #                 name += '/2'
- 
-    #             out.write('>%s\n%s\n' % (name, read.seq))
- 
-    #     return out_fasta
  
     def __len__(self):
         return len(self.reads)
@@ -1086,23 +978,6 @@ def splitqual(read):
  
     return ss.ks_2samp(q1, q2)[0]
  
- 
-# def mafft(infafn, iterations=100, threads=1, tmpdir='/tmp'):
-#     ''' use MAFFT to create MSA '''
- 
-#     outfafn = tmpdir + '/' + str(uuid4()) + '.aln.fa'
- 
-#     args = ['mafft', '--localpair', '--maxiterate', str(iterations), '--thread', str(threads), infafn]
- 
-#     FNULL = open(os.devnull, 'w')
- 
-#     with open(outfafn, 'w') as outfa:
-#         p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=FNULL)
-#         for line in p.stdout:
-#             outfa.write(line)
- 
-#     return outfafn
- 
 
 def load_falib(infa):
     seqdict = {}
@@ -1180,15 +1055,7 @@ def build_breakends(cluster, filters, tmpdir='/tmp'):
                 seq     = subcluster.reads[0].read.seq
                 score   = 1.0
 
-                if len(subcluster) > 1 :
-                    #out_fa     = subcluster.make_fasta(tmpdir)
-                    seq, score = subcluster.consensus()
-                    # align_fa   = mafft(out_fa, tmpdir=tmpdir)
-                    # msa        = MSA(align_fa)
-                    # seq, score = msa.consensus()
-
-                    #os.remove(out_fa)
-                    #os.remove(align_fa)
+                if len(subcluster) > 1: seq, score = subcluster.consensus()
  
                 if seq != '' and score >= filters['min_consensus_score']:
                     breakends.append(BreakEnd(cluster.chrom, breakpos, subcluster, seq, score))
@@ -1620,10 +1487,10 @@ def main(args):
     with open(pickoutfn, 'w') as pickout:
         pickle.dump(insertions, pickout)
 
-    # if not args.no_shared_mem:
-    #     sys.stderr.write("unloading bwa index %s from shared memory ...\n" % args.bwaref)
-    #     p = subprocess.Popen(['bwa', 'shm', '-d'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    #     for line in p.stdout: pass # wait for bwa to load
+    if not args.no_shared_mem:
+        sys.stderr.write("unloading bwa index %s from shared memory ...\n" % args.bwaref)
+        p = subprocess.Popen(['bwa', 'shm', '-d'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        for line in p.stdout: pass # wait for bwa to load
 
     logger.debug('Pickled to %s' % pickoutfn)
 

@@ -11,7 +11,6 @@ Contact: adam.ewing@mater.uq.edu.au
 |bwa      | http://bio-bwa.sourceforge.net/  | bulk sequence alignments |
 |samtools | http://samtools.sourceforge.net/ | BAM manipulation |
 |LAST     | http://last.cbrc.jp/ | fine-scale realignment |
-|MAFFT    | http://mafft.cbrc.jp/alignment/software/ | initial consensus sequences option |
 |minia    | http://minia.genouest.org/ | sequence assembly |
 
 

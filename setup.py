@@ -16,6 +16,10 @@ setup(
         'bx-python>=0.5.0',
         'scipy>=0.14.0',
         'numpy>=1.9.0',
+        'align>=0.1',
+    ],
+    dependency_links = [
+        'git+ssh://git@github.com:adamewing/align.git#egg=align-0.1'
     ],
 
 )

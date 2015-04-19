@@ -612,30 +612,50 @@ class Insertion:
         self.discoreads = mapped.values() + unmapped.values()
 
 
+    def align_filter(self, insref_fa, tmpdir='/tmp'):
+        ''' check whether insertion consensus aligns to '''
+        if not os.path.exists(insref_fa + '.tis'): build_last_db(insref_fa)
+
+        out_fa = '%s/tebreak.align_filter.%s.fa' % (tmpdir, str(uuid4()))
+
+        d1, d2, u1, u2 = (None, None, None, None)
+
+        if self.be1 is not None:
+            d1 = self.be1.distal_subread()       # pysam.AlignedSegment or None
+            u1 = self.be1.unmapped_subread()[1]  # seq strings or None
+            if d1 is not None: d1 = map(lambda x: x.seq, d1)
+
+        if self.be2 is not None:
+            d2 = self.be2.distal_subread()
+            u2 = self.be2.unmapped_subread()[1]
+            if d2 is not None: d2 = map(lambda x: x.seq, d2)
+
+        seqsizes = [20]
+
+        with open(out_fa, 'w') as fa:
+            for seqlist in (d1, d2, u1, u2):
+                if seqlist is not None:
+                    for seq in seqlist:
+                        if len(seq) >= 10:
+                            seqsizes.append(len(seq))
+                            fa.write('>%s\n%s\n' % (str(uuid4()), seq))
+
+        la_results = align_last(out_fa, insref_fa, e=min(seqsizes)-2)
+
+        if len(la_results) == 0: return True
+
+        return False
+
+
     def improve_consensus(self, ctg_fa, bwaref):
         ''' attempt to use assembly of all supporting reads to build a better consensus '''
-        assert self.cons_fasta is not None, "need to write consensus fasta before trying to improve consensus"
+        assert self.cons_fasta is not None, 'need to write consensus fasta before trying to improve consensus'
 
         ctg_falib = load_falib(ctg_fa)
 
-        subprocess.call(['lastdb', '-s', '4G', ctg_fa, ctg_fa])
-        assert os.path.exists(ctg_fa + '.tis'), 'could not lastdb -4G %s %s' % (ctg_fa, ctg_fa)
+        build_last_db(ctg_fa)
 
-        last_cmd = ['lastal', '-e', '20', ctg_fa, self.cons_fasta]
-
-        la_lines   = []
-        la_results = []
-
-        p = subprocess.Popen(last_cmd, stdout=subprocess.PIPE)
-
-        for line in p.stdout:
-            if not line.startswith('#'):
-                if line.strip() != '':
-                    la_lines.append(line.strip())
-
-                else:
-                    la_results.append(LASTResult(la_lines))
-                    la_lines = []
+        la_results = align_last(self.cons_fasta, ctg_fa, e=20)
 
         if self.be1 is not None:
             # find corresponding contig, if possible
@@ -1057,7 +1077,10 @@ def build_breakends(cluster, filters, tmpdir='/tmp'):
 
                 if len(subcluster) > 1: seq, score = subcluster.consensus()
  
-                if seq != '' and score >= filters['min_consensus_score']:
+                N_count = 0
+                if 'N' in seq: N_count = Counter(seq)['N']
+
+                if seq != '' and score >= filters['min_consensus_score'] and N_count <= filters['max_N_consensus']:
                     breakends.append(BreakEnd(cluster.chrom, breakpos, subcluster, seq, score))
  
     return breakends
@@ -1094,6 +1117,35 @@ def map_breakends(breakends, db, tmpdir='/tmp'):
     os.remove(tmp_sam)
  
     return breakdict.values()
+
+
+def build_last_db(fa):
+    ''' make db for LAST alignments '''
+    subprocess.call(['lastdb', '-s', '4G', fa, fa])
+    assert os.path.exists(fa + '.tis'), 'could not lastdb -4G %s %s' % (fa, fa)
+
+
+def align_last(fa, db, e=20):
+    ''' returns list of LASTResult objects '''
+    assert os.path.exists(db + '.tis'), 'not a lastdb: %s' % db
+
+    last_cmd = ['lastal', '-e', str(e), db, fa]
+
+    la_lines   = []
+    la_results = []
+
+    p = subprocess.Popen(last_cmd, stdout=subprocess.PIPE)
+
+    for line in p.stdout:
+        if not line.startswith('#'):
+            if line.strip() != '':
+                la_lines.append(line.strip())
+
+            else:
+                la_results.append(LASTResult(la_lines))
+                la_lines = []
+
+    return la_results
 
 
 def score_breakend_pair(be1, be2, k=2.5, s=3.0):
@@ -1209,7 +1261,7 @@ def summarise_insertion(ins):
     return pi
 
 
-def filter_insertions(insertions, filters):
+def filter_insertions(insertions, filters, tmpdir='/tmp'):
     filtered = []
     for ins in insertions:
         exclude = False
@@ -1234,6 +1286,9 @@ def filter_insertions(insertions, filters):
 
         if filters['restrict_to_readgroup'] is not None:
             if len(rgs) > 1 or filters['restrict_to_readgroup'] not in rgs: exclude = True
+
+        if filters['insertion_library'] is not None and not exclude:
+            if ins.align_filter(filters['insertion_library'], tmpdir=tmpdir): exclude = True
 
         if not exclude: filtered.append(ins)
 
@@ -1314,8 +1369,10 @@ def run_chunk(args, chrom, start, end):
             'min_split_reads':       int(args.min_split_reads),
             'min_discordant_reads':  int(args.min_discordant_reads),
             'min_prox_mapq':         int(args.min_prox_mapq),
+            'max_N_consensus':       int(args.max_N_consensus),
             'restrict_to_bam':       args.restrict_to_bam,
-            'restrict_to_readgroup': args.restrict_to_readgroup
+            'restrict_to_readgroup': args.restrict_to_readgroup,
+            'insertion_library':     args.insertion_library
         }
 
         insertions = []
@@ -1350,7 +1407,7 @@ def run_chunk(args, chrom, start, end):
                 ins.fetch_discordant_reads(bams)
                 ins.compile_info(bams)
 
-            insertions = filter_insertions(insertions, filters)
+            insertions = filter_insertions(insertions, filters, tmpdir=args.tmpdir)
 
             for ins in insertions:
                 # various FASTA/FASTQ outputs
@@ -1399,7 +1456,6 @@ def resolve_duplicates(insertions):
 
 
     return [insertions[n] for n in list(set(insdict.values()))]
-
 
 
 def prefer_insertion(ins1, ins2):
@@ -1487,10 +1543,10 @@ def main(args):
     with open(pickoutfn, 'w') as pickout:
         pickle.dump(insertions, pickout)
 
-    if not args.no_shared_mem:
-        sys.stderr.write("unloading bwa index %s from shared memory ...\n" % args.bwaref)
-        p = subprocess.Popen(['bwa', 'shm', '-d'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        for line in p.stdout: pass # wait for bwa to load
+    # if not args.no_shared_mem:
+    #     sys.stderr.write("unloading bwa index %s from shared memory ...\n" % args.bwaref)
+    #     p = subprocess.Popen(['bwa', 'shm', '-d'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    #     for line in p.stdout: pass # wait for bwa to unload
 
     logger.debug('Pickled to %s' % pickoutfn)
 
@@ -1516,8 +1572,10 @@ if __name__ == '__main__':
     parser.add_argument('--min_split_reads', default=4)
     parser.add_argument('--min_discordant_reads', default=4)
     parser.add_argument('--min_prox_mapq', default=10)
+    parser.add_argument('--max_N_consensus', default=4, help='exclude breakend seqs with > this number of N bases (default = 4)')
     parser.add_argument('--restrict_to_bam', default=None)
     parser.add_argument('--restrict_to_readgroup', default=None)
+    parser.add_argument('--insertion_library', default=None)
 
     parser.add_argument('--tmpdir', default='/tmp', help='temporary directory (default = /tmp)')
     parser.add_argument('--fasta_out_path', default='tebreak_seqdata', help='path for FASTA output')

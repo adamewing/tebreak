@@ -28,8 +28,8 @@ class TEIns:
     def __init__(self, ins):
         self.ins = ins['INFO']
         self.out = od()
-        self.end3 = None
-        self.end5 = None
+        self.end3 = 'NA'
+        self.end5 = 'NA'
 
         self._fill_out()
 
@@ -41,7 +41,8 @@ class TEIns:
         self.te_family()
         self.elt_coords()
         self.out['TE_Match_Pct'] = self.be_avg_pctmatch()
-        self.get_tsd()
+        self.support()
+        self.tsd()
 
     def assign35ends(self):
         self.out['3_Prime_End'] = 'NA'
@@ -77,9 +78,8 @@ class TEIns:
         self.out['TE_Align_Start'] = 'NA'
         self.out['TE_Align_End']   = 'NA'
 
-        if None not in (self.end3, self.end5):
-            if self.end3 + '_bestmatch' in self.ins: self.out['TE_Align_End']   = self.ins[self.end3 + '_bestmatch'].target_end
-            if self.end5 + '_bestmatch' in self.ins: self.out['TE_Align_Start'] = self.ins[self.end5 + '_bestmatch'].target_start
+        if self.end3 + '_bestmatch' in self.ins: self.out['TE_Align_End']   = self.ins[self.end3 + '_bestmatch'].target_end
+        if self.end5 + '_bestmatch' in self.ins: self.out['TE_Align_Start'] = self.ins[self.end5 + '_bestmatch'].target_start
 
     def junctions(self):
         j = []
@@ -87,12 +87,22 @@ class TEIns:
         if 'be2_breakpos' in self.ins: j.append(self.ins['be2_breakpos'])
         return j
 
-    def get_tsd(self):
+    def support(self):
+        self.out['Split_reads_3prime'] = 0
+        self.out['Split_reads_5prime'] = 0
+        self.out['Discordant_reads']   = self.ins['dr_count']
+
+        if self.end3 + '_sr_count' in self.ins: self.out['Split_reads_3prime'] = self.ins[self.end3 + '_sr_count']
+        if self.end5 + '_sr_count' in self.ins: self.out['Split_reads_5prime'] = self.ins[self.end5 + '_sr_count']
+
+
+
+    def tsd(self):
         self.out['TSD_3prime'] = 'NA'
         self.out['TSD_5prime'] = 'NA'
-        if None not in (self.end3, self.end5):
-            if self.end3 + '_end_over' in self.ins: self.out['TSD_3prime'] = self.ins[self.end3 + '_end_over']
-            if self.end5 + '_end_over' in self.ins: self.out['TSD_5prime'] = self.ins[self.end5 + '_end_over']
+
+        if self.end3 + '_end_over' in self.ins: self.out['TSD_3prime'] = self.ins[self.end3 + '_end_over']
+        if self.end5 + '_end_over' in self.ins: self.out['TSD_5prime'] = self.ins[self.end5 + '_end_over']
 
     def be_avg_pctmatch(self):
         m = []
@@ -585,14 +595,13 @@ def resolve_insertion(args, ins, inslib_fa):
     last_res = last_alignment(ins, inslib_fa)
     ins = add_insdata(ins, last_res)
 
-    if 'best_ins_matchpct' in ins['INFO'] and not args.skip_align:
-        if ins['INFO']['dr_count'] > 0 and ins['INFO']['best_ins_matchpct'] > 0.90: # change to parameter
-            tmp_bam = remap_discordant(ins, inslib_fa=inslib_fa, tmpdir=args.tmpdir)
+    if not args.skip_align and ins['INFO']['dr_count'] > 0:
+        tmp_bam = remap_discordant(ins, inslib_fa=inslib_fa, tmpdir=args.tmpdir)
 
-            if tmp_bam is not None:
-                bam = pysam.AlignmentFile(tmp_bam, 'rb')
-                ins['INFO']['support_bam_file'] = tmp_bam
-                ins['INFO']['mapped_target'] = bam.mapped
+        if tmp_bam is not None:
+            bam = pysam.AlignmentFile(tmp_bam, 'rb')
+            ins['INFO']['support_bam_file'] = tmp_bam
+            ins['INFO']['mapped_target'] = bam.mapped
 
     if 'best_ins_matchpct' in ins['INFO']: ins = identify_transductions(ins)
 
@@ -637,6 +646,8 @@ def main(args):
     tebreak.text_summary(insertions, outfile=args.detail_out) # debug
 
     te_insertions = [TEIns(ins) for ins in insertions]
+
+    if len(te_insertions) > 0: print te_insertions[0].header()
 
     for te_ins in sorted(te_insertions):
         if te_ins.pass_filter(forest): print te_ins

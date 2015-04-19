@@ -494,7 +494,6 @@ class Insertion:
         self.discoreads = []
         self.dr_clusters = []
         self.fastqrecs = []
-        self.cons_fasta = None
 
     def __len__(self):
         ''' return total number of reads (sr+dr) associated with insertion '''
@@ -642,20 +641,22 @@ class Insertion:
 
         la_results = align_last(out_fa, insref_fa, e=min(seqsizes)-2)
 
+        os.remove(out_fa)
+
         if len(la_results) == 0: return True
 
         return False
 
 
-    def improve_consensus(self, ctg_fa, bwaref):
+    def improve_consensus(self, ctg_fa, bwaref, tmpdir='/tmp'):
         ''' attempt to use assembly of all supporting reads to build a better consensus '''
-        assert self.cons_fasta is not None, 'need to write consensus fasta before trying to improve consensus'
+        cons_fasta = self.consensus_fasta(tmpdir)
 
         ctg_falib = load_falib(ctg_fa)
 
         build_last_db(ctg_fa)
 
-        la_results = align_last(self.cons_fasta, ctg_fa, e=20)
+        la_results = align_last(cons_fasta, ctg_fa, e=20)
 
         if self.be1 is not None:
             # find corresponding contig, if possible
@@ -685,30 +686,12 @@ class Insertion:
         for ext in ('','.amb','.ann','.bck','.bwt','.des','.fai','.pac','.prj','.sa','.sds','.ssp','.suf','.tis'):
             if os.path.exists(ctg_fa+ext): os.remove(ctg_fa+ext)
 
+        os.remove(cons_fasta)
 
         return self.be1_improved_cons, self.be2_improved_cons
 
 
-    def unmapped_fastq(self, outdir):
-        ''' for downstream analysis of unmapped paired reads '''
-        assert os.path.exists(outdir), 'cannot find path: %s' % outpath
-
-        out_fastq = outdir + '/' + '.'.join(('disc_unmap', self.be1.chrom, str(self.be1.breakpos), 'fq'))
-        with open(out_fastq, 'w') as out:
-            for dr in self.discoreads:
-                read = dr.mate_read
-                if read is not None and read.is_unmapped:
-                    name = read.qname
-                    if read.is_read1:
-                        name += '/1'
-                    if read.is_read2:
-                        name += '/2'
- 
-                    out.write('@%s\n%s\n+\n%s\n' % (name, read.seq, read.qual))
- 
-        return out_fastq
-
-    def supportreads_fastq(self, outdir):
+    def supportreads_fastq(self, outdir, min_readlen=50, limit=1000):
         ''' discordant support reads marked DR, split support reads marked SR '''
         assert os.path.exists(outdir)
 
@@ -733,7 +716,7 @@ class Insertion:
                         if read.is_read2:
                             name += '.%s/2' % rtype
 
-                        outreads[name] = read.seq + '\n+\n' + read.qual
+                        if len(read.seq) > min_readlen: outreads[name] = read.seq + '\n+\n' + read.qual
 
                         if rtype == 'DR' and r.mate_read is not None: # get discordant mates
                             read = r.mate_read
@@ -742,7 +725,9 @@ class Insertion:
                             if read.is_read2:
                                 name += '.%s/2' % rtype
 
-                            outreads[name] = read.seq + '\n+\n' + read.qual
+                            if len(read.seq) > min_readlen: outreads[name] = read.seq + '\n+\n' + read.qual
+
+            if len(outreads) >= limit or len(outreads) == 0: return None
 
             for name, data in outreads.iteritems():
                 out.write('@%s\n%s\n' % (name, data))
@@ -750,16 +735,14 @@ class Insertion:
 
         return out_fastq
 
-    def consensus_fasta(self, outdir):
-        assert os.path.exists(outdir)
+    def consensus_fasta(self, tmpdir='/tmp'):
+        assert os.path.exists(tmpdir)
 
-        out_fasta = outdir + '/' + '.'.join(('consensus', self.be1.chrom, str(self.be1.breakpos), 'fa'))
+        out_fasta = tmpdir + '/' + '.'.join(('consensus', self.be1.chrom, str(self.be1.breakpos), 'fa'))
         with open(out_fasta, 'w') as out:
             out.write('>tebreak:%s:%d\n%s\n' % (self.be1.chrom, self.be1.breakpos, self.be1.consensus))
             if self.be2 is not None:
                 out.write('>tebreak:%s:%d\n%s\n' % (self.be2.chrom, self.be2.breakpos, self.be2.consensus))
-
-        self.cons_fasta = out_fasta
 
         return out_fasta
 
@@ -1295,9 +1278,11 @@ def filter_insertions(insertions, filters, tmpdir='/tmp'):
     return filtered
 
 
-def postprocess_insertions(insertions, bwaref, outpath, bams, tmpdir='/tmp'):
+def postprocess_insertions(insertions, filters, bwaref, bams, tmpdir='/tmp'):
     for ins in insertions:
-        support_fq  = ins.supportreads_fastq(outpath)
+        support_fq  = ins.supportreads_fastq(tmpdir, limit=filters['max_ins_reads'])
+        if support_fq is None: return insertions
+
         support_asm = minia(support_fq, tmpdir=tmpdir)
 
         retry_counter = 0 # minia might not be the most reliable option...
@@ -1311,7 +1296,10 @@ def postprocess_insertions(insertions, bwaref, outpath, bams, tmpdir='/tmp'):
 
         else:
             #sys.stderr.write('Assembled: %s:%d, filename: %s\n' % (ins.be1.chrom, ins.be1.breakpos, support_asm))
-            ins.improve_consensus(support_asm, bwaref)
+            ins.improve_consensus(support_asm, bwaref, tmpdir=tmpdir)
+
+    if os.path.exists(support_fq): os.remove(support_fq)
+    if os.path.exists(support_asm): os.remove(support_asm)
 
     # collect altered breakends
     alt_be_list = []
@@ -1343,7 +1331,6 @@ def postprocess_insertions(insertions, bwaref, outpath, bams, tmpdir='/tmp'):
 
         if ins.be1_improved_cons or ins.be2_improved_cons:
             ins.compile_info(bams)
-            ins.consensus_fasta(outpath)
 
     return insertions
 
@@ -1409,13 +1396,8 @@ def run_chunk(args, chrom, start, end):
 
             insertions = filter_insertions(insertions, filters, tmpdir=args.tmpdir)
 
-            for ins in insertions:
-                # various FASTA/FASTQ outputs
-                ins.unmapped_fastq(args.fasta_out_path)
-                ins.consensus_fasta(args.fasta_out_path)
-
             logger.debug('Chunk %s: Postprocessing %d filtered insertions, trying to improve consensus breakend sequences ...' % (chunkname, len(insertions)))
-            processed_insertions  = postprocess_insertions(insertions, args.bwaref, args.fasta_out_path, bams, tmpdir=args.tmpdir)
+            processed_insertions  = postprocess_insertions(insertions, filters, args.bwaref, bams, tmpdir=args.tmpdir)
 
             logger.debug('Chunk %s: Summarising insertions ...' % chunkname)
             summarised_insertions = [summarise_insertion(ins) for ins in processed_insertions]
@@ -1498,11 +1480,6 @@ def main(args):
         p = subprocess.Popen(['bwa', 'shm', args.bwaref], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         for line in p.stdout: pass # wait for bwa to load
 
-
-    if not os.path.exists(args.fasta_out_path):
-        os.mkdir(args.fasta_out_path)
-        assert os.path.exists(args.fasta_out_path), "could not create directory: %s" % args.fasta_out_path
-
     ''' Chunk genome or use input BED '''
     
     procs = int(args.processes)
@@ -1578,7 +1555,6 @@ if __name__ == '__main__':
     parser.add_argument('--insertion_library', default=None)
 
     parser.add_argument('--tmpdir', default='/tmp', help='temporary directory (default = /tmp)')
-    parser.add_argument('--fasta_out_path', default='tebreak_seqdata', help='path for FASTA output')
     parser.add_argument('--detail_out', default='tebreak.out', help='file to write detailed output')
  
     parser.add_argument('-v', '--verbose', action='store_true')

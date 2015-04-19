@@ -1298,8 +1298,8 @@ def postprocess_insertions(insertions, filters, bwaref, bams, tmpdir='/tmp'):
             #sys.stderr.write('Assembled: %s:%d, filename: %s\n' % (ins.be1.chrom, ins.be1.breakpos, support_asm))
             ins.improve_consensus(support_asm, bwaref, tmpdir=tmpdir)
 
-    if os.path.exists(support_fq): os.remove(support_fq)
-    if os.path.exists(support_asm): os.remove(support_asm)
+        if os.path.exists(support_fq): os.remove(support_fq)
+        if os.path.exists(support_asm): os.remove(support_asm)
 
     # collect altered breakends
     alt_be_list = []

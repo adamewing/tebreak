@@ -1357,7 +1357,7 @@ def postprocess_insertions(insertions, filters, bwaref, bams, tmpdir='/tmp'):
 def run_chunk(args, chrom, start, end):
     logger = logging.getLogger(__name__)
     if args.verbose: logger.setLevel(logging.DEBUG)
-
+    chunkname = '%s:%d-%d' % (chrom, start, end)
 
     try:
         bams = [pysam.AlignmentFile(bam, 'rb') for bam in args.bam.split(',')]
@@ -1387,8 +1387,6 @@ def run_chunk(args, chrom, start, end):
 
         insertions = []
      
-        chunkname = '%s:%d-%d' % (chrom, start, end)
-
         logger.debug('Processing chunk: %s ...' % chunkname)
         logger.debug('Chunk %s: Parsing split reads from bam(s): %s ...' % (chunkname, args.bam))
         sr = fetch_clipped_reads(bams, chrom, start, end, filters) #minclip=filters['min_minclip'], maxD=filters['max_D_score'])
@@ -1502,8 +1500,6 @@ def main(args):
         sys.stderr.write("loading bwa index %s into shared memory ...\n" % args.bwaref)
         p = subprocess.Popen(['bwa', 'shm', args.bwaref], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         for line in p.stdout: pass # wait for bwa to load
-
-    #if args.mask is not None: args.mask = build_mask(args.mask)
 
     ''' Chunk genome or use input BED '''
     

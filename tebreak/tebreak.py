@@ -939,11 +939,11 @@ def is_primary(read):
 def is_supplementary(read):
     ''' pysam does not currently include a check for this flag '''
     return bin(read.flag & 2048) == bin(2048)
+
  
- 
-def fetch_clipped_reads(bams, chrom, start, end, minclip=3, maxaltclip=2, maxD=0.8):
+def fetch_clipped_reads(bams, chrom, start, end, filters):
     ''' Return list of SplitRead objects '''
-    assert minclip > maxaltclip
+    assert filters['min_minclip'] > 2
  
     splitreads = []
  
@@ -954,15 +954,18 @@ def fetch_clipped_reads(bams, chrom, start, end, minclip=3, maxaltclip=2, maxD=0
  
     for bam in bams:
         for read in bam.fetch(chrom, start, end):
-            if not read.is_unmapped and not read.is_duplicate:
-     
-                if read.rlen - read.alen >= int(minclip): # 'soft' clipped?
+            masked = False
+            if filters['genome_mask'] is not None and chrom in filters['genome_mask']:
+                if filters['genome_mask'][chrom].find(read.pos, read.pos+1): masked = True
+
+            if not masked and not read.is_unmapped and not read.is_duplicate:     
+                if read.rlen - read.alen >= int(filters['min_minclip']): # 'soft' clipped?
      
                     # length of 'minor' clip
                     altclip = min(read.qstart, read.rlen-read.qend)
      
-                    if altclip <= maxaltclip:
-                        if splitqual(read) <= maxD:
+                    if altclip <= 2: # could add as a filter
+                        if splitqual(read) <= filters['max_D_score']:
                             chrom = str(bam.getrname(read.tid))
                             splitreads.append(SplitRead(chrom, read, bam.filename))
  
@@ -1234,6 +1237,21 @@ def minia(fq, tmpdir='/tmp'):
     return ctgbase + '.contigs.fa'
 
 
+def build_mask(bedfile):
+    ''' return a dictionary of interval trees '''
+    forest = dd(Intersecter)
+
+    with open(bedfile, 'r') as bed:
+        for line in bed:
+            chrom, start, end = line.strip().split()[:3]
+            start = int(start)
+            end   = int(end)
+
+            forest[chrom].add_interval(Interval(start, end))
+
+    return forest
+
+
 def summarise_insertion(ins):
     ''' returns a pickleable version of the insertion information '''
     pi = dd(dict)
@@ -1340,8 +1358,12 @@ def run_chunk(args, chrom, start, end):
     logger = logging.getLogger(__name__)
     if args.verbose: logger.setLevel(logging.DEBUG)
 
+
     try:
         bams = [pysam.AlignmentFile(bam, 'rb') for bam in args.bam.split(',')]
+
+        # would do this outside but can't pass a non-pickleable object
+        if args.mask is not None: args.mask = build_mask(args.mask)
 
         start = int(start)
         end   = int(end)
@@ -1359,7 +1381,8 @@ def run_chunk(args, chrom, start, end):
             'max_N_consensus':       int(args.max_N_consensus),
             'restrict_to_bam':       args.restrict_to_bam,
             'restrict_to_readgroup': args.restrict_to_readgroup,
-            'insertion_library':     args.insertion_library
+            'insertion_library':     args.insertion_library,
+            'genome_mask':           args.mask
         }
 
         insertions = []
@@ -1368,7 +1391,7 @@ def run_chunk(args, chrom, start, end):
 
         logger.debug('Processing chunk: %s ...' % chunkname)
         logger.debug('Chunk %s: Parsing split reads from bam(s): %s ...' % (chunkname, args.bam))
-        sr = fetch_clipped_reads(bams, chrom, start, end, minclip=filters['min_minclip'], maxD=filters['max_D_score'])
+        sr = fetch_clipped_reads(bams, chrom, start, end, filters) #minclip=filters['min_minclip'], maxD=filters['max_D_score'])
         sr.sort()
 
         logger.debug('Chunk %s: Building clusters from %d split reads ...' % (chunkname, len(sr)))
@@ -1467,7 +1490,7 @@ def text_summary(insertions, outfile='tebreak.out'):
 
             out.write('\n')
 
- 
+
 def main(args):
     ''' housekeeping '''
     logger = logging.getLogger(__name__)
@@ -1479,6 +1502,8 @@ def main(args):
         sys.stderr.write("loading bwa index %s into shared memory ...\n" % args.bwaref)
         p = subprocess.Popen(['bwa', 'shm', args.bwaref], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         for line in p.stdout: pass # wait for bwa to load
+
+    #if args.mask is not None: args.mask = build_mask(args.mask)
 
     ''' Chunk genome or use input BED '''
     
@@ -1544,6 +1569,7 @@ if __name__ == '__main__':
     parser.add_argument('--min_maxclip', default=10, help='min. longest clipped bases per cluster (default = 10)')
     parser.add_argument('--min_sr_per_break', default=1, help='minimum split reads per breakend (default = 1)')
     parser.add_argument('--min_consensus_score', default=0.95, help='quality of consensus alignment (default = 0.95)')
+    parser.add_argument('-m', '--mask', default=None, help='BED file of masked regions: recommended for WGS data')
 
     parser.add_argument('--max_ins_reads', default=1000)
     parser.add_argument('--min_split_reads', default=4)

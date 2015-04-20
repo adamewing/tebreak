@@ -958,7 +958,7 @@ def fetch_clipped_reads(bams, chrom, start, end, filters):
             if filters['genome_mask'] is not None and chrom in filters['genome_mask']:
                 if filters['genome_mask'][chrom].find(read.pos, read.pos+1): masked = True
 
-            if not masked and not read.is_unmapped and not read.is_duplicate:     
+            if not masked and not read.is_unmapped and not read.is_duplicate and read.mapq > 0:
                 if read.rlen - read.alen >= int(filters['min_minclip']): # 'soft' clipped?
      
                     # length of 'minor' clip

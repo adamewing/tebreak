@@ -1222,8 +1222,9 @@ def minia(fq, tmpdir='/tmp'):
         fq = oldcwd + '/' + fq
 
     ctgbase = tmpdir + '/tebreak.minia.%s' % str(uuid4())
+    print "ctgbase:", ctgbase
     
-    cmd = ['minia', '-in', fq, '-abundance-min', '1', '-no-length-cutoff', '-verbose', '0', '-out', ctgbase]
+    cmd = ['minia', '-in', fq, '-abundance-min', '1', '-no-length-cutoff', '-verbose', '0', '-nb-cores', '1', '-out', ctgbase]
 
     FNULL = open(os.devnull, 'w')
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=FNULL)

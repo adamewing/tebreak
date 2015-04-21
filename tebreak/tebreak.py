@@ -1263,6 +1263,23 @@ def summarise_insertion(ins):
     return pi
 
 
+def pileup(chrom, start, end, bam, ref):
+    region = '%s:%d-%d' % (chrom, start, end)
+    cmd = ['samtools', 'mpileup', '-f', ref, '-r', region, bam]
+
+    FNULL = open(os.devnull, 'w')
+
+    depth = []
+
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=FNULL)
+    for line in p.stdout:
+        chrom, pos, base, d = line.split()[:4]
+        pos   = int(pos)
+        depth.append(int(d))
+
+    return np.mean(depth), np.std(depth)
+
+
 def filter_insertions(insertions, filters, tmpdir='/tmp'):
     filtered = []
     for ins in insertions:

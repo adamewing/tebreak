@@ -1053,7 +1053,7 @@ def build_dr_clusters(insertion):
 def build_breakends(cluster, filters, tmpdir='/tmp'):
     ''' returns list of breakends from cluster '''
     breakends = []
- 
+
     for breakpos in cluster.all_breakpoints():
         subclusters = (cluster.subcluster_by_breakend([breakpos], direction='left'), cluster.subcluster_by_breakend([breakpos], direction='right'))
         for subcluster in subclusters:
@@ -1222,7 +1222,6 @@ def minia(fq, tmpdir='/tmp'):
         fq = oldcwd + '/' + fq
 
     ctgbase = tmpdir + '/tebreak.minia.%s' % str(uuid4())
-    print "ctgbase:", ctgbase
     
     cmd = ['minia', '-in', fq, '-abundance-min', '1', '-no-length-cutoff', '-verbose', '0', '-nb-cores', '1', '-out', ctgbase]
 
@@ -1261,23 +1260,6 @@ def summarise_insertion(ins):
     pi['READSTORE'] = ins.fastqrecs
 
     return pi
-
-
-def pileup(chrom, start, end, bam, ref):
-    region = '%s:%d-%d' % (chrom, start, end)
-    cmd = ['samtools', 'mpileup', '-f', ref, '-r', region, bam]
-
-    FNULL = open(os.devnull, 'w')
-
-    depth = []
-
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=FNULL)
-    for line in p.stdout:
-        chrom, pos, base, d = line.split()[:4]
-        pos   = int(pos)
-        depth.append(int(d))
-
-    return np.mean(depth), np.std(depth)
 
 
 def filter_insertions(insertions, filters, tmpdir='/tmp'):
@@ -1372,9 +1354,9 @@ def postprocess_insertions(insertions, filters, bwaref, bams, tmpdir='/tmp'):
 
 
 
-def run_chunk(args, chrom, start, end):
+def run_chunk(args, exp_rpkm, chrom, start, end):
     logger = logging.getLogger(__name__)
-    if args.verbose: logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.DEBUG)
     chunkname = '%s:%d-%d' % (chrom, start, end)
 
     try:
@@ -1397,6 +1379,7 @@ def run_chunk(args, chrom, start, end):
             'min_discordant_reads':  int(args.min_discordant_reads),
             'min_prox_mapq':         int(args.min_prox_mapq),
             'max_N_consensus':       int(args.max_N_consensus),
+            'max_rpkm':              int(args.max_fold_rpkm)*exp_rpkm,
             'restrict_to_bam':       args.restrict_to_bam,
             'restrict_to_readgroup': args.restrict_to_readgroup,
             'insertion_library':     args.insertion_library,
@@ -1407,16 +1390,30 @@ def run_chunk(args, chrom, start, end):
      
         logger.debug('Processing chunk: %s ...' % chunkname)
         logger.debug('Chunk %s: Parsing split reads from bam(s): %s ...' % (chunkname, args.bam))
-        sr = fetch_clipped_reads(bams, chrom, start, end, filters) #minclip=filters['min_minclip'], maxD=filters['max_D_score'])
+        sr = fetch_clipped_reads(bams, chrom, start, end, filters)
         sr.sort()
 
         logger.debug('Chunk %s: Building clusters from %d split reads ...' % (chunkname, len(sr)))
         clusters = build_sr_clusters(sr)
      
         logger.debug('Chunk %s: Building breakends...' % chunkname)
+
         breakends = []
+
         for cluster in clusters:
-            breakends += build_breakends(cluster, filters, tmpdir=args.tmpdir)
+            cl_readcount = 0
+            cl_min, cl_max = cluster.find_extrema()
+
+            for bam in bams:
+                cl_readcount += sum([not read.is_unmapped for read in bam.fetch(cluster.chrom, cl_min, cl_max)])
+
+            rpkm = cl_readcount/((cl_max-cl_min)/1000.)
+
+            if rpkm < filters['max_rpkm']:
+                breakends += build_breakends(cluster, filters, tmpdir=args.tmpdir)
+
+            else:
+                logger.debug('Chunk %s, cluster %d-%d over max RPKM with %f' % (chunkname, cl_min, cl_max, rpkm))
      
         logger.debug('Chunk %s: Mapping %d breakends ...' % (chunkname, len(breakends)))
         if len(breakends) > 0:
@@ -1424,7 +1421,7 @@ def run_chunk(args, chrom, start, end):
          
             logger.debug('Chunk %s: Building insertions...' % chunkname)
 
-            insertions = build_insertions(breakends) #####
+            insertions = build_insertions(breakends)
             logger.debug('Chunk %s: Processing and filtering %d potential insertions ...' % (chunkname, len(insertions)))
 
             insertions = [ins for ins in insertions if len(ins.be1.proximal_subread()) > 0] # remove bogus insertions
@@ -1507,10 +1504,38 @@ def text_summary(insertions, outfile='tebreak.out'):
             out.write('\n')
 
 
+def expected_rpkm(bam_files, genome, intervals=None):
+    ''' expected reads per kilobase mapped '''
+    bams = [pysam.AlignmentFile(bam_file, 'rb') for bam_file in bam_files]
+    total_mapped_reads = sum([bam.mapped for bam in bams])
+    km = genome.bp/1000.
+
+    if intervals is not None:
+        total_length = 0
+        total_mapped_reads = 0
+
+        with open(intervals, 'r') as bed:
+            for line in bed:
+                chrom, start, end = line.strip().split()
+                start = int(start)
+                end   = int(end)
+
+                total_length += end - start
+
+                for bam in bams:
+                    total_mapped_reads += sum([not read.is_unmapped for read in bam.fetch(chrom, start, end)])
+
+        km = total_length/1000.
+
+
+
+    return total_mapped_reads/km
+
+
 def main(args):
     ''' housekeeping '''
     logger = logging.getLogger(__name__)
-    if args.verbose: logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.DEBUG)
 
     checkref(args.bwaref)
 
@@ -1527,15 +1552,18 @@ def main(args):
     if chunk_count < procs: chunks = procs
 
     pool = mp.Pool(processes=procs)
+
+    genome = Genome(args.bwaref + '.fai')
+
     chunks = []
+    exp_rpkm = 0
 
     if args.interval_bed is None:
-        genome = Genome(args.bwaref + '.fai')
         chunks = genome.chunk(chunk_count, sorted=True, pad=5000)
-
-        print chunks
+        exp_rpkm = expected_rpkm(args.bam.split(','), genome)
 
     else:
+        exp_rpkm = expected_rpkm(args.bam.split(','), genome, intervals=args.interval_bed)
         with open(args.interval_bed, 'r') as bed:
             chunks = [(line.strip().split()[0], int(line.strip().split()[1]), int(line.strip().split()[2])) for line in bed]
 
@@ -1544,7 +1572,7 @@ def main(args):
     for chunk in chunks:
         # ins_info = run_chunk(args, *chunk) # uncomment for mp debug
         # text_summary(ins_info)             # uncomment for mp debug
-        res = pool.apply_async(run_chunk, [args, chunk[0], chunk[1], chunk[2]])
+        res = pool.apply_async(run_chunk, [args, exp_rpkm, chunk[0], chunk[1], chunk[2]])
         reslist.append(res)
 
     insertions = []
@@ -1585,6 +1613,7 @@ if __name__ == '__main__':
     parser.add_argument('--min_consensus_score', default=0.95, help='quality of consensus alignment (default = 0.95)')
     parser.add_argument('-m', '--mask', default=None, help='BED file of masked regions: recommended for WGS data')
 
+    parser.add_argument('--max_fold_rpkm', default=10)
     parser.add_argument('--max_ins_reads', default=1000)
     parser.add_argument('--min_split_reads', default=4)
     parser.add_argument('--min_discordant_reads', default=4)
@@ -1597,7 +1626,7 @@ if __name__ == '__main__':
     parser.add_argument('--tmpdir', default='/tmp', help='temporary directory (default = /tmp)')
     parser.add_argument('--detail_out', default='tebreak.out', help='file to write detailed output')
  
-    parser.add_argument('-v', '--verbose', action='store_true')
+    #parser.add_argument('-v', '--verbose', action='store_true')
     parser.add_argument('--no_shared_mem', action='store_true')
  
     args = parser.parse_args()

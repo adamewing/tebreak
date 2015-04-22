@@ -217,14 +217,14 @@ def last_alignment(ins, ref_fa, tmpdir='/tmp'):
             for i, dist_seq in enumerate(ins['INFO']['be2_dist_seq'].split(',')):
                 fa.write('>%s|%s\n%s\n' % (ins['INFO']['be2_obj_uuid'], str(i), dist_seq))
 
-        # realign all unmapped sequences
+        # realign all unmapped sequences, use negative index (-1-i) as flag for unmapped
         if 'be1_umap_seq' in ins['INFO'] and ins['INFO']['be1_umap_seq'] is not None:
             for i, umap_seq in enumerate(ins['INFO']['be1_umap_seq'].split(',')):
-                fa.write('>%s|%s\n%s\n' % (ins['INFO']['be1_obj_uuid'],str(i), umap_seq))
+                fa.write('>%s|%s\n%s\n' % (ins['INFO']['be1_obj_uuid'],str(-1-i), umap_seq))
 
         if 'be2_umap_seq' in ins['INFO'] and ins['INFO']['be2_umap_seq'] is not None:
             for i, umap_seq in enumerate(ins['INFO']['be2_umap_seq'].split(',')):
-                fa.write('>%s|%s\n%s\n' % (ins['INFO']['be2_obj_uuid'], str(i), umap_seq))
+                fa.write('>%s|%s\n%s\n' % (ins['INFO']['be2_obj_uuid'], str(-1-i), umap_seq))
 
     # increasing -m accounts for poly-A tails
     cmd = ['lastal', '-e', '20', '-m', '100', ref_fa, tmpfa]
@@ -548,7 +548,7 @@ def remap_discordant(ins, inslib_fa=None, useref=None, tmpdir='/tmp'):
     return tmp_bam
 
 
-def identify_transductions(ins, minmapq=10):
+def identify_transductions(ins):
     bedict = {'be1': None, 'be2': None}
 
     if 'be1_bestmatch' in ins['INFO']: bedict['be1'] = ins['INFO']['be1_bestmatch']
@@ -559,29 +559,52 @@ def identify_transductions(ins, minmapq=10):
             tr_seqs = []
             tr_locs = [] # chrom, start, end, 3p or 5p / unmap
 
+            segtype = 'dist'
+            if bedict[be].query_distnum < 0: segtype = 'umap'
+
             num_segs = 0
-            if ins['INFO'][be+'_dist_seq'] is not None: num_segs = len(ins['INFO'][be+'_dist_seq'].split(','))
+            if ins['INFO'][be+'_'+segtype+'_seq'] is not None: num_segs = len(ins['INFO'][be+'_'+segtype+'_seq'].split(','))
+
+            # more than one sequence
             if num_segs > 1:
-                for distnum in range(num_segs):
-                    seg_mapq = int(ins['INFO'][be+'_dist_mpq'].split(',')[distnum])
-                    if distnum != bedict[be].query_distnum and seg_mapq >= minmapq:
-                        tr_chrom = ins['INFO'][be+'_dist_chr'].split(',')[distnum]
-                        tr_start = ins['INFO'][be+'_dist_pos'].split(',')[distnum]
-                        tr_end   = ins['INFO'][be+'_dist_end'].split(',')[distnum]
+                for segnum in range(num_segs):
+                    if segtype == 'umap': segnum = -1-segnum
+
+                    seg_mapq = int(ins['INFO'][be+'_'+segtype+'_mpq'].split(',')[segnum])
+                    if segnum != bedict[be].query_distnum:
+                        tr_chrom = ins['INFO'][be+'_'+segtype+'_chr'].split(',')[segnum]
+                        tr_start = ins['INFO'][be+'_'+segtype+'_pos'].split(',')[segnum]
+                        tr_end   = ins['INFO'][be+'_'+segtype+'_end'].split(',')[segnum]
                         tr_side  = '5p'
 
                         if ins['INFO'][be+'_is_3prime']: tr_side = '3p'
 
-                        tr_seqs.append(ins['INFO'][be+'_dist_seq'].split(',')[distnum])
+                        tr_seqs.append(ins['INFO'][be+'_'+segtype+'_seq'].split(',')[segnum])
                         tr_locs.append((tr_chrom, tr_start, tr_end, tr_side))
 
-            if num_segs > 0 and ins['INFO'][be+'_umap_seq'] is not None: # unmapped (maybe) transduced seqs
-                for unmap_seq in ins['INFO'][be+'_umap_seq'].split(','):
-                    tr_side  = '5p'
-                    if ins['INFO'][be+'_is_3prime']: tr_side = '3p'
+            # mapped distal sequence, unmapped transduced seq
+            if segtype == 'dist':
+                if num_segs > 0 and ins['INFO'][be+'_umap_seq'] is not None: # unmapped transduced seqs
+                    for unmap_seq in ins['INFO'][be+'_umap_seq'].split(','):
+                        tr_side  = '5p'
+                        if ins['INFO'][be+'_is_3prime']: tr_side = '3p'
 
-                    tr_seqs.append(unmap_seq)
-                    tr_locs.append(('unmap',0,0,tr_side))
+                        tr_seqs.append(unmap_seq)
+                        tr_locs.append(('unmap', 0, 0, tr_side))
+            else:
+                if num_segs > 0 and ins['INFO'][be+'_dist_seq'] is not None:
+                    for i, mapped_seq in enumerate(ins['INFO'][be+'_dist_seq'].split(',')):
+                        tr_side  = '5p'
+                        if ins['INFO'][be+'_is_3prime']: tr_side = '3p'
+
+                        tr_seqs.append(mapped_seq)
+                        tr_locs.append((ins['INFO'][be+'_dist_chr'][i], 
+                                        ins['INFO'][be+'_dist_pos'].split(',')[i], 
+                                        ins['INFO'][be+'_dist_end'].split(',')[i], 
+                                        tr_side
+                                       )
+                        )
+
 
             if len(tr_seqs) > 0:
                 ins['INFO'][be+'_trans_seq'] = tr_seqs
@@ -606,6 +629,15 @@ def resolve_insertion(args, ins, inslib_fa):
     if 'best_ins_matchpct' in ins['INFO']: ins = identify_transductions(ins)
 
     return ins
+
+
+def resolve_transductions(insertions):
+    ''' some insertions are actually transductions; try to work this out '''
+    be_coord_dict = dd(dict) # chrom --> pos --> ins
+    tr_coord_dict = dd(dict)
+
+    for ins in insertions:
+        pass
 
 
 def resolve_unknown(insertions):

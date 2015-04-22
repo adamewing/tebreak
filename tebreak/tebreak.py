@@ -1409,7 +1409,7 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
 
             rpkm = cl_readcount/((cl_max-cl_min)/1000.)
 
-            if rpkm < filters['max_rpkm']:
+            if filters['max_rpkm'] == 0 or rpkm < filters['max_rpkm']:
                 breakends += build_breakends(cluster, filters, tmpdir=args.tmpdir)
 
             else:
@@ -1566,6 +1566,10 @@ def main(args):
         exp_rpkm = expected_rpkm(args.bam.split(','), genome, intervals=args.interval_bed)
         with open(args.interval_bed, 'r') as bed:
             chunks = [(line.strip().split()[0], int(line.strip().split()[1]), int(line.strip().split()[2])) for line in bed]
+
+    if exp_rpkm < 10:
+        sys.stderr.write("expected RPKM is less than 10, ignoring high RPKM cutoffs...\n")
+        exp_rpkm = 0
 
     reslist = []
 

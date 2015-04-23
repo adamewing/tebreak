@@ -636,7 +636,7 @@ def resolve_insertion(args, ins, inslib_fa):
         return ins
 
     except Exception, e:
-        sys.stderr.write('*'*60 + '\tencountered error:\n' % chunkname)
+        sys.stderr.write('*'*60 + '\tencountered error:\n')
         traceback.print_exc(file=sys.stderr)
         sys.stderr.write("*"*60 + "\n")
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import os
+import sys
 import shutil
 import cPickle as pickle
 import argparse
@@ -8,6 +9,7 @@ import logging
 import tebreak
 import pysam
 import subprocess
+import traceback
 
 import multiprocessing as mp
 
@@ -615,22 +617,30 @@ def identify_transductions(ins):
 
 def resolve_insertion(args, ins, inslib_fa):
     ''' add data based on alignments of library to consensus '''
-    last_res = last_alignment(ins, inslib_fa)
-    ins = add_insdata(ins, last_res)
+    try:
+        last_res = last_alignment(ins, inslib_fa)
+        ins = add_insdata(ins, last_res)
 
-    if not args.skip_align and ins['INFO']['dr_count'] > 0:
-        tmp_bam = remap_discordant(ins, inslib_fa=inslib_fa, tmpdir=args.tmpdir)
+        if not args.skip_align and ins['INFO']['dr_count'] > 0:
+            tmp_bam = remap_discordant(ins, inslib_fa=inslib_fa, tmpdir=args.tmpdir)
 
-        if tmp_bam is not None:
-            bam = pysam.AlignmentFile(tmp_bam, 'rb')
-            ins['INFO']['support_bam_file'] = tmp_bam
-            ins['INFO']['mapped_target'] = bam.mapped
+            if tmp_bam is not None:
+                bam = pysam.AlignmentFile(tmp_bam, 'rb')
+                ins['INFO']['support_bam_file'] = tmp_bam
+                ins['INFO']['mapped_target'] = bam.mapped
 
-            os.remove(tmp_bam)
+                os.remove(tmp_bam)
 
-    if 'best_ins_matchpct' in ins['INFO']: ins = identify_transductions(ins)
+        if 'best_ins_matchpct' in ins['INFO']: ins = identify_transductions(ins)
 
-    return ins
+        return ins
+
+    except Exception, e:
+        sys.stderr.write('*'*60 + '\tencountered error in chunk: %s\n' % chunkname)
+        traceback.print_exc(file=sys.stderr)
+        sys.stderr.write("*"*60 + "\n")
+
+        return None
 
 
 def resolve_transductions(insertions):
@@ -675,7 +685,7 @@ def main(args):
         res = pool.apply_async(resolve_insertion, [args, ins, inslib_fa])
         results.append(res)
 
-    insertions = [res.get() for res in results]
+    insertions = [res.get() for res in results if res is not None]
 
     tebreak.text_summary(insertions, outfile=args.detail_out) # debug
 

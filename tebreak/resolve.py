@@ -188,18 +188,18 @@ def prepare_ref(fasta, refoutdir='tebreak_refs', makeFAI=True, makeBWA=True, mak
         logger.debug('Copying %s to %s ...' % (fasta, ref_fa))
         shutil.copy(fasta, ref_fa)
 
-    if not os.path.exists(ref_fa + '.fai') and makeFAI:
+    if makeFAI:
         logger.debug('Samtools indexing %s ...' % ref_fa)
         subprocess.call(['samtools', 'faidx', ref_fa])
         assert os.path.exists(ref_fa + '.fai'), 'could not samtools faidx %s' % ref_fa
 
-    if not os.path.exists(ref_fa + '.bwt') and makeBWA:
+    if makeBWA:
         logger.debug('Create BWA db for %s ...' % ref_fa)
         p = subprocess.Popen(['bwa', 'index', ref_fa], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         for line in p.stdout: pass
         assert os.path.exists(ref_fa + '.bwt'), 'could not bwa index %s' % ref_fa
 
-    if not os.path.exists(ref_fa + '.tis') and makeLAST:
+    if makeLAST:
         logger.debug('Create LAST db for %s ...' % ref_fa)
         subprocess.call(['lastdb', '-s', '4G', ref_fa, ref_fa])
         assert os.path.exists(ref_fa + '.tis'), 'could not lastdb -4G %s %s' % (ref_fa, ref_fa)

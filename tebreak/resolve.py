@@ -572,7 +572,6 @@ def identify_transductions(ins):
                 for segnum in range(num_segs):
                     if segtype == 'umap': segnum = -1-segnum
 
-                    seg_mapq = int(ins['INFO'][be+'_'+segtype+'_mpq'].split(',')[segnum])
                     if segnum != bedict[be].query_distnum:
                         tr_chrom = ins['INFO'][be+'_'+segtype+'_chr'].split(',')[segnum]
                         tr_start = ins['INFO'][be+'_'+segtype+'_pos'].split(',')[segnum]

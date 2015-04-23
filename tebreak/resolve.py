@@ -573,15 +573,17 @@ def identify_transductions(ins):
                     if segtype == 'umap': segnum = -1-segnum
 
                     if segnum != bedict[be].query_distnum:
-                        tr_chrom = ins['INFO'][be+'_'+segtype+'_chr'].split(',')[segnum]
-                        tr_start = ins['INFO'][be+'_'+segtype+'_pos'].split(',')[segnum]
-                        tr_end   = ins['INFO'][be+'_'+segtype+'_end'].split(',')[segnum]
-                        tr_side  = '5p'
+                        if segtype == 'dist':
+                            tr_chrom = ins['INFO'][be+'_'+segtype+'_chr'].split(',')[segnum]
+                            tr_start = ins['INFO'][be+'_'+segtype+'_pos'].split(',')[segnum]
+                            tr_end   = ins['INFO'][be+'_'+segtype+'_end'].split(',')[segnum]
 
+                        tr_side  = '5p'
                         if ins['INFO'][be+'_is_3prime']: tr_side = '3p'
 
                         tr_seqs.append(ins['INFO'][be+'_'+segtype+'_seq'].split(',')[segnum])
-                        tr_locs.append((tr_chrom, tr_start, tr_end, tr_side))
+                        if segtype == 'dist': tr_locs.append((tr_chrom, tr_start, tr_end, tr_side))
+                        if segtype == 'umap': tr_locs.append(('unmap', 0, 0, tr_side))
 
             # mapped distal sequence, unmapped transduced seq
             if segtype == 'dist':
@@ -637,7 +639,10 @@ def resolve_insertion(args, ins, inslib_fa):
     except Exception, e:
         sys.stderr.write('*'*60 + '\tencountered error:\n')
         traceback.print_exc(file=sys.stderr)
-        sys.stderr.write("Insertion structure:\n" + str(ins) + "\n")
+
+        if ins and 'INFO' in ins and 'chrom' in ins['INFO'] and 'be1_breakpos' in ins['INFO']:
+            sys.stderr.write("Insertion location: %s:%d\n" % (ins['INFO']['chrom'], ins['INFO']['be1_breakpos']))
+
         sys.stderr.write("*"*60 + "\n")
 
         return None

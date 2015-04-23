@@ -117,10 +117,10 @@ class TEIns:
         found_non_pA = False
 
         if 'be1_bestmatch' in self.ins:
-            if poly_A_frac(self.ins['be1_bestmatch'].target_align) < 0.95: found_non_pA = True
+            if poly_A_frac(self.ins['be1_bestmatch'].target_align) < 0.85: found_non_pA = True
 
         if 'be2_bestmatch' in self.ins:
-            if poly_A_frac(self.ins['be2_bestmatch'].target_align) < 0.95: found_non_pA = True
+            if poly_A_frac(self.ins['be2_bestmatch'].target_align) < 0.85: found_non_pA = True
 
         return not found_non_pA
 
@@ -625,6 +625,8 @@ def resolve_insertion(args, ins, inslib_fa):
             bam = pysam.AlignmentFile(tmp_bam, 'rb')
             ins['INFO']['support_bam_file'] = tmp_bam
             ins['INFO']['mapped_target'] = bam.mapped
+
+            os.remove(tmp_bam)
 
     if 'best_ins_matchpct' in ins['INFO']: ins = identify_transductions(ins)
 

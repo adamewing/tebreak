@@ -637,6 +637,7 @@ def resolve_insertion(args, ins, inslib_fa):
     except Exception, e:
         sys.stderr.write('*'*60 + '\tencountered error:\n')
         traceback.print_exc(file=sys.stderr)
+        sys.stderr.write("Insertion structure:\n" + str(ins) + "\n")
         sys.stderr.write("*"*60 + "\n")
 
         return None

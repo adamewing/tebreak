@@ -169,10 +169,18 @@ class TEIns:
 #######################################
 
 
-def best_match(last_results, query_name, req_target=None):
-    qres = [res for res in sorted(last_results) if res.query_id == query_name and (req_target is None or req_target == res.target_id)]
-    if len(qres) > 0:
-        return qres[0]
+def best_match(last_results, query_name, req_target=None, min_match=0.9):
+    #qres = [res for res in sorted(last_results) if res.query_id == query_name and (req_target is None or req_target == res.target_id)]
+    qres = []
+
+    for res in sorted(last_results):
+        if res.query_id == query_name:
+            if req_target is None or req_target == res.target_id:
+                if res.pct_match() > min_match:
+                    return res
+
+    #if len(qres) > 0:
+    #    return qres[0]
 
     return None
 

@@ -728,6 +728,6 @@ if __name__ == '__main__':
     parser.add_argument('--tmpdir', default='/tmp')
     parser.add_argument('--skip_align', action='store_true', default=False)
     parser.add_argument('-v', '--verbose', action='store_true', default=False)
-    parser.add_argument('--detail_out', default='tebreak.out', help='file to write detailed output')
+    parser.add_argument('--detail_out', default='resolve.out', help='file to write detailed output')
     args = parser.parse_args()
     main(args)

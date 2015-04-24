@@ -958,7 +958,7 @@ def fetch_clipped_reads(bams, chrom, start, end, filters):
             if filters['genome_mask'] is not None and chrom in filters['genome_mask']:
                 if filters['genome_mask'][chrom].find(read.pos, read.pos+1): masked = True
 
-            if not masked and not read.is_unmapped and not read.is_duplicate and read.mapq > 0:
+            if not masked and not read.is_unmapped and not read.is_duplicate: #and read.mapq > 0:
                 if read.rlen - read.alen >= int(filters['min_minclip']): # 'soft' clipped?
      
                     # length of 'minor' clip
@@ -1584,9 +1584,10 @@ def main(args):
         insertions += res.get()
     
     insertions = resolve_duplicates(insertions)
-    text_summary(insertions)
+    text_summary(insertions, outfile=args.detail_out)
 
     pickoutfn = re.sub('.bam$', '.tebreak.pickle', os.path.basename(args.bam))
+    if args.pickle is not None: pickoutfn = args.pickle
 
     with open(pickoutfn, 'w') as pickout:
         pickle.dump(insertions, pickout)
@@ -1628,6 +1629,7 @@ if __name__ == '__main__':
     parser.add_argument('--insertion_library', default=None)
 
     parser.add_argument('--tmpdir', default='/tmp', help='temporary directory (default = /tmp)')
+    parser.add_argument('--pickle', default=None, help='pickle output name')
     parser.add_argument('--detail_out', default='tebreak.out', help='file to write detailed output')
  
     #parser.add_argument('-v', '--verbose', action='store_true')

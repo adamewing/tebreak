@@ -562,9 +562,6 @@ class Insertion:
                 if refpos in range(*tsd_ref_interval):
                     if qrypos is not None:
                         tsdseq2 += junc2.seq[qrypos+junc2.qstart]
- 
-            if tsdseq1 == junc1.seq: tsdseq1 = 'full_match'
-            if tsdseq2 == junc2.seq: tsdseq2 = 'full_match'
 
             return tsdseq1, tsdseq2
 

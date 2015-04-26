@@ -149,6 +149,8 @@ class TEIns:
         if forest is not None:
             if self.genome_location_filter(forest): passed = False
 
+        if 'transducer' in self.ins: passed = False
+
         return passed
 
     def header(self):
@@ -178,9 +180,6 @@ def best_match(last_results, query_name, req_target=None, min_match=0.9):
             if req_target is None or req_target == res.target_id:
                 if res.pct_match() > min_match:
                     return res
-
-    #if len(qres) > 0:
-    #    return qres[0]
 
     return None
 
@@ -469,6 +468,19 @@ def best_ref(ins):
     return None
 
 
+def score_insertion(ins):
+    score = 0
+    bothends = 'be1_cons_seq' in ins['INFO'] and 'be2_cons_seq' in ins['INFO']
+
+    if 'be1_sr_count'  in ins['INFO']: score += ins['INFO']['be1_sr_count']
+    if 'be2_sr_count'  in ins['INFO']: score += ins['INFO']['be2_sr_count']
+    if 'mapped_target' in ins['INFO']: score += ins['INFO']['mapped_target']
+
+    if bothends: score *= 2
+
+    return score
+
+
 def make_tmp_ref(ins, ref_fa, tmpdir='/tmp'):
     ref_id = best_ref(ins)
     if ref_id is None:
@@ -658,11 +670,39 @@ def resolve_insertion(args, ins, inslib_fa):
 
 def resolve_transductions(insertions):
     ''' some insertions are actually transductions; try to work this out '''
-    be_coord_dict = dd(dict) # chrom --> pos --> ins
-    tr_coord_dict = dd(dict)
+    tr_coord_dict = dd(dict) # chrom --> pos --> [ins]
 
     for ins in insertions:
-        pass
+            for be in ('be1','be2'):
+                if be+'_trans_loc' in ins['INFO']:
+                    for (chrom, start, end, side) in ins['INFO'][be+'_trans_loc']:
+                        for pos in map(int, (start, end)):
+                            if pos not in tr_coord_dict[chrom]: tr_coord_dict[chrom][pos] = []
+                            tr_coord_dict[chrom][pos].append(ins)
+
+    for parent_ins in insertions:
+        for be in ('be1','be2'):
+            if parent_ins['INFO']['chrom'] in tr_coord_dict and int(parent_ins['INFO'][be+'_breakpos']) in tr_coord_dict[parent_ins['INFO']['chrom']]:
+                for trduct_ins in tr_coord_dict[parent_ins['INFO']['chrom']][int(parent_ins['INFO'][be+'_breakpos'])]:
+
+                    trduct_loc_string = '%s:%d-%d' % (trduct_ins['INFO']['chrom'], trduct_ins['INFO']['be1_breakpos'], trduct_ins['INFO']['be2_breakpos'])
+                    parent_loc_string = '%s:%d-%d' % (parent_ins['INFO']['chrom'], parent_ins['INFO']['be1_breakpos'], parent_ins['INFO']['be2_breakpos'])
+
+                    if score_insertion(parent_ins) < score_insertion(trduct_ins):
+                        if 'transducer' not in parent_ins['INFO']: parent_ins['INFO']['transducer'] = []
+                        if 'transduction' not in trduct_ins['INFO']: trduct_ins['INFO']['transduction'] = []
+
+                        parent_ins['INFO']['transducer'].append(trduct_loc_string)
+                        trduct_ins['INFO']['transduction'].append(parent_loc_string)
+
+                    else:
+                        if 'transducer' not in trduct_ins['INFO']: trduct_ins['INFO']['transducer'] = []
+                        if 'transduction' not in parent_ins['INFO']: parent_ins['INFO']['transduction'] = []
+
+                        parent_ins['INFO']['transduction'].append(trduct_loc_string)
+                        trduct_ins['INFO']['transducer'].append(parent_loc_string)
+
+    return insertions
 
 
 def resolve_unknown(insertions):
@@ -699,6 +739,8 @@ def main(args):
         results.append(res)
 
     insertions = [res.get() for res in results if res is not None]
+
+    insertions = resolve_transductions(insertions)
 
     tebreak.text_summary(insertions, outfile=args.detail_out) # debug
 

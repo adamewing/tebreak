@@ -1096,6 +1096,8 @@ def map_breakends(breakends, db, tmpdir='/tmp'):
     for read in sam.fetch(until_eof=True):
         breakdict[read.qname].mappings.append(read)
 
+    sam.close()
+
     os.remove(tmp_fa)
     os.remove(tmp_sam)
  
@@ -1390,6 +1392,8 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
         sr = fetch_clipped_reads(bams, chrom, start, end, filters)
         sr.sort()
 
+        for bam in bams: bam.close()
+
         logger.debug('Chunk %s: Building clusters from %d split reads ...' % (chunkname, len(sr)))
         clusters = build_sr_clusters(sr)
      
@@ -1524,7 +1528,7 @@ def expected_rpkm(bam_files, genome, intervals=None):
 
         km = total_length/1000.
 
-
+    for bam in bams: bam.close()
 
     return total_mapped_reads/km
 

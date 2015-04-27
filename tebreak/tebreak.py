@@ -684,7 +684,7 @@ class Insertion:
         for ext in ('','.amb','.ann','.bck','.bwt','.des','.fai','.pac','.prj','.sa','.sds','.ssp','.suf','.tis'):
             if os.path.exists(ctg_fa+ext): os.remove(ctg_fa+ext)
 
-        os.remove(cons_fasta)
+        if os.path.exists(cons_fasta): os.remove(cons_fasta)
 
         return self.be1_improved_cons, self.be2_improved_cons
 
@@ -736,7 +736,7 @@ class Insertion:
     def consensus_fasta(self, tmpdir='/tmp'):
         assert os.path.exists(tmpdir)
 
-        out_fasta = tmpdir + '/' + '.'.join(('consensus', self.be1.chrom, str(self.be1.breakpos), 'fa'))
+        out_fasta = tmpdir + '/' + '.'.join(('consensus', self.be1.chrom, str(self.be1.breakpos), str(uuid4()), 'fa'))
         with open(out_fasta, 'w') as out:
             out.write('>tebreak:%s:%d\n%s\n' % (self.be1.chrom, self.be1.breakpos, self.be1.consensus))
             if self.be2 is not None:
@@ -1229,7 +1229,7 @@ def minia(fq, tmpdir='/tmp'):
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=FNULL)
     for line in p.stdout: pass
 
-    os.remove(ctgbase + '.h5')
+    if os.path.exists(ctgbase + '.h5'): os.remove(ctgbase + '.h5')
 
     os.chdir(oldcwd)
     os.rmdir(tmpcwd)
@@ -1301,6 +1301,7 @@ def postprocess_insertions(insertions, filters, bwaref, bams, tmpdir='/tmp'):
         support_fq  = ins.supportreads_fastq(tmpdir, limit=filters['max_ins_reads'])
         if support_fq is None: return insertions
 
+        cwd = os.getcwd()
         support_asm = minia(support_fq, tmpdir=tmpdir)
 
         retry_counter = 0 # minia might not be the most reliable option...
@@ -1318,6 +1319,8 @@ def postprocess_insertions(insertions, filters, bwaref, bams, tmpdir='/tmp'):
 
         if os.path.exists(support_fq): os.remove(support_fq)
         if os.path.exists(support_asm): os.remove(support_asm)
+
+        if os.getcwd() != cwd: os.chdir(cwd)
 
     # collect altered breakends
     alt_be_list = []
@@ -1360,12 +1363,7 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
     chunkname = '%s:%d-%d' % (chrom, start, end)
 
     try:
-        bams = []
-        for bam in args.bam.split(','):
-            assert os.path.exists(bam)
-            bams.append(pysam.AlignmentFile(bam, 'rb'))
-
-        #bams = [pysam.AlignmentFile(bam, 'rb') for bam in args.bam.split(',')]
+        bams = [pysam.AlignmentFile(bam, 'rb') for bam in args.bam.split(',')]
 
         # would do this outside but can't pass a non-pickleable object
         if args.mask is not None: args.mask = build_mask(args.mask)

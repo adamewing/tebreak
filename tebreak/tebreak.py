@@ -3,6 +3,7 @@
 import os
 import re
 import sys
+import time
 import pysam
 import align
 import random
@@ -1359,7 +1360,12 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
     chunkname = '%s:%d-%d' % (chrom, start, end)
 
     try:
-        bams = [pysam.AlignmentFile(bam, 'rb') for bam in args.bam.split(',')]
+        bams = []
+        for bam in args.bam.split(','):
+            assert os.path.exists(bam)
+            bams.append(pysam.AlignmentFile(bam, 'rb'))
+
+        #bams = [pysam.AlignmentFile(bam, 'rb') for bam in args.bam.split(',')]
 
         # would do this outside but can't pass a non-pickleable object
         if args.mask is not None: args.mask = build_mask(args.mask)
@@ -1392,7 +1398,6 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
         sr = fetch_clipped_reads(bams, chrom, start, end, filters)
         sr.sort()
 
-        for bam in bams: bam.close()
 
         logger.debug('Chunk %s: Building clusters from %d split reads ...' % (chunkname, len(sr)))
         clusters = build_sr_clusters(sr)
@@ -1441,9 +1446,11 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
 
             logger.debug('Finished chunk: %s' % chunkname)
 
+            for bam in bams: bam.close()
             return summarised_insertions
 
         else:
+            for bam in bams: bam.close()
             return []
 
     except Exception, e:

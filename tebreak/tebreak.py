@@ -961,9 +961,13 @@ def fetch_clipped_reads(bams, chrom, start, end, filters):
      
                     # length of 'minor' clip
                     altclip = min(read.qstart, read.rlen-read.qend)
+
+                    # junk bases
+                    N_count = 0
+                    if 'N' in read.seq: N_count = Counter(read.seq)['N']
      
                     if altclip <= 2: # could add as a filter
-                        if splitqual(read) <= filters['max_D_score']:
+                        if N_count <= filters['max_N_consensus'] and splitqual(read) <= filters['max_D_score']:
                             chrom = str(bam.getrname(read.tid))
                             splitreads.append(SplitRead(chrom, read, bam.filename))
  

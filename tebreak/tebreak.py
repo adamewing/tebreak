@@ -1089,19 +1089,40 @@ def map_breakends(breakends, db, tmpdir='/tmp'):
     with open(tmp_sam, 'w') as out:
         sam_cmd  = ['bwa', 'mem', '-k', '10', '-w', '500', '-M', '-v', '0', db, tmp_fa]
         p = subprocess.Popen(sam_cmd, stdout=subprocess.PIPE, stderr=FNULL)
+
         for line in p.stdout:
             out.write(line)
  
     sam = pysam.AlignmentFile(tmp_sam)
  
-    for read in sam.fetch(until_eof=True):
-        breakdict[read.qname].mappings.append(read)
+    passed_parse = False
+
+    # rarely, pysam will fail to parse the bwa-mem generated SAM and I haven't worked out why... workaround for now
+    while not passed_parse:
+        try:
+            for i, read in enumerate(sam.fetch(until_eof=True)):
+                breakdict[read.qname].mappings.append(read)
+            passed_parse = True
+
+        except IOError as e:
+            sys.stderr.write("warning: pysam failed parse at read %d, modifying file and re-try...\n" % i)
+            sam.close()
+            lines = []
+            with open(tmp_sam, 'r') as sam:
+                lines = [line for line in sam]
+
+            with open(tmp_sam, 'w') as sam:
+                for n, line in enumerate(lines):
+                    if line.startswith('@'): n -= 1 # header
+                    if n < i: sam.write(line)
+
+            sam = pysam.AlignmentFile(tmp_sam)
 
     sam.close()
 
     os.remove(tmp_fa)
     os.remove(tmp_sam)
- 
+
     return breakdict.values()
 
 

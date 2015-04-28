@@ -1087,7 +1087,7 @@ def map_breakends(breakends, db, tmpdir='/tmp'):
     FNULL = open(os.devnull, 'w')
 
     with open(tmp_sam, 'w') as out:
-        sam_cmd  = ['bwa', 'mem', '-k', '10', '-w', '500', '-M', '-Y', '-v', '0', db, tmp_fa]
+        sam_cmd  = ['bwa', 'mem', '-k', '10', '-w', '500', '-M', '-v', '0', db, tmp_fa]
         p = subprocess.Popen(sam_cmd, stdout=subprocess.PIPE, stderr=FNULL)
 
         for line in p.stdout:

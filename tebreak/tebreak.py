@@ -26,7 +26,7 @@ from collections import OrderedDict as od
 from collections import defaultdict as dd
 from bx.intervals.intersection import Intersecter, Interval # pip install bx-python
 
-
+import profile
  
 #######################################
 ## Classes                           ##
@@ -1605,8 +1605,7 @@ def main(args):
     reslist = []
 
     for chunk in chunks:
-        # ins_info = run_chunk(args, *chunk) # uncomment for mp debug
-        # text_summary(ins_info)             # uncomment for mp debug
+        # run_chunk(args, exp_rpkm, chunk[0], chunk[1], chunk[2]) # uncomment for mp debug
         res = pool.apply_async(run_chunk, [args, exp_rpkm, chunk[0], chunk[1], chunk[2]])
         reslist.append(res)
 
@@ -1623,10 +1622,10 @@ def main(args):
     with open(pickoutfn, 'w') as pickout:
         pickle.dump(insertions, pickout)
 
-    # if not args.no_shared_mem:
-    #     sys.stderr.write("unloading bwa index %s from shared memory ...\n" % args.bwaref)
-    #     p = subprocess.Popen(['bwa', 'shm', '-d'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    #     for line in p.stdout: pass # wait for bwa to unload
+    if not args.no_shared_mem:
+        sys.stderr.write("unloading bwa index %s from shared memory ...\n" % args.bwaref)
+        p = subprocess.Popen(['bwa', 'shm', '-d'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        for line in p.stdout: pass # wait for bwa to unload
 
     logger.debug('Pickled to %s' % pickoutfn)
 

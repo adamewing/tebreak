@@ -668,7 +668,6 @@ def identify_transductions(ins):
                                        )
                         )
 
-
             if len(tr_seqs) > 0:
                 ins['INFO'][be+'_trans_seq'] = tr_seqs
                 ins['INFO'][be+'_trans_loc'] = tr_locs
@@ -688,8 +687,9 @@ def get_bam_info(bam, ins):
         if read.qname.split('.')[-1] == 'DR': dr_count += 1
         if read.qname.split('.')[-1] == 'SR': sr_count += 1
 
-    ins['INFO']['remap_min_pos']  = min(min_positions)
-    ins['INFO']['remap_max_pos']  = max(max_positions)
+    if len(min_positions) > 0: ins['INFO']['remap_min_pos'] = min(min_positions)
+    if len(max_positions) > 0: ins['INFO']['remap_max_pos'] = max(max_positions)
+
     ins['INFO']['remap_sr_count'] = sr_count
     ins['INFO']['remap_dr_count'] = dr_count
 
@@ -713,7 +713,7 @@ def resolve_insertion(args, ins, inslib_fa):
 
                 if not args.keep_tmp_bams:
                     if os.path.exists(tmp_bam): os.remove(tmp_bam)
-                    if os.path.exists(tmp_bam + '.bai'): os.remove(tmp_bam)
+                    if os.path.exists(tmp_bam + '.bai'): os.remove(tmp_bam + '.bai')
 
         if 'best_ins_matchpct' in ins['INFO']: ins = identify_transductions(ins)
 
@@ -766,11 +766,6 @@ def resolve_transductions(insertions):
                         trduct_ins['INFO']['transducer'].append(parent_loc_string)
 
     return insertions
-
-
-def resolve_unknown(insertions):
-    ''' don't bother with alignment to consensus, attempt to assemble unknown insertions '''
-    pass
 
 
 def main(args):

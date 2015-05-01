@@ -45,6 +45,8 @@ class TEIns:
         self.out['TE_Match_Pct'] = self.be_avg_pctmatch()
         self.support()
         self.tsd()
+        self.sample_list()
+        self.consensus()
 
     def assign35ends(self):
         self.out['3_Prime_End'] = 'NA'
@@ -80,8 +82,28 @@ class TEIns:
         self.out['TE_Align_Start'] = 'NA'
         self.out['TE_Align_End']   = 'NA'
 
-        if self.end3 + '_bestmatch' in self.ins: self.out['TE_Align_End']   = self.ins[self.end3 + '_bestmatch'].target_end
+        self.out['Orient_5p'] = 'NA'
+        self.out['Orient_3p'] = 'NA'
+
+        if self.end5 + '_orient' in self.ins: self.out['Orient_5p'] = self.ins[self.end5 + '_orient']
+        if self.end3 + '_orient' in self.ins: self.out['Orient_3p'] = self.ins[self.end3 + '_orient']
+
         if self.end5 + '_bestmatch' in self.ins: self.out['TE_Align_Start'] = self.ins[self.end5 + '_bestmatch'].target_start
+        if self.end3 + '_bestmatch' in self.ins: self.out['TE_Align_End']   = self.ins[self.end3 + '_bestmatch'].target_end
+
+        if 'remap_min_pos' in self.ins:
+            if self.out['TE_Align_Start'] == 'NA' or self.out['TE_Align_Start'] > self.ins['remap_min_pos']:
+                self.out['TE_Align_Start'] = self.ins['remap_min_pos']
+
+        if 'remap_min_pos' in self.ins:
+            
+            if self.out['TE_Align_End'] == 'NA' or self.out['TE_Align_End'] < self.ins['remap_max_pos']:
+                self.out['TE_Align_End'] = self.ins['remap_max_pos']
+
+        self.out['Inversion'] = 'NA'
+        if 'inversion' in self.ins:
+            if self.ins['inversion']: self.out['Inversion'] = 'Y'
+            else: self.out['Inversion'] = 'N'
 
     def junctions(self):
         j = []
@@ -92,12 +114,14 @@ class TEIns:
     def support(self):
         self.out['Split_reads_3prime'] = 0
         self.out['Split_reads_5prime'] = 0
-        self.out['Discordant_reads']   = self.ins['dr_count']
+        self.out['Remapped_Discordant'] = 0
+        self.out['Remapped_Splitreads'] = 0
 
         if self.end3 + '_sr_count' in self.ins: self.out['Split_reads_3prime'] = self.ins[self.end3 + '_sr_count']
         if self.end5 + '_sr_count' in self.ins: self.out['Split_reads_5prime'] = self.ins[self.end5 + '_sr_count']
 
-
+        if 'remap_dr_count' in self.ins: self.out['Remapped_Discordant'] = self.ins['remap_dr_count']
+        if 'remap_dr_count' in self.ins: self.out['Remapped_Splitreads'] = self.ins['remap_sr_count']
 
     def tsd(self):
         self.out['TSD_3prime'] = 'NA'
@@ -106,13 +130,30 @@ class TEIns:
         if self.end3 + '_end_over' in self.ins: self.out['TSD_3prime'] = self.ins[self.end3 + '_end_over']
         if self.end5 + '_end_over' in self.ins: self.out['TSD_5prime'] = self.ins[self.end5 + '_end_over']
 
+    def sample_list(self):
+        samples = dd(int)
+
+        for be in ('be1', 'be2'):
+            if be + '_bf_count' in self.ins:
+                for sample_support in self.ins[be + '_bf_count']: sample, count = sample_support.split('|')
+                samples[sample] += int(count)
+
+            self.out['Sample_count']   = len(samples) 
+            self.out['Sample_support'] = ','.join(['%s|%d' % (sample, count) for sample, count in samples.iteritems()])
+
+    def consensus(self):
+        self.out['Consensus_5p'] = 'NA'
+        self.out['Consensus_3p'] = 'NA'
+
+        if self.end5 + '_cons_seq' in self.ins: self.out['Consensus_5p'] = self.ins[self.end5 + '_cons_seq']
+        if self.end3 + '_cons_seq' in self.ins: self.out['Consensus_3p'] = self.ins[self.end3 + '_cons_seq']
+
     def be_avg_pctmatch(self):
         m = []
         if 'be1_bestmatch' in self.ins: m.append(self.ins['be1_bestmatch'].pct_match())
         if 'be2_bestmatch' in self.ins: m.append(self.ins['be2_bestmatch'].pct_match())
         if len(m) == 0: return 0.0
         return float(sum(m)) / float(len(m))
-
 
     def polyA_filter(self):
         ''' return true if only supported by poly-A matches '''
@@ -135,7 +176,6 @@ class TEIns:
                     return True
 
         return False
-
 
     def pass_filter(self, forest):
         passed = True
@@ -636,6 +676,26 @@ def identify_transductions(ins):
     return ins
 
 
+def get_bam_info(bam, ins):
+    max_positions = []
+    min_positions = []
+    sr_count = 0
+    dr_count = 0
+
+    for read in bam.fetch():
+        max_positions.append(read.get_reference_positions()[-1])
+        min_positions.append(read.get_reference_positions()[0])
+        if read.qname.split('.')[-1] == 'DR': dr_count += 1
+        if read.qname.split('.')[-1] == 'SR': sr_count += 1
+
+    ins['INFO']['remap_min_pos']  = min(min_positions)
+    ins['INFO']['remap_max_pos']  = max(max_positions)
+    ins['INFO']['remap_sr_count'] = sr_count
+    ins['INFO']['remap_dr_count'] = dr_count
+
+    return ins
+
+
 def resolve_insertion(args, ins, inslib_fa):
     ''' add data based on alignments of library to consensus '''
     try:
@@ -649,8 +709,11 @@ def resolve_insertion(args, ins, inslib_fa):
                 bam = pysam.AlignmentFile(tmp_bam, 'rb')
                 ins['INFO']['support_bam_file'] = tmp_bam
                 ins['INFO']['mapped_target'] = bam.mapped
+                ins = get_bam_info(bam, ins)
 
-                os.remove(tmp_bam)
+                if not args.keep_tmp_bams:
+                    if os.path.exists(tmp_bam): os.remove(tmp_bam)
+                    if os.path.exists(tmp_bam + '.bai'): os.remove(tmp_bam)
 
         if 'best_ins_matchpct' in ins['INFO']: ins = identify_transductions(ins)
 
@@ -770,6 +833,7 @@ if __name__ == '__main__':
     parser.add_argument('--tmpdir', default='/tmp')
     parser.add_argument('--skip_align', action='store_true', default=False)
     parser.add_argument('-v', '--verbose', action='store_true', default=False)
+    parser.add_argument('--keep_tmp_bams', action='store_true', default=False)
     parser.add_argument('--detail_out', default='resolve.out', help='file to write detailed output')
     args = parser.parse_args()
     main(args)

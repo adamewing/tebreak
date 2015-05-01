@@ -493,7 +493,7 @@ class Insertion:
 
         self.info = od() # set with self.compile_info()
         self.discoreads = []
-        self.dr_clusters = []
+        #self.dr_clusters = []
         self.fastqrecs = []
 
     def __len__(self):
@@ -693,7 +693,8 @@ class Insertion:
         ''' discordant support reads marked DR, split support reads marked SR '''
         assert os.path.exists(outdir)
 
-        outreads = od()
+        outreads  = od()
+        usedreads = {}
 
         out_fastq = outdir + '/' + '.'.join(('supportreads', self.be1.chrom, str(self.be1.breakpos), 'fq'))
         with open(out_fastq, 'w') as out:
@@ -709,21 +710,34 @@ class Insertion:
                     for r in readlist:
                         read = r.read
                         name = read.qname
+                        unseen = True
                         if read.is_read1:
+                            if name + '/1' in usedreads: unseen = False
+                            usedreads[name + '/1'] = True
                             name += '.%s/1' % rtype
+
                         if read.is_read2:
+                            if name + '/2' in usedreads: unseen = False
+                            usedreads[name + '/2'] = True
                             name += '.%s/2' % rtype
 
-                        if len(read.seq) > min_readlen: outreads[name] = read.seq + '\n+\n' + read.qual
+                        if len(read.seq) > min_readlen and unseen: outreads[name] = read.seq + '\n+\n' + read.qual
 
                         if rtype == 'DR' and r.mate_read is not None: # get discordant mates
                             read = r.mate_read
+                            unseen = True
+
                             if read.is_read1:
+                                if name + '/1' in usedreads: unseen = False
+                                usedreads[name + '/1'] = True
                                 name += '.%s/1' % rtype
+
                             if read.is_read2:
+                                if name + '/2' in usedreads: unseen = False
+                                usedreads[name + '/2'] = True
                                 name += '.%s/2' % rtype
 
-                            if len(read.seq) > min_readlen: outreads[name] = read.seq + '\n+\n' + read.qual
+                            if len(read.seq) > min_readlen and unseen: outreads[name] = read.seq + '\n+\n' + read.qual
 
             if len(outreads) >= limit or len(outreads) == 0: return None
 
@@ -853,10 +867,10 @@ class Insertion:
             self.info['be2_sr_count'] = 0
 
         # discordant read info
-        self.dr_clusters = build_dr_clusters(self)
+        #self.dr_clusters = build_dr_clusters(self)
 
         self.info['dr_count'] = len(self.discoreads)
-        self.info['dr_clusters']  = map(lambda x : x.summary_tuple(), self.dr_clusters)
+        #self.info['dr_clusters']  = map(lambda x : x.summary_tuple(), self.dr_clusters)
         self.info['dr_unmapped_mates'] = len([dr for dr in self.discoreads if dr.mate_read is not None and dr.mate_read.is_unmapped])
 
  
@@ -1030,26 +1044,26 @@ def build_sr_clusters(splitreads, searchdist=100): # TODO PARAM,
     return clusters
 
 
-def build_dr_clusters(insertion):
-    ''' cluster discordant read ends assocaited with insertion '''
-
-    clusters  = []
- 
-    for dr in sorted(insertion.discoreads):
-        if len(clusters) == 0:
-            clusters.append(DiscoCluster(dr))
- 
-        elif clusters[-1].chrom != dr.mate_chrom:
-            clusters.append(DiscoCluster(dr))
- 
-        else:
-            if ref_overlap(clusters[-1].reads[-1].mate_read, dr.mate_read) is None:
-                clusters.append(DiscoCluster(dr))
- 
-            else:
-                clusters[-1].add_read(dr)
-
-    return clusters
+#def build_dr_clusters(insertion):
+#    ''' cluster discordant read ends assocaited with insertion '''
+#
+#    clusters  = []
+# 
+#    for dr in sorted(insertion.discoreads):
+#        if len(clusters) == 0:
+#            clusters.append(DiscoCluster(dr))
+# 
+#        elif clusters[-1].chrom != dr.mate_chrom:
+#            clusters.append(DiscoCluster(dr))
+# 
+#        else:
+#            if ref_overlap(clusters[-1].reads[-1].mate_read, dr.mate_read) is None:
+#                clusters.append(DiscoCluster(dr))
+# 
+#            else:
+#                clusters[-1].add_read(dr)
+#
+#    return clusters
 
 
 def build_breakends(cluster, filters, tmpdir='/tmp'):

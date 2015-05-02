@@ -6,6 +6,8 @@ import os
 import argparse
 import logging
 
+from collections import Counter
+
 logger = logging.getLogger(__name__)
 
 def rmtag(read):
@@ -22,7 +24,7 @@ def rmtag(read):
     return read
 
 
-def parsereads(bamfn, outfn, maxdist=10000, minclip=5):
+def parsereads(bamfn, outfn, maxdist=10000, minclip=5, maxN=4):
     bam = pysam.AlignmentFile(bamfn, 'rb')
     out = pysam.AlignmentFile(outfn, 'wb', template=bam)
 
@@ -53,9 +55,19 @@ def parsereads(bamfn, outfn, maxdist=10000, minclip=5):
 
         if read.is_duplicate: output = False
 
+        if not read.is_unmapped and 'H' in read.cigarstring: output = False
+
+        if output:
+            if 'N' in read.seq and Counter(read.seq)['N'] >= maxN: output = False 
+
         if output: out.write(rmtag(read))
 
-        if i % tick == 0: logger.debug('%s: parsed %d reads, last position: %s:%d' % (os.path.basename(bamfn), i, bam.getrname(read.tid), read.pos))
+        if i % tick == 0:
+            if read.is_unmapped:
+                logger.debug('%s: parsed %d reads, last position unmapped' % (os.path.basename(bamfn), i))
+            else:
+                logger.debug('%s: parsed %d reads, last position: %s:%d' % (os.path.basename(bamfn), i, bam.getrname(read.tid), read.pos))
+                
 
     bam.close()
     out.close()

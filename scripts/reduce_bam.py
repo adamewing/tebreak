@@ -55,7 +55,7 @@ def parsereads(bamfn, outfn, maxdist=10000, minclip=5):
 
         if output: out.write(rmtag(read))
 
-        if i % tick == 0: logger.debug('parsed %d reads, last position: %s:%d' % (i, bam.getrname(read.tid), read.pos))
+        if i % tick == 0: logger.debug('%s: parsed %d reads, last position: %s:%d' % (os.path.basename(bamfn), i, bam.getrname(read.tid), read.pos))
 
     bam.close()
     out.close()

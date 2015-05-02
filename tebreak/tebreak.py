@@ -1605,10 +1605,18 @@ def main(args):
 
     if args.interval_bed is None:
         chunks = genome.chunk(chunk_count, sorted=True, pad=5000)
-        exp_rpkm = expected_rpkm(args.bam.split(','), genome)
+
+        if args.rpkm_bam:
+            exp_rpkm = expected_rpkm(args.rpkm_bam.split(','), genome)
+        else:
+            exp_rpkm = expected_rpkm(args.bam.split(','), genome)
 
     else:
-        exp_rpkm = expected_rpkm(args.bam.split(','), genome, intervals=args.interval_bed)
+        if args.rpkm_bam:
+            exp_rpkm = expected_rpkm(args.rpkm_bam.split(','), genome, intervals=args.interval_bed)
+        else:
+            exp_rpkm = expected_rpkm(args.bam.split(','), genome, intervals=args.interval_bed)
+
         with open(args.interval_bed, 'r') as bed:
             chunks = [(line.strip().split()[0], int(line.strip().split()[1]), int(line.strip().split()[2])) for line in bed]
 
@@ -1662,6 +1670,7 @@ if __name__ == '__main__':
     parser.add_argument('--min_consensus_score', default=0.95, help='quality of consensus alignment (default = 0.95)')
     parser.add_argument('-m', '--mask', default=None, help='BED file of masked regions: recommended for WGS data')
 
+    parser.add_argument('--rpkm_bam', default=None, help='use alternate BAM(s) for RPKM calculation: use original BAMs if using reduced BAM(s) for -b/--bam')
     parser.add_argument('--max_fold_rpkm', default=10)
     parser.add_argument('--max_ins_reads', default=1000)
     parser.add_argument('--min_split_reads', default=4)

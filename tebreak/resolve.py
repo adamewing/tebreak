@@ -787,6 +787,7 @@ def main(args):
         logger.debug('building genome reference filter MAF from: %s vs %s' %(args.inslib_fasta, args.filter_ref_last_db))
         assert os.path.exists(args.filter_ref_last_db + '.suf'), 'reference %s not indexed with lastdb' % args.filter_ref_last_db
         filter_ref_maf = make_inslib_mask(args.inslib_fasta, args.filter_ref_last_db, args.refoutdir)
+        forest = last_interval_forest(filter_ref_maf)
 
     results = []
 

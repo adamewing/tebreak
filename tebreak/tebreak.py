@@ -1321,11 +1321,16 @@ def filter_insertions(insertions, filters, tmpdir='/tmp'):
         if len(ins.discoreads) < filters['min_discordant_reads']: exclude = True
         if ins.num_sr() < filters['min_split_reads']: exclude = True
 
-        if filters['restrict_to_bam'] is not None:
-            if len(bams) > 1 or filters['restrict_to_bam'] not in bams: exclude = True
+        if filters['exclude_bam']:
+            for bam in bams:
+                if bam in filters['exclude_bam']: exclude = True
 
-        if filters['restrict_to_readgroup'] is not None:
-            if len(rgs) > 1 or filters['restrict_to_readgroup'] not in rgs: exclude = True
+        if filters['exclude_readgroup']:
+            for rg in rgs:
+                if rg in filters['exclude_rg']: exclude = True
+
+        if filters['max_bam_count'] > 0:
+            if len(bams) > filters['max_bam_count']: exclude = True
 
         if filters['insertion_library'] is not None and not exclude:
             if ins.align_filter(filters['insertion_library'], tmpdir=tmpdir): exclude = True
@@ -1422,11 +1427,15 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
             'min_prox_mapq':         int(args.min_prox_mapq),
             'max_N_consensus':       int(args.max_N_consensus),
             'max_rpkm':              int(args.max_fold_rpkm)*exp_rpkm,
-            'restrict_to_bam':       args.restrict_to_bam,
-            'restrict_to_readgroup': args.restrict_to_readgroup,
+            'exclude_bam':           [],
+            'exclude_readgroup':     [],
+            'max_bam_count':         int(args.max_bam_count),
             'insertion_library':     args.insertion_library,
             'genome_mask':           args.mask
         }
+
+        if args.exclude_bam is not None: filters['exclude_bam'] = map(os.path.basename, args.exclude_bam.split(','))
+        if args.exclude_readgroup is not None: filters['exclude_readgroup'] = args.exclude_readgroup.split(',')
 
         insertions = []
      
@@ -1516,7 +1525,6 @@ def resolve_duplicates(insertions):
             if prefer_insertion(ins, insertions[insdict[be1]]):
                 insdict[be1] = n
                 insdict[be2] = n
-
 
     return [insertions[n] for n in list(set(insdict.values()))]
 
@@ -1677,8 +1685,9 @@ if __name__ == '__main__':
     parser.add_argument('--min_discordant_reads', default=4)
     parser.add_argument('--min_prox_mapq', default=10)
     parser.add_argument('--max_N_consensus', default=4, help='exclude breakend seqs with > this number of N bases (default = 4)')
-    parser.add_argument('--restrict_to_bam', default=None)
-    parser.add_argument('--restrict_to_readgroup', default=None)
+    parser.add_argument('--exclude_bam', default=None, help='may be comma delimited')
+    parser.add_argument('--exclude_readgroup', default=None, help='may be comma delimited')
+    parser.add_argument('--max_bam_count', default=0)
     parser.add_argument('--insertion_library', default=None)
 
     parser.add_argument('--tmpdir', default='/tmp', help='temporary directory (default = /tmp)')

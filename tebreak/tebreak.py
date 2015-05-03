@@ -1291,6 +1291,29 @@ def build_mask(bedfile):
     return forest
 
 
+def avgmap(maptabix, chrom, start, end):
+    ''' return average mappability across chrom:start-end region; maptabix = pysam.Tabixfile'''
+    scores = []
+
+    if chrom in maptabix.contigs:
+        for rec in maptabix.fetch(chrom, int(start), int(end)):
+            mchrom, mstart, mend, mscore = rec.strip().split()
+            mstart, mend = int(mstart), int(mend)
+            mscore = float(mscore)
+
+            while mstart < mend and mstart:
+                mstart += 1
+                if mstart >= int(start) and mstart <= int(end):
+                    scores.append(mscore)
+
+        if len(scores) > 0:
+            return sum(scores) / float(len(scores))
+        else:
+            return 0.0
+    else:
+        return 0.0
+
+
 def summarise_insertion(ins):
     ''' returns a pickleable version of the insertion information '''
     pi = dd(dict)
@@ -1412,6 +1435,8 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
         # would do this outside but can't pass a non-pickleable object
         if args.mask is not None: args.mask = build_mask(args.mask)
 
+        if args.map_tabix is not None: args.map_tabix = pysam.Tabixfile(args.map_tabix)
+
         start = int(start)
         end   = int(end)
 
@@ -1431,7 +1456,9 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
             'exclude_readgroup':     [],
             'max_bam_count':         int(args.max_bam_count),
             'insertion_library':     args.insertion_library,
-            'genome_mask':           args.mask
+            'genome_mask':           args.mask,
+            'map_tabix':             args.map_tabix,
+            'min_mappability':       float(args.min_mappability)
         }
 
         if args.exclude_bam is not None: filters['exclude_bam'] = map(os.path.basename, args.exclude_bam.split(','))
@@ -1456,16 +1483,21 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
             cl_readcount = 0
             cl_min, cl_max = cluster.find_extrema()
 
-            for bam in bams:
-                cl_readcount += sum([not read.is_unmapped for read in bam.fetch(cluster.chrom, cl_min, cl_max)])
+            mappability = 1.0
+            if filters['map_tabix'] is not None: mappability = avgmap(filters['map_tabix'], cluster.chrom, cl_min, cl_max)
 
-            rpkm = cl_readcount/((cl_max-cl_min)/1000.)
+            if mappability > filters['min_mappability']:
 
-            if filters['max_rpkm'] == 0 or rpkm < filters['max_rpkm']:
-                breakends += build_breakends(cluster, filters, tmpdir=args.tmpdir)
+                for bam in bams:
+                    cl_readcount += sum([not read.is_unmapped for read in bam.fetch(cluster.chrom, cl_min, cl_max)])
 
-            else:
-                logger.debug('Chunk %s, cluster %d-%d over max RPKM with %f' % (chunkname, cl_min, cl_max, rpkm))
+                rpkm = cl_readcount/((cl_max-cl_min)/1000.)
+
+                if filters['max_rpkm'] == 0 or rpkm < filters['max_rpkm']:
+                    breakends += build_breakends(cluster, filters, tmpdir=args.tmpdir)
+
+                else:
+                    logger.debug('Chunk %s, cluster %d-%d over max RPKM with %f' % (chunkname, cl_min, cl_max, rpkm))
      
         logger.debug('Chunk %s: Mapping %d breakends ...' % (chunkname, len(breakends)))
         if len(breakends) > 0:
@@ -1676,25 +1708,26 @@ if __name__ == '__main__':
     parser.add_argument('--min_maxclip', default=10, help='min. longest clipped bases per cluster (default = 10)')
     parser.add_argument('--min_sr_per_break', default=1, help='minimum split reads per breakend (default = 1)')
     parser.add_argument('--min_consensus_score', default=0.95, help='quality of consensus alignment (default = 0.95)')
-    parser.add_argument('-m', '--mask', default=None, help='BED file of masked regions: recommended for WGS data')
+    parser.add_argument('-m', '--mask', default=None, help='BED file of masked regions')
 
     parser.add_argument('--rpkm_bam', default=None, help='use alternate BAM(s) for RPKM calculation: use original BAMs if using reduced BAM(s) for -b/--bam')
-    parser.add_argument('--max_fold_rpkm', default=10)
-    parser.add_argument('--max_ins_reads', default=1000)
-    parser.add_argument('--min_split_reads', default=4)
-    parser.add_argument('--min_discordant_reads', default=4)
-    parser.add_argument('--min_prox_mapq', default=10)
+    parser.add_argument('--max_fold_rpkm', default=10, help='ignore insertions supported by rpkm*max_fold_rpkm reads (default = 10)')
+    parser.add_argument('--max_ins_reads', default=1000, help='maximum number of reads per insertion call (default = 1000)')
+    parser.add_argument('--min_split_reads', default=4, help='minimum total split reads per insertion call (default = 4)')
+    parser.add_argument('--min_discordant_reads', default=4, help='minimum discordant read count (default = 4)')
+    parser.add_argument('--min_prox_mapq', default=10, help='minimum map quality for proximal subread (default = 10)')
     parser.add_argument('--max_N_consensus', default=4, help='exclude breakend seqs with > this number of N bases (default = 4)')
     parser.add_argument('--exclude_bam', default=None, help='may be comma delimited')
     parser.add_argument('--exclude_readgroup', default=None, help='may be comma delimited')
-    parser.add_argument('--max_bam_count', default=0)
-    parser.add_argument('--insertion_library', default=None)
+    parser.add_argument('--max_bam_count', default=0, help='maximum number of bams supporting per insertion')
+    parser.add_argument('--insertion_library', default=None, help='for pre-selecting insertion types')
+    parser.add_argument('--map_tabix', default=None, help='tabix-indexed BED of mappability scores')
+    parser.add_argument('--min_mappability', default=0.5, help='minimum mappability (default = 0.5; only matters with --map_tabix)')
 
     parser.add_argument('--tmpdir', default='/tmp', help='temporary directory (default = /tmp)')
     parser.add_argument('--pickle', default=None, help='pickle output name')
     parser.add_argument('--detail_out', default='tebreak.out', help='file to write detailed output')
  
-    #parser.add_argument('-v', '--verbose', action='store_true')
     parser.add_argument('--no_shared_mem', action='store_true')
  
     args = parser.parse_args()

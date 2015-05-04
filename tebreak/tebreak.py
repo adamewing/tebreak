@@ -1484,7 +1484,9 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
             cl_min, cl_max = cluster.find_extrema()
 
             mappability = 1.0
-            if filters['map_tabix'] is not None: mappability = avgmap(filters['map_tabix'], cluster.chrom, cl_min, cl_max)
+            if filters['map_tabix'] is not None:
+                if cluster.chrom in filters['map_tabix'].contigs:
+                    mappability = avgmap(filters['map_tabix'], cluster.chrom, cl_min, cl_max)
 
             if mappability > filters['min_mappability']:
 

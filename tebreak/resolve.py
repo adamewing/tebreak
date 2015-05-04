@@ -135,8 +135,9 @@ class TEIns:
 
         for be in ('be1', 'be2'):
             if be + '_bf_count' in self.ins:
-                for sample_support in self.ins[be + '_bf_count']: sample, count = sample_support.split('|')
-                samples[sample] += int(count)
+                for sample_support in self.ins[be + '_bf_count']:
+                    sample, count = sample_support.split('|')
+                    samples[sample] += int(count)
 
             self.out['Sample_count']   = len(samples) 
             self.out['Sample_support'] = ','.join(['%s|%d' % (sample, count) for sample, count in samples.iteritems()])

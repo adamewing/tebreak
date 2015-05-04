@@ -495,6 +495,7 @@ class Insertion:
         self.discoreads = []
         #self.dr_clusters = []
         self.fastqrecs = []
+        self.mappability = None
 
     def __len__(self):
         ''' return total number of reads (sr+dr) associated with insertion '''
@@ -765,6 +766,9 @@ class Insertion:
 
         self.info['ins_uuid'] = self.uuid
         self.info['chrom'] = self.be1.chrom
+        self.info['min_supporting_base'] = self.min_supporting_base()
+        self.info['max_supporting_base'] = self.max_supporting_base()
+        self.info['mappability'] = self.mappability
 
         self.info['be1_breakpos'] = self.be1.breakpos
         self.info['be1_obj_uuid'] = self.be1.uuid
@@ -865,9 +869,6 @@ class Insertion:
 
         if 'be2_sr_count' not in self.info:
             self.info['be2_sr_count'] = 0
-
-        # discordant read info
-        #self.dr_clusters = build_dr_clusters(self)
 
         self.info['dr_count'] = len(self.discoreads)
         #self.info['dr_clusters']  = map(lambda x : x.summary_tuple(), self.dr_clusters)
@@ -1042,28 +1043,6 @@ def build_sr_clusters(splitreads, searchdist=100): # TODO PARAM,
                 clusters[-1].add_splitread(sr)
 
     return clusters
-
-
-#def build_dr_clusters(insertion):
-#    ''' cluster discordant read ends assocaited with insertion '''
-#
-#    clusters  = []
-# 
-#    for dr in sorted(insertion.discoreads):
-#        if len(clusters) == 0:
-#            clusters.append(DiscoCluster(dr))
-# 
-#        elif clusters[-1].chrom != dr.mate_chrom:
-#            clusters.append(DiscoCluster(dr))
-# 
-#        else:
-#            if ref_overlap(clusters[-1].reads[-1].mate_read, dr.mate_read) is None:
-#                clusters.append(DiscoCluster(dr))
-# 
-#            else:
-#                clusters[-1].add_read(dr)
-#
-#    return clusters
 
 
 def build_breakends(cluster, filters, tmpdir='/tmp'):
@@ -1358,6 +1337,14 @@ def filter_insertions(insertions, filters, tmpdir='/tmp'):
         if filters['insertion_library'] is not None and not exclude:
             if ins.align_filter(filters['insertion_library'], tmpdir=tmpdir): exclude = True
 
+        if filters['map_tabix'] is not None and not exclude:
+            if cluster.chrom in filters['map_tabix'].contigs:
+                ins.mappability = avgmap(filters['map_tabix'], ins.chrom, ins.min_supporting_base(), ins.max_supporting_base())
+            else:
+                ins.mappability = 0.0
+
+            if ins.mappability > filters['min_mappability']: exclude = True
+
         if not exclude: filtered.append(ins)
 
     return filtered
@@ -1483,25 +1470,16 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
             cl_readcount = 0
             cl_min, cl_max = cluster.find_extrema()
 
-            mappability = 1.0
-            if filters['map_tabix'] is not None:
-                if cluster.chrom in filters['map_tabix'].contigs:
-                    mappability = avgmap(filters['map_tabix'], cluster.chrom, cl_min, cl_max)
-                else:
-                    mappability = 0.0
+            for bam in bams:
+                cl_readcount += sum([not read.is_unmapped for read in bam.fetch(cluster.chrom, cl_min, cl_max)])
 
-            if mappability > filters['min_mappability']:
+            rpkm = cl_readcount/((cl_max-cl_min)/1000.)
 
-                for bam in bams:
-                    cl_readcount += sum([not read.is_unmapped for read in bam.fetch(cluster.chrom, cl_min, cl_max)])
+            if filters['max_rpkm'] == 0 or rpkm < filters['max_rpkm']:
+                breakends += build_breakends(cluster, filters, tmpdir=args.tmpdir)
 
-                rpkm = cl_readcount/((cl_max-cl_min)/1000.)
-
-                if filters['max_rpkm'] == 0 or rpkm < filters['max_rpkm']:
-                    breakends += build_breakends(cluster, filters, tmpdir=args.tmpdir)
-
-                else:
-                    logger.debug('Chunk %s, cluster %d-%d over max RPKM with %f' % (chunkname, cl_min, cl_max, rpkm))
+            else:
+                logger.debug('Chunk %s, cluster %d-%d over max RPKM with %f' % (chunkname, cl_min, cl_max, rpkm))
      
         logger.debug('Chunk %s: Mapping %d breakends ...' % (chunkname, len(breakends)))
         if len(breakends) > 0:

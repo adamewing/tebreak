@@ -871,7 +871,6 @@ class Insertion:
             self.info['be2_sr_count'] = 0
 
         self.info['dr_count'] = len(self.discoreads)
-        #self.info['dr_clusters']  = map(lambda x : x.summary_tuple(), self.dr_clusters)
         self.info['dr_unmapped_mates'] = len([dr for dr in self.discoreads if dr.mate_read is not None and dr.mate_read.is_unmapped])
 
  
@@ -1338,12 +1337,12 @@ def filter_insertions(insertions, filters, tmpdir='/tmp'):
             if ins.align_filter(filters['insertion_library'], tmpdir=tmpdir): exclude = True
 
         if filters['map_tabix'] is not None and not exclude:
-            if cluster.chrom in filters['map_tabix'].contigs:
-                ins.mappability = avgmap(filters['map_tabix'], ins.chrom, ins.min_supporting_base(), ins.max_supporting_base())
+            if ins.be1.chrom in filters['map_tabix'].contigs:
+                ins.mappability = avgmap(filters['map_tabix'], ins.be1.chrom, ins.min_supporting_base(), ins.max_supporting_base())
             else:
                 ins.mappability = 0.0
 
-            if ins.mappability > filters['min_mappability']: exclude = True
+            if ins.mappability < filters['min_mappability']: exclude = True
 
         if not exclude: filtered.append(ins)
 

@@ -1316,6 +1316,8 @@ def filter_insertions(insertions, filters, tmpdir='/tmp'):
             rgs  += [rg.split('|')[0] for rg in ins.be2.cluster.readgroups()]
             bams += [bam.split('|')[0] for bam in ins.be2.cluster.bamfiles()]
 
+        bams = list(set(bams)) # uniqify
+
         if len(ins) >= filters['max_ins_reads']: exclude = True
         if max(mapq) < filters['min_prox_mapq']: exclude = True
 

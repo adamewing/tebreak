@@ -172,8 +172,6 @@ class TEIns:
         if self.ins['chrom'] in forest:
             hits = forest[self.ins['chrom']].find(self.out['Left_Junction'], self.out['Right_Junction']+1)
             for hit in hits:
-                superfamily = hit.value.query_id.split(':')[0]
-                if superfamily in self.out['Superfamily'].split(','):
                     return True
 
         return False
@@ -297,25 +295,15 @@ def last_alignment(ins, ref_fa, tmpdir='/tmp'):
     return maf_results
 
 
-def last_interval_forest(maf_file, padding=100):
+def interval_forest(bed_file):
     ''' build dictionary of interval trees; value=LASTResult '''
     forest = dd(Intersecter)
 
-    maf_lines   = []
-    maf_results = []
-
-    with open(maf_file, 'r') as maf:
-        for line in maf:
-            if not line.startswith('#'):
-                if line.strip() != '':
-                    maf_lines.append(line.strip())
-
-                else:
-                    maf_results.append(tebreak.LASTResult(maf_lines))
-                    maf_lines = []
-
-    for res in maf_results:
-        forest[res.target_id].add_interval(Interval(res.target_start-padding, res.target_end+padding, value=res))
+    with open(bed_file, 'r') as bed:
+        for line in bed:
+            chrom, start, end = line.strip().split()[:3]
+            info = line.strip().split()[3:]
+            forest[chrom].add_interval(Interval(int(start), int(end), value=info))
 
     return forest
 
@@ -331,7 +319,16 @@ def poly_A_frac(seq):
     return float(max(f)) / float(len(seq))
 
 
-def add_insdata(ins, last_res):
+def bamcount(ins):
+    bams = []
+    for be in ('be1', 'be2'):
+        if be + '_bf_count' in ins['INFO']:
+            bams += [bam.split('|')[0] for bam in ins['INFO'][be + '_bf_count']]
+
+    return len(list(set(bams)))
+
+
+def add_insdata(ins, last_res, max_bam_count=0):
     be1_bestmatch = best_match(last_res, ins['INFO']['be1_obj_uuid'])
     be2_bestmatch = None
     if 'be2_obj_uuid' in ins['INFO'] and ins['INFO']['be2_obj_uuid'] != ins['INFO']['be1_obj_uuid']:
@@ -536,23 +533,6 @@ def make_tmp_ref(ins, ref_fa, tmpdir='/tmp'):
         fa.write('>%s\n%s\n' % (ref_id, inslib[ref_id]))
 
     return prepare_ref(tmp_ref, refoutdir=tmpdir, makeLAST=False)
-
-
-def make_inslib_mask(ref_fa, lastdb, refoutdir):
-    outmaf = refoutdir + '/' + '.'.join(os.path.basename(ref_fa).split('.')[:-1]) + '.last.maf'
-
-    if os.path.exists(outmaf):
-        sys.stderr.write('inslib mask MAF already exists, using %s\n' % outmaf)
-        return outmaf
-
-    cmd = ['lastal', '-e', '100', lastdb, ref_fa]
-
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-    with open(outmaf, 'w') as maf:
-        for line in p:
-            maf.write(line)
-
-    return outfn
 
 
 def remap_discordant(ins, inslib_fa=None, useref=None, tmpdir='/tmp'):
@@ -779,24 +759,19 @@ def main(args):
     inslib_fa = prepare_ref(args.inslib_fasta, refoutdir=args.refoutdir, makeFAI=False, makeBWA=False)
 
     forest = None
-    # set up reference mask MAF if available
-    if args.filter_ref_maf is not None:
-        logger.debug('using MAF as genome reference filter: %s' % args.filter_ref_maf)
-        forest = last_interval_forest(args.filter_ref_maf)
-
-    elif args.filter_ref_last_db is not None:
-        logger.debug('building genome reference filter MAF from: %s vs %s' %(args.inslib_fasta, args.filter_ref_last_db))
-        assert os.path.exists(args.filter_ref_last_db + '.suf'), 'reference %s not indexed with lastdb' % args.filter_ref_last_db
-        filter_ref_maf = make_inslib_mask(args.inslib_fasta, args.filter_ref_last_db, args.refoutdir)
-        forest = last_interval_forest(filter_ref_maf)
+    # set up reference mask BED if available
+    if args.filter_bed is not None:
+        logger.debug('using BED as genome reference filter: %s' % args.filter_bed)
+        forest = interval_forest(args.filter_bed)
 
     results = []
 
     pool = mp.Pool(processes=int(args.processes))
 
     for ins in insertions:
-        res = pool.apply_async(resolve_insertion, [args, ins, inslib_fa])
-        results.append(res)
+        if int(args.max_bam_count) == 0 or bamcount(ins) <= int(args.max_bam_count):
+            res = pool.apply_async(resolve_insertion, [args, ins, inslib_fa])
+            results.append(res)
 
     insertions = [res.get() for res in results if res is not None]
 
@@ -822,8 +797,8 @@ if __name__ == '__main__':
     parser.add_argument('-t', '--processes', default=1, help='split work across multiple processes')
     parser.add_argument('-i', '--inslib_fasta', required=True, help='reference for insertions (not genome)')
 
-    parser.add_argument('-d', '--filter_ref_last_db', default=None, help='reference LAST db')
-    parser.add_argument('-m', '--filter_ref_maf', default=None, help='MAF of -i/--inslib_fasta lastal vs. -d/--filter_ref_last_db')
+    parser.add_argument('-m', '--filter_bed', default=None, help='MAF of -i/--inslib_fasta lastal vs. -d/--filter_ref_last_db')
+    parser.add_argument('--max_bam_count', default=0)
 
     parser.add_argument('--refoutdir', default='tebreak_refs')
 

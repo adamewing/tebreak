@@ -518,19 +518,33 @@ class Insertion:
  
     def min_supporting_base(self):
         ''' return leftmost supporting reference position covered '''
-        be2 = []
-        if self.be2 is not None:
-            be2 = self.be2.proximal_subread()[0].get_reference_positions()
+        be1 = []
+        if self.be1 is not None: be1 = self.be1.proximal_subread()[0].get_reference_positions()
 
-        return min(self.be1.proximal_subread()[0].get_reference_positions() + be2)
+        be2 = []
+        if self.be2 is not None: be2 = self.be2.proximal_subread()[0].get_reference_positions()
+
+        be = be1 + be2
+
+        if len(be) == 0:
+            return None
+
+        return min(be)
 
     def max_supporting_base(self):
         ''' return rightmost supporting reference position covered '''
-        be2 = []
-        if self.be2 is not None:
-            be2 = self.be2.proximal_subread()[0].get_reference_positions()
+        be1 = []
+        if self.be1 is not None: be1 = self.be1.proximal_subread()[0].get_reference_positions()
 
-        return max(self.be1.proximal_subread()[0].get_reference_positions() + be2)
+        be2 = []
+        if self.be2 is not None: be2 = self.be2.proximal_subread()[0].get_reference_positions()
+
+        be = be1 + be2
+
+        if len(be) == 0:
+            return None
+
+        return max(be)
 
     def tsd(self, be1_use_prox=0, be2_use_prox=0):
         ''' target site duplication '''
@@ -572,6 +586,8 @@ class Insertion:
         chrom = self.be1.chrom
         start = self.min_supporting_base()
         end   = self.max_supporting_base()
+
+        if None in (start, end): return []
      
         assert start < end, 'fetch_discordant_reads: start > end'
 
@@ -1272,6 +1288,8 @@ def build_mask(bedfile):
 def avgmap(maptabix, chrom, start, end):
     ''' return average mappability across chrom:start-end region; maptabix = pysam.Tabixfile'''
     scores = []
+
+    if None in (start, end): return None
 
     if chrom in maptabix.contigs:
         for rec in maptabix.fetch(chrom, int(start), int(end)):

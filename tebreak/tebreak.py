@@ -518,33 +518,31 @@ class Insertion:
  
     def min_supporting_base(self):
         ''' return leftmost supporting reference position covered '''
-        be1 = []
-        if self.be1 is not None: be1 = self.be1.proximal_subread()[0].get_reference_positions()
+        sites = []
+        for be in (self.be1, self.be2):
+            if be is not None:
+                if len(be.proximal_subread()) > 0:
+                    for proxread in be.proximal_subread(): 
+                        sites += proxread.get_reference_positions()
 
-        be2 = []
-        if self.be2 is not None: be2 = self.be2.proximal_subread()[0].get_reference_positions()
-
-        be = be1 + be2
-
-        if len(be) == 0:
+        if len(sites) == 0:
             return None
 
-        return min(be)
+        return min(sites)
 
     def max_supporting_base(self):
         ''' return rightmost supporting reference position covered '''
-        be1 = []
-        if self.be1 is not None: be1 = self.be1.proximal_subread()[0].get_reference_positions()
-
-        be2 = []
-        if self.be2 is not None: be2 = self.be2.proximal_subread()[0].get_reference_positions()
-
-        be = be1 + be2
-
-        if len(be) == 0:
+        sites = []
+        for be in (self.be1, self.be2):
+            if be is not None:
+                if len(be.proximal_subread()) > 0:
+                    for proxread in be.proximal_subread(): 
+                        sites += proxread.get_reference_positions()
+                    
+        if len(sites) == 0:
             return None
 
-        return max(be)
+        return max(sites)
 
     def tsd(self, be1_use_prox=0, be2_use_prox=0):
         ''' target site duplication '''

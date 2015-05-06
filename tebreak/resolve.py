@@ -36,21 +36,21 @@ class TEIns:
         self._fill_out()
 
     def _fill_out(self):
-        self.out['Chromosome']     = self.ins['chrom']
-        self.out['Left_Junction']  = min(self.junctions())
-        self.out['Right_Junction'] = max(self.junctions())
+        self.out['Chromosome']    = self.ins['chrom']
+        self.out['Left_Extreme']  = self.ins['min_supporting_base']
+        self.out['Right_Extreme'] = self.ins['max_supporting_base']
         self.assign35ends()
         self.te_family()
         self.elt_coords()
-        self.out['TE_Match_Pct'] = self.be_avg_pctmatch()
         self.support()
+        self.improve_cons()
         self.tsd()
         self.sample_list()
         self.consensus()
 
     def assign35ends(self):
-        self.out['3_Prime_End'] = 'NA'
         self.out['5_Prime_End'] = 'NA'
+        self.out['3_Prime_End'] = 'NA'
 
         if 'be1_is_3prime' in self.ins:
             if self.ins['be1_is_3prime']:
@@ -112,16 +112,35 @@ class TEIns:
         return j
 
     def support(self):
+        self.out['5p_Elt_Match'] = 0.0
+        self.out['3p_Elt_Match'] = 0.0
+
+        if self.end5 + '_bestmatch' in self.ins: self.out['5p_Elt_Match'] = self.ins[self.end5 + '_bestmatch'].pct_match()
+        if self.end3 + '_bestmatch' in self.ins: self.out['3p_Elt_Match'] = self.ins[self.end3 + '_bestmatch'].pct_match()
+
+        self.out['5p_Genome_Match'] = 0.0
+        self.out['3p_Genome_Match'] = 0.0
+
+        if self.end5 + '_avgmatch' in self.ins: self.out['5p_Genome_Match'] = self.ins[self.end5 + '_avgmatch']
+        if self.end3 + '_avgmatch' in self.ins: self.out['3p_Genome_Match'] = self.ins[self.end3 + '_avgmatch']
+
         self.out['Split_reads_3prime'] = 0
         self.out['Split_reads_5prime'] = 0
-        self.out['Remapped_Discordant'] = 0
-        self.out['Remapped_Splitreads'] = 0
 
         if self.end3 + '_sr_count' in self.ins: self.out['Split_reads_3prime'] = self.ins[self.end3 + '_sr_count']
         if self.end5 + '_sr_count' in self.ins: self.out['Split_reads_5prime'] = self.ins[self.end5 + '_sr_count']
 
+        self.out['Remapped_Discordant'] = 0
+        self.out['Remapped_Splitreads'] = 0
+
         if 'remap_dr_count' in self.ins: self.out['Remapped_Discordant'] = self.ins['remap_dr_count']
         if 'remap_dr_count' in self.ins: self.out['Remapped_Splitreads'] = self.ins['remap_sr_count']
+
+        self.out['5p_Cons_Len'] = 0
+        self.out['3p_Cons_Len'] = 0
+
+        if self.end5 + '_cons_seq' in self.ins: self.out['5p_Cons_Len'] = len(self.ins[self.end5 + '_cons_seq'])
+        if self.end3 + '_cons_seq' in self.ins: self.out['3p_Cons_Len'] = len(self.ins[self.end3 + '_cons_seq'])
 
     def tsd(self):
         self.out['TSD_3prime'] = 'NA'
@@ -129,6 +148,16 @@ class TEIns:
 
         if self.end3 + '_end_over' in self.ins: self.out['TSD_3prime'] = self.ins[self.end3 + '_end_over']
         if self.end5 + '_end_over' in self.ins: self.out['TSD_5prime'] = self.ins[self.end5 + '_end_over']
+
+    def improve_cons(self):
+        self.out['5p_Improved'] = 'N'
+        self.out['3p_Improved'] = 'N'
+
+        if self.end5 + '_improved' in self.ins and self.ins[self.end5 + '_improved']:
+            self.out['5p_Improved'] = 'Y'
+
+        if self.end3 + '_improved' in self.ins and self.ins[self.end3 + '_improved']:
+            self.out['3p_Improved'] = 'Y'
 
     def sample_list(self):
         samples = dd(int)
@@ -148,13 +177,6 @@ class TEIns:
 
         if self.end5 + '_cons_seq' in self.ins: self.out['Consensus_5p'] = self.ins[self.end5 + '_cons_seq']
         if self.end3 + '_cons_seq' in self.ins: self.out['Consensus_3p'] = self.ins[self.end3 + '_cons_seq']
-
-    def be_avg_pctmatch(self):
-        m = []
-        if 'be1_bestmatch' in self.ins: m.append(self.ins['be1_bestmatch'].pct_match())
-        if 'be2_bestmatch' in self.ins: m.append(self.ins['be2_bestmatch'].pct_match())
-        if len(m) == 0: return 0.0
-        return float(sum(m)) / float(len(m))
 
     def polyA_filter(self):
         ''' return true if only supported by poly-A matches '''
@@ -197,7 +219,7 @@ class TEIns:
 
     def __lt__(self, other):
         if self.out['Chromosome'] == other.out['Chromosome']:
-            return self.out['Left_Junction'] < other.out['Left_Junction']
+            return self.out['Left_Extreme'] < other.out['Left_Extreme']
 
         return self.out['Chromosome'] < other.out['Chromosome']
 
@@ -211,7 +233,6 @@ class TEIns:
 
 
 def best_match(last_results, query_name, req_target=None, min_match=0.9):
-    #qres = [res for res in sorted(last_results) if res.query_id == query_name and (req_target is None or req_target == res.target_id)]
     qres = []
 
     for res in sorted(last_results):

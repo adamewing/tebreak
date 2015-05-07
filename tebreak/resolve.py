@@ -821,6 +821,9 @@ if __name__ == '__main__':
     parser.add_argument('-m', '--filter_bed', default=None, help='MAF of -i/--inslib_fasta lastal vs. -d/--filter_ref_last_db')
     parser.add_argument('--max_bam_count', default=0)
 
+    parser.add_argument('--annotation_tabix', default=None, help='can be comma-delimited list')
+    parser.add_argument('--map_tabix', default=None, help='tabix-indexed BED of mappability scores')
+
     parser.add_argument('--refoutdir', default='tebreak_refs')
 
     parser.add_argument('--tmpdir', default='/tmp')

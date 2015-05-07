@@ -465,8 +465,7 @@ class BreakEnd:
         return len(self.cluster)
 
     def __str__(self):
-        return '%s\t%d' % (self.chrom, self.breakpos)
-
+        return '%s:%d:%s' % (self.chrom, self.breakpos, self.consensus)
 
 class Insertion:
     ''' store and compile information about an insertion with 1 or 2 breakpoints '''
@@ -673,10 +672,10 @@ class Insertion:
 
         if self.be1 is not None:
             # find corresponding contig, if possible
-            be_name = 'tebreak:%s:%d' % (self.be1.chrom, self.be1.breakpos)
+            #be_name = 'tebreak:%s:%d' % (self.be1.chrom, self.be1.breakpos)
 
             for res in la_results:
-                if res.query_id == be_name:
+                if res.query_id == self.be1.uuid:
                     # criteria for deciding the new consensus is better
                     if res.target_seqsize > len(self.be1.consensus) and len(self.be1.consensus) - res.query_alnsize < 10 and res.pct_match() > 0.95:
                         self.be1_alt = self.be1
@@ -686,10 +685,10 @@ class Insertion:
 
         if self.be2 is not None:
             # find corresponding contig, if possible
-            be_name = 'tebreak:%s:%d' % (self.be2.chrom, self.be2.breakpos)
+            #be_name = 'tebreak:%s:%d' % (self.be2.chrom, self.be2.breakpos)
 
             for res in la_results:
-                if res.query_id == be_name:
+                if res.query_id == self.be2.uuid:
                     # criteria for deciding the new consensus is better
                     if res.target_seqsize > len(self.be2.consensus) and len(self.be2.consensus) - res.query_alnsize < 10 and res.pct_match() > 0.95:
                         self.be2_alt = self.be2
@@ -767,9 +766,11 @@ class Insertion:
 
         out_fasta = tmpdir + '/' + '.'.join(('consensus', self.be1.chrom, str(self.be1.breakpos), str(uuid4()), 'fa'))
         with open(out_fasta, 'w') as out:
-            out.write('>tebreak:%s:%d\n%s\n' % (self.be1.chrom, self.be1.breakpos, self.be1.consensus))
+            #out.write('>tebreak:%s:%d\n%s\n' % (self.be1.chrom, self.be1.breakpos, self.be1.consensus))
+            out.write('>%s\n%s\n' % (self.be1.uuid, self.be1.consensus))
             if self.be2 is not None:
-                out.write('>tebreak:%s:%d\n%s\n' % (self.be2.chrom, self.be2.breakpos, self.be2.consensus))
+                #out.write('>tebreak:%s:%d\n%s\n' % (self.be2.chrom, self.be2.breakpos, self.be2.consensus))
+                out.write('>%s\n%s\n' % (self.be2.uuid, self.be2.consensus))
 
         return out_fasta
 
@@ -1226,7 +1227,6 @@ def build_insertions(breakends, maxdist=100):
     for be1_uuid, be2_uuid, score in pair_scores:
         if be1_uuid not in used and be2_uuid not in used:
             insertions.append(Insertion(be_dict[be1_uuid], be_dict[be2_uuid]))
-
         used[be1_uuid] = True
         used[be2_uuid] = True
 
@@ -1683,10 +1683,10 @@ def main(args):
     with open(pickoutfn, 'w') as pickout:
         pickle.dump(insertions, pickout)
 
-    if not args.no_shared_mem:
-        sys.stderr.write("unloading bwa index %s from shared memory ...\n" % args.bwaref)
-        p = subprocess.Popen(['bwa', 'shm', '-d'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        for line in p.stdout: pass # wait for bwa to unload
+    #if not args.no_shared_mem:
+    #    sys.stderr.write("unloading bwa index %s from shared memory ...\n" % args.bwaref)
+    #    p = subprocess.Popen(['bwa', 'shm', '-d'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    #    for line in p.stdout: pass # wait for bwa to unload
 
     logger.debug('Pickled to %s' % pickoutfn)
 

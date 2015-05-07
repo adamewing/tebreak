@@ -409,13 +409,14 @@ class DiscoCluster(ReadCluster):
  
 class BreakEnd:
     ''' coallate information about a breakend '''
-    def __init__(self, chrom, breakpos, cluster, consensus, score):
+    def __init__(self, chrom, breakpos, cluster, consensus, score, direction):
         self.uuid      = str(uuid4())
         self.cluster   = cluster
         self.chrom     = chrom
         self.breakpos  = breakpos
         self.consensus = consensus
         self.consscore = score
+        self.direction = direction
  
         self.mappings = []
  
@@ -465,7 +466,7 @@ class BreakEnd:
         return len(self.cluster)
 
     def __str__(self):
-        return '%s:%d:%s' % (self.chrom, self.breakpos, self.consensus)
+        return '%s:%d:%s:%s' % (self.chrom, self.breakpos, self.consensus, self.direction)
 
 class Insertion:
     ''' store and compile information about an insertion with 1 or 2 breakpoints '''
@@ -672,7 +673,6 @@ class Insertion:
 
         if self.be1 is not None:
             # find corresponding contig, if possible
-            #be_name = 'tebreak:%s:%d' % (self.be1.chrom, self.be1.breakpos)
 
             for res in la_results:
                 if res.query_id == self.be1.uuid:
@@ -685,7 +685,6 @@ class Insertion:
 
         if self.be2 is not None:
             # find corresponding contig, if possible
-            #be_name = 'tebreak:%s:%d' % (self.be2.chrom, self.be2.breakpos)
 
             for res in la_results:
                 if res.query_id == self.be2.uuid:
@@ -766,10 +765,8 @@ class Insertion:
 
         out_fasta = tmpdir + '/' + '.'.join(('consensus', self.be1.chrom, str(self.be1.breakpos), str(uuid4()), 'fa'))
         with open(out_fasta, 'w') as out:
-            #out.write('>tebreak:%s:%d\n%s\n' % (self.be1.chrom, self.be1.breakpos, self.be1.consensus))
             out.write('>%s\n%s\n' % (self.be1.uuid, self.be1.consensus))
             if self.be2 is not None:
-                #out.write('>tebreak:%s:%d\n%s\n' % (self.be2.chrom, self.be2.breakpos, self.be2.consensus))
                 out.write('>%s\n%s\n' % (self.be2.uuid, self.be2.consensus))
 
         return out_fasta
@@ -1064,8 +1061,8 @@ def build_breakends(cluster, filters, tmpdir='/tmp'):
     breakends = []
 
     for breakpos in cluster.all_breakpoints():
-        subclusters = (cluster.subcluster_by_breakend([breakpos], direction='left'), cluster.subcluster_by_breakend([breakpos], direction='right'))
-        for subcluster in subclusters:
+        for dir in ('left', 'right'):
+            subcluster = cluster.subcluster_by_breakend([breakpos], direction=dir)
             if len(subcluster) >= filters['min_sr_per_break'] and subcluster.max_cliplen() >= filters['min_maxclip']:
                 seq     = subcluster.reads[0].read.seq
                 score   = 1.0
@@ -1076,7 +1073,7 @@ def build_breakends(cluster, filters, tmpdir='/tmp'):
                 if 'N' in seq: N_count = Counter(seq)['N']
 
                 if seq != '' and score >= filters['min_consensus_score'] and N_count <= filters['max_N_consensus']:
-                    breakends.append(BreakEnd(cluster.chrom, breakpos, subcluster, seq, score))
+                    breakends.append(BreakEnd(cluster.chrom, breakpos, subcluster, seq, score, dir))
  
     return breakends
 
@@ -1213,7 +1210,7 @@ def build_insertions(breakends, maxdist=100):
 
             pair_name = '-'.join(sorted((be1.uuid, be2.uuid)))
 
-            if be1.uuid != be2.uuid and pair_name not in checked_pairs:
+            if be1.uuid != be2.uuid and be1.direction != be2.direction and pair_name not in checked_pairs:
                 if abs(be1.breakpos-be2.breakpos) <= maxdist:
                     pair_scores.append((be1.uuid, be2.uuid, score_breakend_pair(be1, be2)))
 
@@ -1227,6 +1224,7 @@ def build_insertions(breakends, maxdist=100):
     for be1_uuid, be2_uuid, score in pair_scores:
         if be1_uuid not in used and be2_uuid not in used:
             insertions.append(Insertion(be_dict[be1_uuid], be_dict[be2_uuid]))
+            #print "debug:, insertion: %s and %s" % (be_dict[be1_uuid], be_dict[be2_uuid])
         used[be1_uuid] = True
         used[be2_uuid] = True
 

@@ -567,12 +567,14 @@ class Insertion:
             tsdseq1 = ''
             tsdseq2 = ''
  
-            for (qrypos, refpos) in junc1.get_aligned_pairs():
+            #for (qrypos, refpos) in junc1.get_aligned_pairs(): # broken by pysam 8.3
+            for qrypos, refpos in enumerate(junc1.get_reference_positions()):
                 if refpos in range(*tsd_ref_interval):
                     if qrypos is not None:
                         tsdseq1 += junc1.seq[qrypos+junc1.qstart]
  
-            for (qrypos, refpos) in junc2.get_aligned_pairs():
+            #for (qrypos, refpos) in junc2.get_aligned_pairs(): # broken by pysam 8.3
+            for qrypos, refpos in enumerate(junc2.get_reference_positions()):
                 if refpos in range(*tsd_ref_interval):
                     if qrypos is not None:
                         tsdseq2 += junc2.seq[qrypos+junc2.qstart]

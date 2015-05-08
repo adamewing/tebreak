@@ -1622,12 +1622,15 @@ def main(args):
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.DEBUG)
 
+    logger.debug("commandline: %s" % ' '.join(sys.argv))
+
     checkref(args.bwaref)
 
     if not args.no_shared_mem:
-        sys.stderr.write("loading bwa index %s into shared memory ...\n" % args.bwaref)
+        logger.debug("loading bwa index %s into shared memory ..." % args.bwaref)
         p = subprocess.Popen(['bwa', 'shm', args.bwaref], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         for line in p.stdout: pass # wait for bwa to load
+        logger.debug("loaded.")
 
     ''' Chunk genome or use input BED '''
     
@@ -1644,7 +1647,8 @@ def main(args):
     exp_rpkm = 0
 
     if args.interval_bed is None or args.wg_rpkm:
-        chunks = genome.chunk(chunk_count, sorted=True, pad=5000)
+        if args.interval_bed is None:
+            chunks = genome.chunk(chunk_count, sorted=True, pad=5000)
 
         if args.rpkm_bam:
             exp_rpkm = expected_rpkm(args.rpkm_bam.split(','), genome)
@@ -1661,6 +1665,8 @@ def main(args):
     if args.interval_bed is not None:
         with open(args.interval_bed, 'r') as bed:
             chunks = [(line.strip().split()[0], int(line.strip().split()[1]), int(line.strip().split()[2])) for line in bed]
+
+    logger.debug("chunk count: %d" % len(chunks))
 
 
     if exp_rpkm < 10:

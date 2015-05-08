@@ -35,11 +35,10 @@ def check_minia():
 
 
 def check_LAST():
-    p = subprocess.Popen(['lastal', '--version'], stdout=subprocess.PIPE)
-    for line in p.stdout:
+    p = subprocess.Popen(['lastal'], stderr=subprocess.PIPE)
+    for line in p.stderr:
         if line.startswith('lastal'):
-            if int(line.strip().split()[1]) >= 548:
-                return True 
+            return True 
     return False
 
 

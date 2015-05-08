@@ -997,7 +997,8 @@ def fetch_clipped_reads(bams, chrom, start, end, filters):
                     if altclip <= 2: # could add as a filter
                         if N_count <= filters['max_N_consensus'] and splitqual(read) <= filters['max_D_score']:
                             chrom = str(bam.getrname(read.tid))
-                            splitreads.append(SplitRead(chrom, read, bam.filename))
+                            if len(read.get_reference_positions()) > 0:
+                                splitreads.append(SplitRead(chrom, read, bam.filename))
  
     return splitreads
  

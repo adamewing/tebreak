@@ -124,8 +124,8 @@ class TEIns:
         if self.end5 + '_avgmatch' in self.ins: self.out['5p_Genome_Match'] = self.ins[self.end5 + '_avgmatch']
         if self.end3 + '_avgmatch' in self.ins: self.out['3p_Genome_Match'] = self.ins[self.end3 + '_avgmatch']
 
-        self.out['Split_reads_3prime'] = 0
         self.out['Split_reads_5prime'] = 0
+        self.out['Split_reads_3prime'] = 0
 
         if self.end3 + '_sr_count' in self.ins: self.out['Split_reads_3prime'] = self.ins[self.end3 + '_sr_count']
         if self.end5 + '_sr_count' in self.ins: self.out['Split_reads_5prime'] = self.ins[self.end5 + '_sr_count']

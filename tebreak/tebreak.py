@@ -429,7 +429,7 @@ class BreakEnd:
  
     def distal_subread(self):
         ''' return mapping(s) not containing breakpoint '''
-        return [read for read in self.mappings if self.breakpos not in read.get_reference_positions()]
+        return [read for read in self.mappings if not read.is_unmapped and self.breakpos not in read.get_reference_positions()]
  
     def unmapped_subread(self):
         ''' returns list of intervals and corresponding subseqs '''

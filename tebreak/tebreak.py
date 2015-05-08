@@ -1657,8 +1657,11 @@ def main(args):
         else:
             exp_rpkm = expected_rpkm(args.bam.split(','), genome, intervals=args.interval_bed)
 
+
+    if args.interval_bed is not None:
         with open(args.interval_bed, 'r') as bed:
             chunks = [(line.strip().split()[0], int(line.strip().split()[1]), int(line.strip().split()[2])) for line in bed]
+
 
     if exp_rpkm < 10:
         sys.stderr.write("expected RPKM is less than 10, ignoring high RPKM cutoffs...\n")

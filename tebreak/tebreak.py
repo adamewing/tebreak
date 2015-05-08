@@ -1643,7 +1643,7 @@ def main(args):
     chunks = []
     exp_rpkm = 0
 
-    if args.interval_bed is None:
+    if args.interval_bed is None or args.wg_rpkm:
         chunks = genome.chunk(chunk_count, sorted=True, pad=5000)
 
         if args.rpkm_bam:
@@ -1728,7 +1728,8 @@ if __name__ == '__main__':
     parser.add_argument('--pickle', default=None, help='pickle output name')
     parser.add_argument('--detail_out', default='tebreak.out', help='file to write detailed output')
  
-    parser.add_argument('--no_shared_mem', action='store_true')
+    parser.add_argument('--wg_rpkm', default=False, action='store_true', help='force calculate rpkm over whole genome')
+    parser.add_argument('--no_shared_mem', default=False, action='store_true')
  
     args = parser.parse_args()
     main(args)

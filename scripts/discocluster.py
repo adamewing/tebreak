@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import os
 import pysam
 import argparse
 import logging
@@ -64,7 +65,7 @@ def get_coords(forest, bams, min_mapq=1, min_dist=10000):
 
                     if mchrom in forest:
                         if len(forest[mchrom].find(mstart, mend)) > 0:
-                            coords.append(Coord(mchrom, mstart, mend, bam.filename))
+                            coords.append(Coord(mchrom, mstart, mend, os.path.basename(bam.filename)))
 
             if i % tick == 0:
                 if read.is_unmapped:

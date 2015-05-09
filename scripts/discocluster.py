@@ -14,10 +14,11 @@ from bx.intervals.intersection import Intersecter, Interval
 
 
 class Coord:
-    def __init__(self, chrom, start, end, bam_name):
+    def __init__(self, chrom, start, end, label, bam_name):
         self.chrom = chrom
         self.start = int(start)
         self.end   = int(end)
+        self.label = label
         self.bam   = bam_name
 
     def __gt__(self, other):
@@ -33,8 +34,8 @@ def interval_forest(bed_file):
 
     with open(bed_file, 'r') as bed:
         for line in bed:
-            chrom, start, end = line.strip().split()[:3]
-            forest[chrom].add_interval(Interval(int(start), int(end)))
+            chrom, start, end, label = line.strip().split()[:4]
+            forest[chrom].add_interval(Interval(int(start), int(end), value=label))
 
     return forest
 
@@ -64,8 +65,9 @@ def get_coords(forest, bams, min_mapq=1, min_dist=10000):
                     mend   = mstart + len(read.seq)
 
                     if mchrom in forest:
-                        if len(forest[mchrom].find(mstart, mend)) > 0:
-                            coords.append(Coord(mchrom, mstart, mend, os.path.basename(bam.filename)))
+                        for rec in forest[mchrom].find(mstart, mend):
+                            coords.append(Coord(mchrom, mstart, mend, rec.value, os.path.basename(bam.filename)))
+                            break
 
             if i % tick == 0:
                 if read.is_unmapped:
@@ -76,7 +78,15 @@ def get_coords(forest, bams, min_mapq=1, min_dist=10000):
     return coords
 
 
-def cluster(coords, min_size=4, max_spacing=1000):
+def subcluster_by_label(cluster):
+    subclusters = dd(list)
+    for c in cluster:
+        subclusters[c.label].append(c)
+
+    return subclusters.values()
+
+
+def cluster(coords, min_size=4, max_spacing=1000, output_padding=1000):
     logger.debug('sorting coordinates')
     coords.sort()
 
@@ -89,16 +99,19 @@ def cluster(coords, min_size=4, max_spacing=1000):
             if c.chrom == cluster[-1].chrom and c.start - cluster[-1].end <= max_spacing:
                 cluster.append(c)
             else:
-                if len(cluster) >= min_size:
-                    cluster_chrom = cluster[0].chrom
-                    cluster_start = cluster[0].start - max_spacing
-                    if cluster_start < 0: cluster_start = 0
+                for cluster in subcluster_by_label(cluster):
+                    if len(cluster) >= min_size:
+                        cluster_chrom = cluster[0].chrom
+                        cluster_start = cluster[0].start - output_padding
+                        if cluster_start < 0: cluster_start = 0
 
-                    cluster_end = cluster[-1].end + max_spacing
+                        cluster_end = cluster[-1].end + output_padding
 
-                    bamlist = ','.join(list(set([c.bam  for c in cluster])))
+                        bamlist = ','.join(list(set([c.bam  for c in cluster])))
+                        labels = list(set([c.label for c in cluster]))
+                        assert len(labels) == 1
 
-                    print '%s\t%d\t%d\t%s\t%d' % (cluster_chrom, cluster_start, cluster_end, bamlist, len(cluster))
+                        print '%s\t%d\t%d\t%s\t%s\t%d' % (cluster_chrom, cluster_start, cluster_end, bamlist, labels[0], len(cluster))
 
                 cluster = [c]
 

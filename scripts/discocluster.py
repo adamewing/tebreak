@@ -13,10 +13,11 @@ from bx.intervals.intersection import Intersecter, Interval
 
 
 class Coord:
-    def __init__(self, chrom, start, end):
+    def __init__(self, chrom, start, end, bam_name):
         self.chrom = chrom
         self.start = int(start)
         self.end   = int(end)
+        self.bam   = bam_name
 
     def __gt__(self, other):
         if self.chrom == other.chrom:
@@ -37,38 +38,39 @@ def interval_forest(bed_file):
     return forest
 
 
-def get_coords(forest, bam, min_mapq=1, min_dist=10000):
+def get_coords(forest, bams, min_mapq=1, min_dist=10000):
     coords = []
 
-    tick = 10000000
-    try:
-        tick = int((bam.mapped + bam.unmapped) * 0.01)
-        if tick == 0: tick = 1
-        logger.debug('outputting status every %d reads (1 pct)' % tick)
+    for bam in bams:
+        tick = 10000000
+        try:
+            tick = int((bam.mapped + bam.unmapped) * 0.01)
+            if tick == 0: tick = 1
+            logger.debug('outputting status every %d reads (1 pct)' % tick)
 
-    except ValueError as e:
-        logger.debug('no index found, outputting status every %d reads' % tick)
+        except ValueError as e:
+            logger.debug('no index found, outputting status every %d reads' % tick)
 
-    for i, read in enumerate(bam.fetch()):
-        if not read.is_unmapped and not read.mate_is_unmapped and not read.is_duplicate:
+        for i, read in enumerate(bam.fetch()):
+            if not read.is_unmapped and not read.mate_is_unmapped and not read.is_duplicate:
 
-            mdist = abs(read.next_reference_start-read.query_alignment_start)
-            if read.reference_id != read.next_reference_id: mdist=3e9
+                mdist = abs(read.next_reference_start-read.query_alignment_start)
+                if read.reference_id != read.next_reference_id: mdist=3e9
 
-            if read.mapq >= min_mapq and mdist >= min_dist:
-                mchrom = bam.getrname(read.next_reference_id)
-                mstart = read.next_reference_start
-                mend   = mstart + len(read.seq)
+                if read.mapq >= min_mapq and mdist >= min_dist:
+                    mchrom = bam.getrname(read.next_reference_id)
+                    mstart = read.next_reference_start
+                    mend   = mstart + len(read.seq)
 
-                if mchrom in forest:
-                    if len(forest[mchrom].find(mstart, mend)) > 0:
-                        coords.append(Coord(mchrom, mstart, mend))
+                    if mchrom in forest:
+                        if len(forest[mchrom].find(mstart, mend)) > 0:
+                            coords.append(Coord(mchrom, mstart, mend, bam.filename))
 
-        if i % tick == 0:
-            if read.is_unmapped:
-                logger.debug('parsed %d reads, last position unmapped' % i)
-            else:
-                logger.debug('parsed %d reads, last position: %s:%d' % (i, bam.getrname(read.tid), read.pos))
+            if i % tick == 0:
+                if read.is_unmapped:
+                    logger.debug('parsed %d reads, last position unmapped' % i)
+                else:
+                    logger.debug('parsed %d reads, last position: %s:%d' % (i, bam.getrname(read.tid), read.pos))
 
     return coords
 
@@ -93,7 +95,9 @@ def cluster(coords, min_size=4, max_spacing=1000):
 
                     cluster_end = cluster[-1].end + max_spacing
 
-                    print '%s\t%d\t%d' % (cluster_chrom, cluster_start, cluster_end)
+                    bamlist = ','.join(list(set([c.bam  for c in cluster])))
+
+                    print '%s\t%d\t%d\t%s\t%d' % (cluster_chrom, cluster_start, cluster_end, bamlist, len(cluster))
 
                 cluster = [c]
 
@@ -101,13 +105,13 @@ def cluster(coords, min_size=4, max_spacing=1000):
 def main(args):
     logger.setLevel(logging.DEBUG)
     assert args.bam.endswith('.bam'), "not a BAM file: %s" % args.bam
-    bam = pysam.AlignmentFile(args.bam, 'rb')
+    bams = [pysam.AlignmentFile(bam, 'rb') for bam in args.bam.split(',')]
 
     logger.debug('building interval trees for %s' % args.bed)
     forest = interval_forest(args.bed)
 
     logger.debug('fetching coordinates from %s' % args.bam)
-    coords = get_coords(forest, bam)
+    coords = get_coords(forest, bams)
     logger.debug('found %d anchored reads' % len(coords))
 
     cluster(coords)
@@ -118,7 +122,7 @@ if __name__ == '__main__':
     logging.basicConfig(format=FORMAT)
 
     parser = argparse.ArgumentParser(description='identify clusters of discordant read ends where one end is in BED file')
-    parser.add_argument('--bam', required=True)
+    parser.add_argument('--bam', required=True, help='can be comma-delimited for multiple BAMs')
     parser.add_argument('--bed', required=True)
     args = parser.parse_args()
     main(args)

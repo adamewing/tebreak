@@ -14,12 +14,15 @@ from bx.intervals.intersection import Intersecter, Interval
 
 
 class Coord:
-    def __init__(self, chrom, start, end, label, bam_name):
-        self.chrom = chrom
-        self.start = int(start)
-        self.end   = int(end)
-        self.label = label
-        self.bam   = bam_name
+    def __init__(self, chrom, start, end, mchrom, mstart, mend, label, bam_name):
+        self.chrom  = chrom
+        self.start  = int(start)
+        self.end    = int(end)
+        self.mchrom = mchrom
+        self.mstart = int(mstart)
+        self.mend   = int(mend)
+        self.label  = label
+        self.bam    = bam_name
 
     def __gt__(self, other):
         if self.chrom == other.chrom:
@@ -40,7 +43,7 @@ def interval_forest(bed_file):
     return forest
 
 
-def get_coords(forest, bams, min_mapq=1, min_dist=10000):
+def get_coords(forest, bams, min_mapq=0, min_dist=10000):
     coords = []
 
     for bam in bams:
@@ -56,6 +59,10 @@ def get_coords(forest, bams, min_mapq=1, min_dist=10000):
         for i, read in enumerate(bam.fetch()):
             if not read.is_unmapped and not read.mate_is_unmapped and not read.is_duplicate:
 
+                rchrom = bam.getrname(read.reference_id)
+                rstart = read.reference_start
+                rend   = read.reference_end
+
                 mdist = abs(read.next_reference_start-read.query_alignment_start)
                 if read.reference_id != read.next_reference_id: mdist=3e9
 
@@ -66,7 +73,7 @@ def get_coords(forest, bams, min_mapq=1, min_dist=10000):
 
                     if mchrom in forest:
                         for rec in forest[mchrom].find(mstart, mend):
-                            coords.append(Coord(mchrom, mstart, mend, rec.value, os.path.basename(bam.filename)))
+                            coords.append(Coord(rchrom, rstart, rend, mchrom, mstart, mend, rec.value, os.path.basename(bam.filename)))
                             break
 
             if i % tick == 0:

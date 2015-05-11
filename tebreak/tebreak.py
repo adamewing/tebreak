@@ -1601,7 +1601,7 @@ def expected_rpkm(bam_files, genome, intervals=None):
 
         with open(intervals, 'r') as bed:
             for line in bed:
-                chrom, start, end = line.strip().split()
+                chrom, start, end = line.strip().split()[:3]
                 start = int(start)
                 end   = int(end)
 

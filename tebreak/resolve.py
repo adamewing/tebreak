@@ -39,7 +39,10 @@ class Annotator:
             out[fn] = []
             if chrom in tbx.contigs:
                 for rec in tbx.fetch(chrom, start, end):
-                    out[fn].append(','.join(rec.strip().split()[3:]))
+                    if len(rec.strip().split()) == 3:
+                        out[fn].append(','.join('Y'))
+                    else:
+                        out[fn].append(','.join(rec.strip().split()[3:]))
 
             out[fn] = ';'.join(out[fn])
 

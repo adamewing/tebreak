@@ -31,7 +31,7 @@ class Annotator:
         self.tbx = od()
 
         for fn in tabix_list.strip().split(','):
-            self.tbx[fn] = pysam.Tabixfile(fn)
+            self.tbx[os.path.basename(fn)] = pysam.Tabixfile(fn)
 
     def annotate(self, chrom, start, end):
         out = od()

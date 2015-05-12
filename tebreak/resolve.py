@@ -26,19 +26,43 @@ logger = logging.getLogger(__name__)
 #######################################
 
 
+class Annotator:
+    def __init__(self, tabix_list):
+        self.tbx = od()
+
+        for fn in tabix_list.strip().split(','):
+            self.tbx[fn] = pysam.Tabixfile(fn)
+
+    def annotate(self, chrom, start, end):
+        out = od()
+        for fn, tbx in self.tbx.iteritems():
+            out[fn] = []
+            if chrom in tbx.contigs:
+                for rec in tbx.fetch(chrom, start, end):
+                    out[fn].append(','.join(rec.strip().split()[3:]))
+
+            out[fn] = ';'.join(out[fn])
+
+            if not out[fn]: out[fn] = 'NA'
+
+        return out
+
+
 class TEIns:
-    def __init__(self, ins):
+    def __init__(self, ins, annotator):
         self.ins = ins['INFO']
         self.out = od()
         self.end3 = 'NA'
         self.end5 = 'NA'
 
+        self.annotator = annotator
+
         self._fill_out()
 
     def _fill_out(self):
-        self.out['Chromosome']    = self.ins['chrom']
-        self.out['Left_Extreme']  = self.ins['min_supporting_base']
-        self.out['Right_Extreme'] = self.ins['max_supporting_base']
+        self.out['Chromosome']    = chrom = self.ins['chrom']
+        self.out['Left_Extreme']  = start = self.ins['min_supporting_base']
+        self.out['Right_Extreme'] = end   = self.ins['max_supporting_base']
         self.assign35ends()
         self.te_family()
         self.elt_coords()
@@ -47,6 +71,9 @@ class TEIns:
         self.tsd()
         self.sample_list()
         self.consensus()
+
+        if self.annotator is not None: self.out.update(self.annotator.annotate(chrom, start, end))
+
 
     def assign35ends(self):
         self.out['5_Prime_End'] = 'NA'
@@ -800,7 +827,10 @@ def main(args):
 
     tebreak.text_summary(insertions, outfile=args.detail_out) # debug
 
-    te_insertions = [TEIns(ins) for ins in insertions]
+    annotator = None
+    if args.annotation_tabix: annotator = Annotator(args.annotation_tabix)
+
+    te_insertions = [TEIns(ins, annotator) for ins in insertions]
 
     if len(te_insertions) > 0: print te_insertions[0].header()
 

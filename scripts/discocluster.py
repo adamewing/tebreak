@@ -14,21 +14,26 @@ from bx.intervals.intersection import Intersecter, Interval
 
 
 class Coord:
-    def __init__(self, chrom, start, end, mchrom, mstart, mend, label, bam_name):
-        self.chrom  = chrom
-        self.start  = int(start)
-        self.end    = int(end)
-        self.mchrom = mchrom
-        self.mstart = int(mstart)
-        self.mend   = int(mend)
-        self.label  = label
-        self.bam    = bam_name
+    def __init__(self, chrom, start, end, strand, mchrom, mstart, mend, mstrand, label, bam_name):
+        self.chrom   = chrom
+        self.start   = int(start)
+        self.end     = int(end)
+        self.strand  = strand
+        self.mchrom  = mchrom
+        self.mstart  = int(mstart)
+        self.mend    = int(mend)
+        self.mstrand = mstrand
+        self.label   = label
+        self.bam     = bam_name
 
     def __gt__(self, other):
         if self.chrom == other.chrom:
             return self.start > other.start
         else:
             return self.chrom > other.chrom
+
+    def __str__(self):
+        pass
 
 
 def interval_forest(bed_file):
@@ -63,6 +68,9 @@ def get_coords(forest, bams, min_mapq=0, min_dist=10000):
                 rstart = read.reference_start
                 rend   = read.reference_end
 
+                rstr = '+'
+                if read.is_reverse: rstr = '-'
+
                 mdist = abs(read.next_reference_start-read.query_alignment_start)
                 if read.reference_id != read.next_reference_id: mdist=3e9
 
@@ -71,9 +79,12 @@ def get_coords(forest, bams, min_mapq=0, min_dist=10000):
                     mstart = read.next_reference_start
                     mend   = mstart + len(read.seq)
 
+                    mstr = '+'
+                    if read.mate_is_reverse: rstr = '-'
+
                     if mchrom in forest:
                         for rec in forest[mchrom].find(mstart, mend):
-                            coords.append(Coord(rchrom, rstart, rend, mchrom, mstart, mend, rec.value, os.path.basename(bam.filename)))
+                            coords.append(Coord(rchrom, rstart, rend, rstr, mchrom, mstart, mend, mstr, rec.value, os.path.basename(bam.filename)))
                             break
 
             if i % tick == 0:

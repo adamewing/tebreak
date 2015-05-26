@@ -1650,10 +1650,11 @@ def main(args):
         if args.interval_bed is None:
             chunks = genome.chunk(chunk_count, sorted=True, pad=5000)
 
-        if args.rpkm_bam:
-            exp_rpkm = expected_rpkm(args.rpkm_bam.split(','), genome)
-        else:
-            exp_rpkm = expected_rpkm(args.bam.split(','), genome)
+        if not args.no_rpkm:
+            if args.rpkm_bam:
+                exp_rpkm = expected_rpkm(args.rpkm_bam.split(','), genome)
+            else:
+                exp_rpkm = expected_rpkm(args.bam.split(','), genome)
 
     else:
         if args.rpkm_bam:
@@ -1669,7 +1670,7 @@ def main(args):
     logger.debug("chunk count: %d" % len(chunks))
 
 
-    if exp_rpkm < 10:
+    if not args.no_rpkm and exp_rpkm < 10:
         sys.stderr.write("expected RPKM is less than 10, ignoring high RPKM cutoffs...\n")
         exp_rpkm = 0
 
@@ -1738,6 +1739,7 @@ if __name__ == '__main__':
     parser.add_argument('--detail_out', default='tebreak.out', help='file to write detailed output')
  
     parser.add_argument('--wg_rpkm', default=False, action='store_true', help='force calculate rpkm over whole genome')
+    parser.add_argument('--no_rpkm', default=False, action='store_true', help='do not filter sites by rpkm')
     parser.add_argument('--no_shared_mem', default=False, action='store_true')
  
     args = parser.parse_args()

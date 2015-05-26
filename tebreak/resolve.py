@@ -52,13 +52,15 @@ class Annotator:
 
 
 class TEIns:
-    def __init__(self, ins, annotator):
+    def __init__(self, ins, annotator, use_rg):
         self.ins = ins['INFO']
         self.out = od()
         self.end3 = 'NA'
         self.end5 = 'NA'
 
         self.annotator = annotator
+
+        self.use_rg = use_rg
 
         self._fill_out()
 
@@ -192,9 +194,12 @@ class TEIns:
     def sample_list(self):
         samples = dd(int)
 
+        ctype = 'bf'
+        if self.use_rg: ctype = 'rg'
+
         for be in ('be1', 'be2'):
-            if be + '_bf_count' in self.ins:
-                for sample_support in self.ins[be + '_bf_count']:
+            if be + '_' + ctype + '_count' in self.ins:
+                for sample_support in self.ins[be + '_' + ctype + '_count']:
                     sample, count = sample_support.split('|')
                     samples[sample] += int(count)
 
@@ -377,6 +382,16 @@ def bamcount(ins):
             bams += [bam.split('|')[0] for bam in ins['INFO'][be + '_bf_count']]
 
     return len(list(set(bams)))
+
+
+def rgcount(ins):
+    rgs = []
+    for be in ('be1', 'be2'):
+        if be + '_rg_count' in ins['INFO']:
+            rgs += [rg.split('|')[0] for rg in ins['INFO'][be + '_rg_count']]
+
+    return len(list(set(rgs)))
+
 
 
 def add_insdata(ins, last_res, max_bam_count=0):
@@ -734,7 +749,7 @@ def resolve_insertion(args, ins, inslib_fa):
         last_res = last_alignment(ins, inslib_fa)
         ins = add_insdata(ins, last_res)
 
-        if not args.skip_align and ins['INFO']['dr_count'] > 0:
+        if not args.skip_align:
             tmp_bam = remap_discordant(ins, inslib_fa=inslib_fa, tmpdir=args.tmpdir)
 
             if tmp_bam is not None:
@@ -807,6 +822,8 @@ def main(args):
     with open(args.pickle, 'r') as pickin:
         insertions = pickle.load(pickin)
 
+    logger.debug('finished loading %s' % pickin)
+
     inslib_fa = prepare_ref(args.inslib_fasta, refoutdir=args.refoutdir, makeFAI=False, makeBWA=False)
 
     forest = None
@@ -819,10 +836,11 @@ def main(args):
 
     pool = mp.Pool(processes=int(args.processes))
 
-    for ins in insertions:
+    for counter, ins in enumerate(insertions):
         if int(args.max_bam_count) == 0 or bamcount(ins) <= int(args.max_bam_count):
             res = pool.apply_async(resolve_insertion, [args, ins, inslib_fa])
             results.append(res)
+            if counter % 1000 == 0: logger.debug('submitted %d candidates, last uuid: %s' % (counter, ins['INFO']['ins_uuid']))
 
     insertions = [res.get() for res in results if res is not None]
 
@@ -833,7 +851,7 @@ def main(args):
     annotator = None
     if args.annotation_tabix: annotator = Annotator(args.annotation_tabix)
 
-    te_insertions = [TEIns(ins, annotator) for ins in insertions]
+    te_insertions = [TEIns(ins, annotator, args.use_rg) for ins in insertions]
 
     if len(te_insertions) > 0: print te_insertions[0].header()
 
@@ -851,7 +869,7 @@ if __name__ == '__main__':
     parser.add_argument('-t', '--processes', default=1, help='split work across multiple processes')
     parser.add_argument('-i', '--inslib_fasta', required=True, help='reference for insertions (not genome)')
 
-    parser.add_argument('-m', '--filter_bed', default=None, help='MAF of -i/--inslib_fasta lastal vs. -d/--filter_ref_last_db')
+    parser.add_argument('-m', '--filter_bed', default=None, help='mask BED')
     parser.add_argument('--max_bam_count', default=0)
 
     parser.add_argument('--annotation_tabix', default=None, help='can be comma-delimited list')
@@ -861,6 +879,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--tmpdir', default='/tmp')
     parser.add_argument('--skip_align', action='store_true', default=False)
+    parser.add_argument('--use_rg', action='store_true', default=False, help='use RG instead of BAM filename for samples')
     parser.add_argument('-v', '--verbose', action='store_true', default=False)
     parser.add_argument('--keep_tmp_bams', action='store_true', default=False)
     parser.add_argument('--detail_out', default='resolve.out', help='file to write detailed output')

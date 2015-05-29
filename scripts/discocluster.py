@@ -33,7 +33,7 @@ class Coord:
             return self.chrom > other.chrom
 
     def __str__(self):
-        pass
+        return '%s\t%s:\t%s:%d-%d(%s) <--> %s:%d-%d(%s)' % (self.bam, self.label, self.chrom, self.start, self.end, self.strand, self.mchrom, self.mstart, self.mend, self.mstrand)
 
 
 def interval_forest(bed_file):
@@ -71,7 +71,7 @@ def get_coords(forest, bams, min_mapq=0, min_dist=10000):
                 rstr = '+'
                 if read.is_reverse: rstr = '-'
 
-                mdist = abs(read.next_reference_start-read.query_alignment_start)
+                mdist = abs(read.next_reference_start-read.next_reference_start)
                 if read.reference_id != read.next_reference_id: mdist=3e9
 
                 if read.mapq >= min_mapq and mdist >= min_dist:
@@ -80,7 +80,7 @@ def get_coords(forest, bams, min_mapq=0, min_dist=10000):
                     mend   = mstart + len(read.seq)
 
                     mstr = '+'
-                    if read.mate_is_reverse: rstr = '-'
+                    if read.mate_is_reverse: mstr = '-'
 
                     if mchrom in forest:
                         for rec in forest[mchrom].find(mstart, mend):

@@ -71,7 +71,7 @@ def get_coords(forest, bams, min_mapq=0, min_dist=10000):
                 rstr = '+'
                 if read.is_reverse: rstr = '-'
 
-                mdist = abs(read.next_reference_start-read.next_reference_start)
+                mdist = abs(read.reference_start-read.next_reference_start)
                 if read.reference_id != read.next_reference_id: mdist=3e9
 
                 if read.mapq >= min_mapq and mdist >= min_dist:

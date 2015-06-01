@@ -104,7 +104,7 @@ def subcluster_by_label(cluster):
     return subclusters.values()
 
 
-def cluster(coords, min_size=4, max_spacing=1000, output_padding=1000):
+def cluster(forest, coords, min_size=4, max_spacing=1000, output_padding=1000):
     logger.debug('sorting coordinates')
     coords.sort()
 
@@ -129,7 +129,8 @@ def cluster(coords, min_size=4, max_spacing=1000, output_padding=1000):
                         labels = list(set([c.label for c in cluster]))
                         assert len(labels) == 1
 
-                        print '%s\t%d\t%d\t%s\t%s\t%d' % (cluster_chrom, cluster_start, cluster_end, bamlist, labels[0], len(cluster))
+                        if cluster_chrom not in forest or len(list(forest[cluster_chrom].find(cluster_start, cluster_end))) == 0:
+                            print '%s\t%d\t%d\t%s\t%s\t%d' % (cluster_chrom, cluster_start, cluster_end, bamlist, labels[0], len(cluster))
 
                 cluster = [c]
 
@@ -146,7 +147,7 @@ def main(args):
     coords = get_coords(forest, bams)
     logger.debug('found %d anchored reads' % len(coords))
 
-    cluster(coords)
+    cluster(forest, coords)
 
 
 if __name__ == '__main__':

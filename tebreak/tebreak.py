@@ -1319,6 +1319,18 @@ def summarise_insertion(ins):
     return pi
 
 
+def filter_size(insertions, filters):
+    filtered = []
+    for ins in insertions:
+        exclude = False
+        if len(ins.discoreads) < filters['min_discordant_reads']: exclude = True
+        if ins.num_sr() < filters['min_split_reads']: exclude = True
+
+    if not exclude: filtered.append(ins)
+
+    return filtered
+
+
 def filter_insertions(insertions, filters, tmpdir='/tmp'):
     filtered = []
     for ins in insertions:
@@ -1338,8 +1350,8 @@ def filter_insertions(insertions, filters, tmpdir='/tmp'):
         if len(ins) >= filters['max_ins_reads']: exclude = True
         if max(mapq) < filters['min_prox_mapq']: exclude = True
 
-        if len(ins.discoreads) < filters['min_discordant_reads']: exclude = True
-        if ins.num_sr() < filters['min_split_reads']: exclude = True
+        #if len(ins.discoreads) < filters['min_discordant_reads']: exclude = True
+        #if ins.num_sr() < filters['min_split_reads']: exclude = True
 
         if filters['exclude_bam']:
             for bam in bams:
@@ -1510,11 +1522,13 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
 
             insertions = [ins for ins in insertions if len(ins.be1.proximal_subread()) > 0] # remove bogus insertions
 
+            insertions = filter_insertions(insertions, filters, tmpdir=args.tmpdir)
+
             for ins in insertions:
                 ins.fetch_discordant_reads(bams)
                 ins.compile_info(bams)
 
-            insertions = filter_insertions(insertions, filters, tmpdir=args.tmpdir)
+            insertions = filter_size(insertions, filters, tmpdir=args.tmpdir)
 
             logger.debug('Chunk %s: Postprocessing %d filtered insertions, trying to improve consensus breakend sequences ...' % (chunkname, len(insertions)))
             processed_insertions  = postprocess_insertions(insertions, filters, args.bwaref, bams, tmpdir=args.tmpdir)

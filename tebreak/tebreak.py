@@ -1516,8 +1516,6 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
                 ins.fetch_discordant_reads(bams)
                 ins.compile_info(bams)
 
-            insertions = filter_size(insertions, filters)
-
             logger.debug('Chunk %s: Postprocessing %d filtered insertions, trying to improve consensus breakend sequences ...' % (chunkname, len(insertions)))
             processed_insertions  = postprocess_insertions(insertions, filters, args.bwaref, bams, tmpdir=args.tmpdir)
 

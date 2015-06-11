@@ -1326,7 +1326,7 @@ def filter_size(insertions, filters):
         if len(ins.discoreads) < filters['min_discordant_reads']: exclude = True
         if ins.num_sr() < filters['min_split_reads']: exclude = True
 
-    if not exclude: filtered.append(ins)
+        if not exclude: filtered.append(ins)
 
     return filtered
 

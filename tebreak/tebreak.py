@@ -1319,18 +1319,6 @@ def summarise_insertion(ins):
     return pi
 
 
-def filter_size(insertions, filters):
-    filtered = []
-    for ins in insertions:
-        exclude = False
-        if len(ins.discoreads) < filters['min_discordant_reads']: exclude = True
-        if ins.num_sr() < filters['min_split_reads']: exclude = True
-
-        if not exclude: filtered.append(ins)
-
-    return filtered
-
-
 def filter_insertions(insertions, filters, tmpdir='/tmp'):
     filtered = []
     for ins in insertions:
@@ -1350,8 +1338,8 @@ def filter_insertions(insertions, filters, tmpdir='/tmp'):
         if len(ins) >= filters['max_ins_reads']: exclude = True
         if max(mapq) < filters['min_prox_mapq']: exclude = True
 
-        #if len(ins.discoreads) < filters['min_discordant_reads']: exclude = True
-        #if ins.num_sr() < filters['min_split_reads']: exclude = True
+        if len(ins.discoreads) < filters['min_discordant_reads']: exclude = True
+        if ins.num_sr() < filters['min_split_reads']: exclude = True
 
         if filters['exclude_bam']:
             for bam in bams:

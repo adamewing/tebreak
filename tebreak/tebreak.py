@@ -1338,7 +1338,6 @@ def filter_insertions(insertions, filters, tmpdir='/tmp'):
         if len(ins) >= filters['max_ins_reads']: exclude = True
         if max(mapq) < filters['min_prox_mapq']: exclude = True
 
-        if len(ins.discoreads) < filters['min_discordant_reads']: exclude = True
         if ins.num_sr() < filters['min_split_reads']: exclude = True
 
         if filters['exclude_bam']:
@@ -1453,7 +1452,7 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
             'max_D_score':           float(args.maxD),
             'max_ins_reads':         int(args.max_ins_reads),
             'min_split_reads':       int(args.min_split_reads),
-            'min_discordant_reads':  int(args.min_discordant_reads),
+            #'min_discordant_reads':  int(args.min_discordant_reads),
             'min_prox_mapq':         int(args.min_prox_mapq),
             'max_N_consensus':       int(args.max_N_consensus),
             'max_rpkm':              int(args.max_fold_rpkm)*exp_rpkm,
@@ -1506,9 +1505,9 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
             logger.debug('Chunk %s: Building insertions...' % chunkname)
 
             insertions = build_insertions(breakends)
-            logger.debug('Chunk %s: Processing and filtering %d potential insertions ...' % (chunkname, len(insertions)))
-
             insertions = [ins for ins in insertions if len(ins.be1.proximal_subread()) > 0] # remove bogus insertions
+
+            logger.debug('Chunk %s: Processing and filtering %d potential insertions ...' % (chunkname, len(insertions)))
 
             insertions = filter_insertions(insertions, filters, tmpdir=args.tmpdir)
 
@@ -1724,7 +1723,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_fold_rpkm', default=10, help='ignore insertions supported by rpkm*max_fold_rpkm reads (default = 10)')
     parser.add_argument('--max_ins_reads', default=1000, help='maximum number of reads per insertion call (default = 1000)')
     parser.add_argument('--min_split_reads', default=4, help='minimum total split reads per insertion call (default = 4)')
-    parser.add_argument('--min_discordant_reads', default=4, help='minimum discordant read count (default = 4)')
+    #parser.add_argument('--min_discordant_reads', default=4, help='minimum discordant read count (default = 4)')
     parser.add_argument('--min_prox_mapq', default=10, help='minimum map quality for proximal subread (default = 10)')
     parser.add_argument('--max_N_consensus', default=4, help='exclude breakend seqs with > this number of N bases (default = 4)')
     parser.add_argument('--exclude_bam', default=None, help='may be comma delimited')

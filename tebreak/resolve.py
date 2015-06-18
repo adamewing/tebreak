@@ -834,6 +834,7 @@ def main(args):
         forest = interval_forest(args.filter_bed)
 
     results = []
+    insertions = []
 
     pool = mp.Pool(processes=int(args.processes))
 
@@ -841,11 +842,13 @@ def main(args):
         if int(args.max_bam_count) == 0 or bamcount(ins) <= int(args.max_bam_count):
             res = pool.apply_async(resolve_insertion, [args, ins, inslib_fa])
             results.append(res)
-            if counter % 1000 == 0: logger.debug('submitted %d candidates, last uuid: %s' % (counter, ins['INFO']['ins_uuid']))
+            if counter % 1000 == 0:
+                logger.debug('submitted %d candidates, last uuid: %s' % (counter, ins['INFO']['ins_uuid']))
 
-    insertions = [res.get() for res in results if res is not None]
-
-    insertions = resolve_transductions(insertions)
+                new_insertions = [res.get() for res in results if res is not None]
+                new_insertions = resolve_transductions(insertions)
+                insertions += new_insertions
+                results = []
 
     tebreak.text_summary(insertions, outfile=args.detail_out) # debug
 

@@ -750,19 +750,20 @@ def resolve_insertion(args, ins, inslib_fa):
         ins = add_insdata(ins, last_res)
 
         if not args.skip_align:
-            tmp_bam = remap_discordant(ins, inslib_fa=inslib_fa, tmpdir=args.tmpdir)
+            if 'best_ins_matchpct' in ins['INFO'] and ins['INFO']['best_ins_matchpct'] >= float(args.minmatch):
+                tmp_bam = remap_discordant(ins, inslib_fa=inslib_fa, tmpdir=args.tmpdir)
 
-            if tmp_bam is not None:
-                bam = pysam.AlignmentFile(tmp_bam, 'rb')
-                ins['INFO']['support_bam_file'] = tmp_bam
-                ins['INFO']['mapped_target'] = bam.mapped
-                ins = get_bam_info(bam, ins)
+                if tmp_bam is not None:
+                    bam = pysam.AlignmentFile(tmp_bam, 'rb')
+                    ins['INFO']['support_bam_file'] = tmp_bam
+                    ins['INFO']['mapped_target'] = bam.mapped
+                    ins = get_bam_info(bam, ins)
 
-                if not args.keep_tmp_bams:
-                    if os.path.exists(tmp_bam): os.remove(tmp_bam)
-                    if os.path.exists(tmp_bam + '.bai'): os.remove(tmp_bam + '.bai')
+                    if not args.keep_tmp_bams:
+                        if os.path.exists(tmp_bam): os.remove(tmp_bam)
+                        if os.path.exists(tmp_bam + '.bai'): os.remove(tmp_bam + '.bai')
 
-        if 'best_ins_matchpct' in ins['INFO']: ins = identify_transductions(ins)
+                ins = identify_transductions(ins)
 
         return ins
 
@@ -871,6 +872,7 @@ if __name__ == '__main__':
 
     parser.add_argument('-m', '--filter_bed', default=None, help='mask BED')
     parser.add_argument('--max_bam_count', default=0)
+    parser.add_argument('--minmatch', default=0.95)
 
     parser.add_argument('--annotation_tabix', default=None, help='can be comma-delimited list')
     parser.add_argument('--map_tabix', default=None, help='tabix-indexed BED of mappability scores')

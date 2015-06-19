@@ -816,14 +816,42 @@ def resolve_transductions(insertions):
     return insertions
 
 
+def prefilter(args, ins):
+    if int(args.max_bam_count) > 0 and bamcount(ins) > int(args.max_bam_count): return True
+
+    minmatch = 0.0
+    if 'be1_avgmatch' in ins['INFO'] and ins['INFO']['be1_avgmatch'] > minmatch: minmatch = ins['INFO']['be1_avgmatch']
+    if 'be2_avgmatch' in ins['INFO'] and ins['INFO']['be2_avgmatch'] > minmatch: minmatch = ins['INFO']['be2_avgmatch']
+
+    if minmatch < float(args.minmatch): return True
+
+    if not args.unmapped:
+        unmap = True
+        if 'be1_dist_seq' in ins['INFO'] and ins['INFO']['be1_dist_seq'] is not None: unmap = False
+        if 'be2_dist_seq' in ins['INFO'] and ins['INFO']['be2_dist_seq'] is not None: unmap = False
+
+        if unmap: return True
+
+    return False
+
+
+
 def main(args):
     if args.verbose: logger.setLevel(logging.DEBUG)
     insertions = []
 
+    logger.debug('resolve.py called with args: %s' % ' '.join(sys.argv))
+    logger.debug('loading pickle: %s' % args.pickle)
+
     with open(args.pickle, 'r') as pickin:
         insertions = pickle.load(pickin)
 
-    logger.debug('finished loading %s' % pickin)
+    logger.debug('finished loading %s' % args.pickle)
+    logger.debug('raw candidate count: %d' % len(insertions))
+
+    insertions = [ins for ins in insertions if not prefilter(args, ins)]
+
+    logger.debug('prefiltered candidate count: %d' % len(insertions))
 
     inslib_fa = prepare_ref(args.inslib_fasta, refoutdir=args.refoutdir, makeFAI=False, makeBWA=False)
 
@@ -840,23 +868,17 @@ def main(args):
     pool = mp.Pool(processes=int(args.processes))
 
     for counter, ins in enumerate(insertions):
-        if int(args.max_bam_count) == 0 or bamcount(ins) <= int(args.max_bam_count):
-            minmatch = 0.0
-            if 'be1_avgmatch' in ins['INFO'] and ins['INFO']['be1_avgmatch'] > minmatch: minmatch = ins['INFO']['be1_avgmatch']
-            if 'be2_avgmatch' in ins['INFO'] and ins['INFO']['be2_avgmatch'] > minmatch: minmatch = ins['INFO']['be2_avgmatch']
+        res = pool.apply_async(resolve_insertion, [args, ins, inslib_fa])
+        results.append(res)
 
-            if minmatch >= float(args.minmatch):
-                res = pool.apply_async(resolve_insertion, [args, ins, inslib_fa])
-                results.append(res)
+        if counter % 1000 == 0:
+            logger.debug('submitted %d candidates, last uuid: %s' % (counter, ins['INFO']['ins_uuid']))
 
-            if counter % 1000 == 0:
-                logger.debug('submitted %d candidates, last uuid: %s' % (counter, ins['INFO']['ins_uuid']))
-
-                new_insertions = [res.get() for res in results if res is not None]
-                if new_insertions:
-                    new_insertions = resolve_transductions(new_insertions)
-                    processed_insertions += new_insertions
-                    results = []
+            new_insertions = [res.get() for res in results if res is not None]
+            if new_insertions:
+                new_insertions = resolve_transductions(new_insertions)
+                processed_insertions += new_insertions
+                results = []
 
     new_insertions = [res.get() for res in results if res is not None]
     new_insertions = resolve_transductions(new_insertions)
@@ -901,5 +923,6 @@ if __name__ == '__main__':
     parser.add_argument('-v', '--verbose', action='store_true', default=False)
     parser.add_argument('--keep_tmp_bams', action='store_true', default=False)
     parser.add_argument('--detail_out', default='resolve.out', help='file to write detailed output')
+    parser.add_argument('--unmapped', default=False, action='store_true')
     args = parser.parse_args()
     main(args)

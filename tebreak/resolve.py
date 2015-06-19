@@ -750,7 +750,7 @@ def resolve_insertion(args, ins, inslib_fa):
         ins = add_insdata(ins, last_res)
 
         if not args.skip_align:
-            if 'best_ins_matchpct' in ins['INFO'] and ins['INFO']['best_ins_matchpct'] >= float(args.minmatch):
+            if 'best_ins_matchpct' in ins['INFO'] and ins['INFO']['best_ins_matchpct'] >= float(args.minTEmatch):
                 tmp_bam = remap_discordant(ins, inslib_fa=inslib_fa, tmpdir=args.tmpdir)
 
                 if tmp_bam is not None:
@@ -834,28 +834,40 @@ def main(args):
         forest = interval_forest(args.filter_bed)
 
     results = []
-    insertions = []
+    
+    processed_insertions = []
 
     pool = mp.Pool(processes=int(args.processes))
 
     for counter, ins in enumerate(insertions):
         if int(args.max_bam_count) == 0 or bamcount(ins) <= int(args.max_bam_count):
-            res = pool.apply_async(resolve_insertion, [args, ins, inslib_fa])
-            results.append(res)
+            minmatch = 0.0
+            if 'be1_avgmatch' in ins['INFO'] and ins['INFO']['be1_avgmatch'] > minmatch: minmatch = ins['INFO']['be1_avgmatch']
+            if 'be2_avgmatch' in ins['INFO'] and ins['INFO']['be2_avgmatch'] > minmatch: minmatch = ins['INFO']['be2_avgmatch']
+
+            if minmatch >= float(args.minmatch):
+                res = pool.apply_async(resolve_insertion, [args, ins, inslib_fa])
+                results.append(res)
+
             if counter % 1000 == 0:
                 logger.debug('submitted %d candidates, last uuid: %s' % (counter, ins['INFO']['ins_uuid']))
 
                 new_insertions = [res.get() for res in results if res is not None]
-                new_insertions = resolve_transductions(insertions)
-                insertions += new_insertions
-                results = []
+                if new_insertions:
+                    new_insertions = resolve_transductions(new_insertions)
+                    processed_insertions += new_insertions
+                    results = []
 
-    tebreak.text_summary(insertions, outfile=args.detail_out) # debug
+    new_insertions = [res.get() for res in results if res is not None]
+    new_insertions = resolve_transductions(new_insertions)
+    processed_insertions += new_insertions
+
+    tebreak.text_summary(processed_insertions, outfile=args.detail_out) # debug
 
     annotator = None
     if args.annotation_tabix: annotator = Annotator(args.annotation_tabix)
 
-    te_insertions = [TEIns(ins, annotator, args.use_rg) for ins in insertions]
+    te_insertions = [TEIns(ins, annotator, args.use_rg) for ins in processed_insertions]
 
     if len(te_insertions) > 0: print te_insertions[0].header()
 
@@ -875,6 +887,7 @@ if __name__ == '__main__':
 
     parser.add_argument('-m', '--filter_bed', default=None, help='mask BED')
     parser.add_argument('--max_bam_count', default=0)
+    parser.add_argument('--minTEmatch', default=0.9)
     parser.add_argument('--minmatch', default=0.95)
 
     parser.add_argument('--annotation_tabix', default=None, help='can be comma-delimited list')

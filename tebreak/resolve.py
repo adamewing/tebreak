@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import os
+import gc
 import sys
 import shutil
 import cPickle as pickle
@@ -866,6 +867,9 @@ def main(args):
     processed_insertions = []
 
     pool = mp.Pool(processes=int(args.processes))
+
+    gc_c = gc.collect()
+    logger.debug('gc: %d' % gc_c)
 
     for counter, ins in enumerate(insertions):
         res = pool.apply_async(resolve_insertion, [args, ins, inslib_fa])

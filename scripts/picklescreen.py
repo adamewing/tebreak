@@ -14,10 +14,10 @@ from collections import defaultdict as dd
 logger = logging.getLogger(__name__)
 
 
-def map(fq, ref):
+def map(fq, ref, threads=4):
     logger.debug('map %s to %s ...' % (fq, ref))
 
-    bwa = ['bwa', 'mem', '-M', '-Y', '-k', '10', '-P', '-S', '-T', '20', ref, fq]
+    bwa = ['bwa', 'mem', '-t', int(threads), '-M', '-Y', '-k', '10', '-P', '-S', '-T', '20', ref, fq]
 
     keep = {}
 
@@ -84,7 +84,7 @@ def main(args):
 
     fq = makefq(insertions)
 
-    keep = map(fq, ref)
+    keep = map(fq, ref, threads=int(args.threads))
 
     logger.debug('kept %d records' % len(keep))
 
@@ -109,6 +109,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='trim pickle based on alignments')
     parser.add_argument('-p', '--pickle', required=True)
     parser.add_argument('-r', '--ref', required=True)
+    parser.add_argument('-t', '--threads', default=4)
     parser.add_argument('--out', default='filtered.pickle')
     args = parser.parse_args()
     main(args)

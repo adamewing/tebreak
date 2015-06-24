@@ -31,6 +31,7 @@ def len_filter(rec):
     telen = int(rec['TE_Align_End']) - int(rec['TE_Align_Start'])
     if 'ALU' in rec['Superfamily'] and telen < 280: return True
     if 'SVA' in rec['Superfamily'] and telen < 1000: return True
+    if 'L1' in rec['Superfamily'] and int(rec['TE_Align_End']) < 5950: return True
 
     return False
 

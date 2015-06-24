@@ -49,8 +49,8 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="return segments of the genome covered at some minimum depth")
     parser.add_argument('-b', '--bam', required=True, help="indexed BAM file")
-    parser.add_argument('-d', '--depth', default=1, help="minimum depth to report segment (default=10)")
-    parser.add_argument('-l', '--length', default=0, help="minimum length covered segment to report (default=1000)")
+    parser.add_argument('-d', '--depth', default=1, help="minimum depth to report segment (default=1)")
+    parser.add_argument('-l', '--length', default=0, help="minimum length covered segment to report (default=0)")
 
     args = parser.parse_args()
     main(args)

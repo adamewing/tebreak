@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 def map(fq, ref, threads=4):
     logger.debug('map %s to %s ...' % (fq, ref))
 
-    bwa = ['bwa', 'mem', '-t', int(threads), '-M', '-Y', '-k', '10', '-P', '-S', '-T', '20', ref, fq]
+    bwa = ['bwa', 'mem', '-t', str(threads), '-M', '-Y', '-k', '10', '-P', '-S', '-T', '20', ref, fq]
 
     keep = {}
 

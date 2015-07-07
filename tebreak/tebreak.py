@@ -1580,12 +1580,13 @@ def prefer_insertion(ins1, ins2):
 def text_summary(insertions, outfile='tebreak.out'):
     with open(outfile, 'w') as out:
         for ins in insertions:
-            out.write('#BEGIN\n')
-            for label, value in ins['INFO'].iteritems():
-                out.write('%s: %s\n' % (label, str(value)))
-            out.write('#END\n')
+            if ins is not None:
+                out.write('#BEGIN\n')
+                for label, value in ins['INFO'].iteritems():
+                    out.write('%s: %s\n' % (label, str(value)))
+                out.write('#END\n')
 
-            out.write('\n')
+                out.write('\n')
 
 
 def expected_rpkm(bam_files, genome, intervals=None):

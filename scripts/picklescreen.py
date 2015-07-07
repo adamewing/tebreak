@@ -34,6 +34,22 @@ def map(fq, ref, threads=4):
     return keep
 
 
+def filter(ins, min_total=2, req_both=False):
+    if req_both:
+        if 'be2_dist_seq' in ins['INFO']:
+            if ins['INFO']['be2_dist_seq'] is None: return True
+        else:
+            return True
+
+    total_support = 0
+    if 'be1_sr_count' in ins['INFO']: total_support += ins['INFO']['be1_sr_count']
+    if 'be2_sr_count' in ins['INFO']: total_support += ins['INFO']['be2_sr_count']
+
+    if total_support < min_total: return True
+
+    return False
+
+
 def prepare_ref(fasta, refoutdir='tebreak_refs'):
     if not os.path.exists(refoutdir):
         os.mkdir(refoutdir)
@@ -86,16 +102,17 @@ def main(args):
 
     keep = map(fq, ref, threads=int(args.threads))
 
-    logger.debug('kept %d records' % len(keep))
 
     filtered = []
 
     for ins in insertions:
-        if ins['INFO']['ins_uuid'] in keep:
+        if ins['INFO']['ins_uuid'] in keep and not filter(ins, req_both=args.require_both):
             rec = dd(dict)
             rec['INFO'] = ins['INFO']
             rec['READSTORE'] = ins['READSTORE']
             filtered.append(rec)
+
+    logger.debug('kept %d records' % len(filtered))
 
     with open(args.out, 'w') as pickout:
         pickle.dump(filtered, pickout)
@@ -111,5 +128,6 @@ if __name__ == '__main__':
     parser.add_argument('-r', '--ref', required=True)
     parser.add_argument('-t', '--threads', default=4)
     parser.add_argument('--out', default='filtered.pickle')
+    parser.add_argument('--require_both', default=False, action='store_true')
     args = parser.parse_args()
     main(args)

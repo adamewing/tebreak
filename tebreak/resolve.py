@@ -785,34 +785,36 @@ def resolve_transductions(insertions):
     tr_coord_dict = dd(dict) # chrom --> pos --> [ins]
 
     for ins in insertions:
-            for be in ('be1','be2'):
-                if be+'_trans_loc' in ins['INFO']:
-                    for (chrom, start, end, side) in ins['INFO'][be+'_trans_loc']:
-                        for pos in map(int, (start, end)):
-                            if pos not in tr_coord_dict[chrom]: tr_coord_dict[chrom][pos] = []
-                            tr_coord_dict[chrom][pos].append(ins)
+            if ins is not None:
+                for be in ('be1','be2'):
+                    if be+'_trans_loc' in ins['INFO']:
+                        for (chrom, start, end, side) in ins['INFO'][be+'_trans_loc']:
+                            for pos in map(int, (start, end)):
+                                if pos not in tr_coord_dict[chrom]: tr_coord_dict[chrom][pos] = []
+                                tr_coord_dict[chrom][pos].append(ins)
 
     for parent_ins in insertions:
-        for be in ('be1','be2'):
-            if parent_ins['INFO']['chrom'] in tr_coord_dict and int(parent_ins['INFO'][be+'_breakpos']) in tr_coord_dict[parent_ins['INFO']['chrom']]:
-                for trduct_ins in tr_coord_dict[parent_ins['INFO']['chrom']][int(parent_ins['INFO'][be+'_breakpos'])]:
+        if parent_ins is not None:
+            for be in ('be1','be2'):
+                if parent_ins['INFO']['chrom'] in tr_coord_dict and int(parent_ins['INFO'][be+'_breakpos']) in tr_coord_dict[parent_ins['INFO']['chrom']]:
+                    for trduct_ins in tr_coord_dict[parent_ins['INFO']['chrom']][int(parent_ins['INFO'][be+'_breakpos'])]:
 
-                    trduct_loc_string = '%s:%d-%d' % (trduct_ins['INFO']['chrom'], trduct_ins['INFO']['be1_breakpos'], trduct_ins['INFO']['be2_breakpos'])
-                    parent_loc_string = '%s:%d-%d' % (parent_ins['INFO']['chrom'], parent_ins['INFO']['be1_breakpos'], parent_ins['INFO']['be2_breakpos'])
+                        trduct_loc_string = '%s:%d-%d' % (trduct_ins['INFO']['chrom'], trduct_ins['INFO']['be1_breakpos'], trduct_ins['INFO']['be2_breakpos'])
+                        parent_loc_string = '%s:%d-%d' % (parent_ins['INFO']['chrom'], parent_ins['INFO']['be1_breakpos'], parent_ins['INFO']['be2_breakpos'])
 
-                    if score_insertion(parent_ins) < score_insertion(trduct_ins):
-                        if 'transducer' not in parent_ins['INFO']: parent_ins['INFO']['transducer'] = []
-                        if 'transduction' not in trduct_ins['INFO']: trduct_ins['INFO']['transduction'] = []
+                        if score_insertion(parent_ins) < score_insertion(trduct_ins):
+                            if 'transducer' not in parent_ins['INFO']: parent_ins['INFO']['transducer'] = []
+                            if 'transduction' not in trduct_ins['INFO']: trduct_ins['INFO']['transduction'] = []
 
-                        parent_ins['INFO']['transducer'].append(trduct_loc_string)
-                        trduct_ins['INFO']['transduction'].append(parent_loc_string)
+                            parent_ins['INFO']['transducer'].append(trduct_loc_string)
+                            trduct_ins['INFO']['transduction'].append(parent_loc_string)
 
-                    else:
-                        if 'transducer' not in trduct_ins['INFO']: trduct_ins['INFO']['transducer'] = []
-                        if 'transduction' not in parent_ins['INFO']: parent_ins['INFO']['transduction'] = []
+                        else:
+                            if 'transducer' not in trduct_ins['INFO']: trduct_ins['INFO']['transducer'] = []
+                            if 'transduction' not in parent_ins['INFO']: parent_ins['INFO']['transduction'] = []
 
-                        parent_ins['INFO']['transduction'].append(trduct_loc_string)
-                        trduct_ins['INFO']['transducer'].append(parent_loc_string)
+                            parent_ins['INFO']['transduction'].append(trduct_loc_string)
+                            trduct_ins['INFO']['transducer'].append(parent_loc_string)
 
     return insertions
 

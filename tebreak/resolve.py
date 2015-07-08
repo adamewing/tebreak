@@ -895,7 +895,7 @@ def main(args):
     annotator = None
     if args.annotation_tabix: annotator = Annotator(args.annotation_tabix)
 
-    te_insertions = [TEIns(ins, annotator, args.use_rg) for ins in processed_insertions]
+    te_insertions = [TEIns(ins, annotator, args.use_rg) for ins in processed_insertions if ins is not None]
 
     if len(te_insertions) > 0: print te_insertions[0].header()
 

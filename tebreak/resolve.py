@@ -244,11 +244,26 @@ class TEIns:
         if len(self.ins['be1_prox_seq']) < 20: passed = False
 
         if forest is not None:
-            if self.genome_location_filter(forest): passed = False
+            if self.genome_location_filter(forest): passed = False        
+
+        if not self.end_align_flush(): passed = False
 
         if 'transducer' in self.ins: passed = False
 
         return passed
+
+    def end_align_flush(self, tolerance=2):
+        flush = False
+
+        for be in ('be1','be2'):
+            if be+'_prox_loc' in self.ins:
+                aligned_segs = self.ins[be+'_prox_loc']
+                cons_len = len(self.ins[be+'_cons_seq'])
+
+                for s in aligned_segs:
+                    if s[0] <= tolerance or s[1] >= cons_len-tolerance: flush = True
+
+        return flush
 
     def header(self):
         return '\t'.join(self.out.keys())

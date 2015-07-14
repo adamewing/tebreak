@@ -52,8 +52,10 @@ class Annotator:
         return out
 
 
-class TEIns:
-    def __init__(self, ins, annotator, use_rg):
+class Ins:
+    def __init__(self, ins, annotator, use_rg, allow_unmapped=False):
+        self.allow_unmapped=allow_unmapped
+
         self.ins = ins['INFO']
         self.out = od()
         self.end3 = 'NA'
@@ -64,6 +66,7 @@ class TEIns:
         self.use_rg = use_rg
 
         self._fill_out()
+
 
     def _fill_out(self):
         self.out['Chromosome']    = chrom = self.ins['chrom']
@@ -96,6 +99,12 @@ class TEIns:
                 self.out['5_Prime_End'] = self.ins['be1_breakpos']
                 self.end3 = 'be2'
                 self.end5 = 'be1'
+
+        if self.allow_unmapped and 'NA' in (self.out['5_Prime_End'], self.out['3_Prime_End']):
+                self.out['3_Prime_End'] = self.ins['be1_breakpos']
+                self.out['5_Prime_End'] = self.ins['be2_breakpos']
+                self.end3 = 'be1'
+                self.end5 = 'be2'
 
     def te_family(self):
         ''' inslib input should have headers superfamily:subfamily e.g. L1:L1Ta or Alu:AluYa5 '''
@@ -234,23 +243,36 @@ class TEIns:
 
         return False
 
-    def pass_filter(self, forest):
-        passed = True
+    def pass_te_filter(self, forest):
+        passed = pass_general_filter(forest)
+
         if 'best_ins_matchpct' in self.ins:
             if self.ins['best_ins_matchpct'] < 0.9: passed = False
             if self.polyA_filter(): passed = False
         else: passed = False
 
-        if len(self.ins['be1_prox_seq']) < 20: passed = False
-
-        if forest is not None:
-            if self.genome_location_filter(forest): passed = False        
-
-        if not self.end_align_flush(): passed = False
-
         if 'transducer' in self.ins: passed = False
 
         return passed
+
+
+    def pass_general_filter(self, forest):
+        passed = True
+
+        if 'NA' in (self.end5, self.end3): passed = False
+
+        prox_len = [len(self.ins['be1_prox_seq'])]
+        if 'be2_prox_seq' in self.ins: prox_len.append(len(self.ins['be2_prox_seq']))
+
+        if max(prox_len) < 20: passed = False
+
+        if forest is not None:
+            if self.genome_location_filter(forest): passed = False
+
+        if not self.end_align_flush(): passed = False
+
+        return passed
+
 
     def end_align_flush(self, tolerance=2):
         flush = False
@@ -766,7 +788,7 @@ def resolve_insertion(args, ins, inslib_fa):
         ins = add_insdata(ins, last_res)
 
         if not args.skip_align:
-            if 'best_ins_matchpct' in ins['INFO'] and ins['INFO']['best_ins_matchpct'] >= float(args.minTEmatch):
+            if 'best_ins_matchpct' in ins['INFO'] and ins['INFO']['best_ins_matchpct'] >= float(args.min_ins_match):
                 tmp_bam = remap_discordant(ins, inslib_fa=inslib_fa, tmpdir=args.tmpdir)
 
                 if tmp_bam is not None:
@@ -910,12 +932,16 @@ def main(args):
     annotator = None
     if args.annotation_tabix: annotator = Annotator(args.annotation_tabix)
 
-    te_insertions = [TEIns(ins, annotator, args.use_rg) for ins in processed_insertions if ins is not None]
+    final_insertions = [Ins(ins, annotator, args.use_rg, allow_unmapped=args.unmapped) for ins in processed_insertions if ins is not None]
 
-    if len(te_insertions) > 0: print te_insertions[0].header()
+    if len(final_insertions) > 0: print final_insertions[0].header()
 
-    for te_ins in sorted(te_insertions):
-        if te_ins.pass_filter(forest): print te_ins
+    if args.te:
+        for te_ins in sorted(final_insertions):
+            if te_ins.pass_te_filter(forest): print te_ins
+    else:
+        for out_ins in sorted(final_insertions):
+            if out_ins.pass_general_filter(forest): print out_ins
 
 
 if __name__ == '__main__':
@@ -923,27 +949,24 @@ if __name__ == '__main__':
     FORMAT = '%(asctime)s %(message)s'
     logging.basicConfig(format=FORMAT)
  
-    parser = argparse.ArgumentParser(description='Resolve TE insertions from TEbreak data')
-    parser.add_argument('-p', '--pickle', required=True)
-    parser.add_argument('-t', '--processes', default=1, help='split work across multiple processes')
-    parser.add_argument('-i', '--inslib_fasta', required=True, help='reference for insertions (not genome)')
-
-    parser.add_argument('-m', '--filter_bed', default=None, help='mask BED')
-    parser.add_argument('--max_bam_count', default=0)
-    parser.add_argument('--minTEmatch', default=0.9)
-    parser.add_argument('--minmatch', default=0.95)
-
-    parser.add_argument('--annotation_tabix', default=None, help='can be comma-delimited list')
-    parser.add_argument('--map_tabix', default=None, help='tabix-indexed BED of mappability scores')
-
-    parser.add_argument('--refoutdir', default='tebreak_refs')
-
-    parser.add_argument('--tmpdir', default='/tmp')
-    parser.add_argument('--skip_align', action='store_true', default=False)
-    parser.add_argument('--use_rg', action='store_true', default=False, help='use RG instead of BAM filename for samples')
-    parser.add_argument('-v', '--verbose', action='store_true', default=False)
-    parser.add_argument('--keep_tmp_bams', action='store_true', default=False)
-    parser.add_argument('--detail_out', default='resolve.out', help='file to write detailed output')
-    parser.add_argument('--unmapped', default=False, action='store_true')
+    parser = argparse.ArgumentParser(description='Resolve insertions from TEbreak data')
+    parser.add_argument('-p', '--pickle', required=True, help="pickle file output from tebreak.py")
+    parser.add_argument('-t', '--processes', default=1, help="split work across multiple processes")
+    parser.add_argument('-i', '--inslib_fasta', required=True, help="reference for insertions (not genome)")
+    parser.add_argument('-m', '--filter_bed', default=None, help="BED file of regions to mask")
+    parser.add_argument('--max_bam_count', default=0, help="skip sites with more than this number of BAMs (default = no limit)")
+    parser.add_argument('--min_ins_match', default=0.9, help="minumum match to insertion library")
+    parser.add_argument('--minmatch', default=0.95, help="minimum match to reference genome")
+    parser.add_argument('--annotation_tabix', default=None, help="can be comma-delimited list")
+    parser.add_argument('--map_tabix', default=None, help="tabix-indexed BED of mappability scores")
+    parser.add_argument('--refoutdir', default='tebreak_refs', help="output directory for generating tebreak references (default=tebreak_refs)")
+    parser.add_argument('--tmpdir', default='/tmp', help="directory for temporary files")
+    parser.add_argument('--skip_align', action='store_true', default=False, help="skip re-alignment of discordant ends to ref insertion")
+    parser.add_argument('--use_rg', action='store_true', default=False, help="use RG instead of BAM filename for samples")
+    parser.add_argument('-v', '--verbose', action='store_true', default=False, help="output status information")
+    parser.add_argument('--keep_tmp_bams', action='store_true', default=False, help="leave temporary alignmets to ref insertions")
+    parser.add_argument('--detail_out', default='resolve.out', help="file to write detailed output")
+    parser.add_argument('--unmapped', default=False, action='store_true', help="report insertions that do not match insertion library")
+    parser.add_argument('--te', default=False, action='store_true', help="set if insertion library is transposons")
     args = parser.parse_args()
     main(args)

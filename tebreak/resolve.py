@@ -113,7 +113,12 @@ class Ins:
 
         for be in ('be1', 'be2'):
             if be + '_bestmatch' in self.ins:
-                superfam, subfam = self.ins[be + '_bestmatch'].target_id.split(':')
+                if ':' in self.ins[be + '_bestmatch'].target_id:
+                    superfam, subfam = self.ins[be + '_bestmatch'].target_id.split(':')
+                else:
+                    superfam = self.ins[be + '_bestmatch'].target_id
+                    subfam = 'NA'
+
                 self.out['Superfamily'].append(superfam)
                 self.out['Subfamily'].append(subfam)
 
@@ -308,6 +313,7 @@ class Ins:
 def best_match(last_results, query_name, req_target=None, min_match=0.9):
     qres = []
 
+
     for res in sorted(last_results):
         if res.query_id == query_name:
             if req_target is None or req_target == res.target_id:
@@ -317,7 +323,7 @@ def best_match(last_results, query_name, req_target=None, min_match=0.9):
     return None
 
 
-def prepare_ref(fasta, refoutdir='tebreak_refs', makeFAI=True, makeBWA=True, makeLAST=True):
+def prepare_ref(fasta, refoutdir='tebreak_refs', makeFAI=True, makeBWA=True, makeLAST=True, usecached=False):
     if not os.path.exists(refoutdir):
         os.mkdir(refoutdir)
         assert os.path.exists(refoutdir), 'could not create ref output directory: %s' % refoutdir
@@ -340,6 +346,7 @@ def prepare_ref(fasta, refoutdir='tebreak_refs', makeFAI=True, makeBWA=True, mak
         assert os.path.exists(ref_fa + '.bwt'), 'could not bwa index %s' % ref_fa
 
     if makeLAST:
+        if usecached and os.path.exists(ref_fa + '.tis'): return ref_fa
         logger.debug('Create LAST db for %s ...' % ref_fa)
         subprocess.call(['lastdb', '-s', '4G', ref_fa, ref_fa])
         assert os.path.exists(ref_fa + '.tis'), 'could not lastdb -4G %s %s' % (ref_fa, ref_fa)
@@ -390,7 +397,7 @@ def last_alignment(ins, ref_fa, tmpdir='/tmp'):
 
 
 def interval_forest(bed_file):
-    ''' build dictionary of interval trees; value=LASTResult '''
+    ''' build dictionary of interval trees '''
     forest = dd(Intersecter)
 
     with open(bed_file, 'r') as bed:
@@ -893,7 +900,7 @@ def main(args):
 
     logger.debug('prefiltered candidate count: %d' % len(insertions))
 
-    inslib_fa = prepare_ref(args.inslib_fasta, refoutdir=args.refoutdir, makeFAI=False, makeBWA=False)
+    inslib_fa = prepare_ref(args.inslib_fasta, refoutdir=args.refoutdir, makeFAI=False, makeBWA=False, usecached=args.usecachedLAST)
 
     forest = None
     # set up reference mask BED if available
@@ -968,5 +975,6 @@ if __name__ == '__main__':
     parser.add_argument('--detail_out', default='resolve.out', help="file to write detailed output")
     parser.add_argument('--unmapped', default=False, action='store_true', help="report insertions that do not match insertion library")
     parser.add_argument('--te', default=False, action='store_true', help="set if insertion library is transposons")
+    parser.add_argument('--usecachedLAST', default=False, action='store_true', help="try to used cached LAST db, if found")
     args = parser.parse_args()
     main(args)

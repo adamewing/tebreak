@@ -149,7 +149,7 @@ class LASTResult:
         self.query_align   = res[2].split()[6]
 
     def pct_match(self):
-        return float(sum([a==b for a,b in zip(list(self.query_align), list(self.target_align))])) / float(self.query_alnsize)
+        return float(sum([a.upper()==b.upper() for a,b in zip(list(self.query_align), list(self.target_align))])) / float(self.query_alnsize)
 
     def __lt__(self, other):
         return self.score > other.score
@@ -1026,7 +1026,7 @@ def load_falib(infa):
             if line.startswith('>'):
                 if seq != '':
                     seqdict[seqid] = seq
-                seqid = line.lstrip('>').strip()
+                seqid = line.lstrip('>').strip().split()[0]
                 seq   = ''
             else:
                 assert seqid != ''

@@ -69,6 +69,8 @@ class Ins:
 
 
     def _fill_out(self):
+        self.out['UUID'] = self.ins['ins_uuid']
+
         self.out['Chromosome']    = chrom = self.ins['chrom']
         self.out['Left_Extreme']  = start = self.ins['min_supporting_base']
         self.out['Right_Extreme'] = end   = self.ins['max_supporting_base']
@@ -355,7 +357,7 @@ def prepare_ref(fasta, refoutdir='tebreak_refs', makeFAI=True, makeBWA=True, mak
 
 
 def last_alignment(ins, ref_fa, tmpdir='/tmp'):
-    tmpfa = tmpdir + '/' + 'tebreak.resolve.%s.fa' % str(uuid4())
+    tmpfa = tmpdir + '/' + 'tebreak.resolve.%s.fa' % ins['INFO']['ins_uuid']
     with open(tmpfa, 'w') as fa:
         # realign all distal sequences
         if 'be1_dist_seq' in ins['INFO'] and ins['INFO']['be1_dist_seq'] is not None:
@@ -638,7 +640,7 @@ def make_tmp_ref(ins, ref_fa, tmpdir='/tmp'):
     inslib = tebreak.load_falib(ref_fa)
     assert ref_id in inslib, 'Reference is missing: %s' % ref_id
 
-    tmp_ref = tmpdir + '/tebreak.ref.%s.%s.fa' % (ref_id, str(uuid4()))
+    tmp_ref = tmpdir + '/tebreak.ref.%s.%s.fa' % (ref_id, ins['INFO']['ins_uuid'])
 
     with open(tmp_ref, 'w') as fa:
         fa.write('>%s\n%s\n' % (ref_id, inslib[ref_id]))
@@ -660,7 +662,7 @@ def remap_discordant(ins, inslib_fa=None, useref=None, tmpdir='/tmp'):
 
     if tmp_ref is None: return None
 
-    tmp_fq  = '%s/tebreak.%s.discoremap.fq' % (tmpdir, str(uuid4()))
+    tmp_fq  = '%s/tebreak.%s.discoremap.fq' % (tmpdir, ins['INFO']['ins_uuid'])
     tmp_sam = '.'.join(tmp_fq.split('.')[:-1]) + '.sam'
     tmp_bam = '.'.join(tmp_fq.split('.')[:-1]) + '.bam'
     tmp_srt = '.'.join(tmp_fq.split('.')[:-1]) + '.srt'
@@ -804,9 +806,27 @@ def resolve_insertion(args, ins, inslib_fa):
                     ins['INFO']['mapped_target'] = bam.mapped
                     ins = get_bam_info(bam, ins)
 
-                    if not args.keep_tmp_bams:
+                    if not args.keep_all_tmp_bams and not args.keep_ins_bams:
                         if os.path.exists(tmp_bam): os.remove(tmp_bam)
                         if os.path.exists(tmp_bam + '.bai'): os.remove(tmp_bam + '.bai')
+
+                    if args.keep_ins_bams and ins['INFO']['mapped_target'] > 0:
+                        tmp_bam_base = os.path.basename(tmp_bam)
+                        ins_obj = Ins(ins, None, False)
+                        if args.te:
+                            if ins_obj.pass_te_filter(None):
+                                if os.path.exists(tmp_bam): shutil.move(tmp_bam, args.refoutdir + '/' + tmp_bam_base)
+                                if os.path.exists(tmp_bam + '.bai'): shutil.move(tmp_bam + '.bai', args.refoutdir + '/' + tmp_bam_base + '.bai')
+                            else:
+                                if os.path.exists(tmp_bam): os.remove(tmp_bam)
+                                if os.path.exists(tmp_bam + '.bai'): os.remove(tmp_bam + '.bai')
+                        else:
+                            if ins_obj.pass_general_filter(None):
+                                if os.path.exists(tmp_bam): shutil.move(tmp_bam, args.refoutdir + '/' + tmp_bam_base)
+                                if os.path.exists(tmp_bam + '.bai'): shutil.move(tmp_bam + '.bai', args.refoutdir + '/' + tmp_bam_base + '.bai')
+                            else:
+                                if os.path.exists(tmp_bam): os.remove(tmp_bam)
+                                if os.path.exists(tmp_bam + '.bai'): os.remove(tmp_bam + '.bai')
 
                 ins = identify_transductions(ins)
 
@@ -863,7 +883,13 @@ def resolve_transductions(insertions):
     return insertions
 
 
-def prefilter(args, ins):
+def load_uuids(fn):
+    ''' read UUIDs from first column of input file '''
+    with open(fn, 'r') as insfile:
+        return dict.fromkeys([line.strip().split()[0] for line in insfile if line.strip().split()[0].find('-') == 8], True)
+
+
+def prefilter(args, ins, uuids):
     if int(args.max_bam_count) > 0 and bamcount(ins) > int(args.max_bam_count): return True
 
     minmatch = 0.0
@@ -879,8 +905,9 @@ def prefilter(args, ins):
 
         if unmap: return True
 
-    return False
+    if uuids is not None and ins['INFO']['ins_uuid'] not in uuids: return True
 
+    return False
 
 
 def main(args):
@@ -896,7 +923,10 @@ def main(args):
     logger.debug('finished loading %s' % args.pickle)
     logger.debug('raw candidate count: %d' % len(insertions))
 
-    insertions = [ins for ins in insertions if not prefilter(args, ins)]
+    uuids = None
+    if args.uuid_list is not None: uuids = load_uuids(args.uuid_list)
+
+    insertions = [ins for ins in insertions if not prefilter(args, ins, uuids)]
 
     logger.debug('prefiltered candidate count: %d' % len(insertions))
 
@@ -961,20 +991,22 @@ if __name__ == '__main__':
     parser.add_argument('-t', '--processes', default=1, help="split work across multiple processes")
     parser.add_argument('-i', '--inslib_fasta', required=True, help="reference for insertions (not genome)")
     parser.add_argument('-m', '--filter_bed', default=None, help="BED file of regions to mask")
+    parser.add_argument('-v', '--verbose', action='store_true', default=False, help="output status information")
     parser.add_argument('--max_bam_count', default=0, help="skip sites with more than this number of BAMs (default = no limit)")
     parser.add_argument('--min_ins_match', default=0.9, help="minumum match to insertion library")
     parser.add_argument('--minmatch', default=0.95, help="minimum match to reference genome")
     parser.add_argument('--annotation_tabix', default=None, help="can be comma-delimited list")
     parser.add_argument('--map_tabix', default=None, help="tabix-indexed BED of mappability scores")
     parser.add_argument('--refoutdir', default='tebreak_refs', help="output directory for generating tebreak references (default=tebreak_refs)")
-    parser.add_argument('--tmpdir', default='/tmp', help="directory for temporary files")
     parser.add_argument('--skip_align', action='store_true', default=False, help="skip re-alignment of discordant ends to ref insertion")
     parser.add_argument('--use_rg', action='store_true', default=False, help="use RG instead of BAM filename for samples")
-    parser.add_argument('-v', '--verbose', action='store_true', default=False, help="output status information")
-    parser.add_argument('--keep_tmp_bams', action='store_true', default=False, help="leave temporary alignmets to ref insertions")
+    parser.add_argument('--keep_all_tmp_bams', action='store_true', default=False, help="leave ALL temporary BAMs (warning: lots of files!)")
+    parser.add_argument('--keep_ins_bams', action='store_true', default=False, help="insertion-specific BAMs will be kept in --refoutdir")
     parser.add_argument('--detail_out', default='resolve.out', help="file to write detailed output")
     parser.add_argument('--unmapped', default=False, action='store_true', help="report insertions that do not match insertion library")
     parser.add_argument('--te', default=False, action='store_true', help="set if insertion library is transposons")
     parser.add_argument('--usecachedLAST', default=False, action='store_true', help="try to used cached LAST db, if found")
+    parser.add_argument('--uuid_list', default=None, help='limit resolution to UUIDs in first column of input list (can be tabular output from previous resolve.py run)')
+    parser.add_argument('--tmpdir', default='/tmp', help="directory for temporary files")
     args = parser.parse_args()
     main(args)

@@ -1,0 +1,11 @@
+\BOOKMARK [1][-]{section.1}{Introduction}{}% 1
+\BOOKMARK [2][-]{subsection.1.1}{Software Dependencies and Installation}{section.1}% 2
+\BOOKMARK [1][-]{section.2}{Insertion site discovery \(tebreak.py\)}{}% 3
+\BOOKMARK [2][-]{subsection.2.1}{Usage}{section.2}% 4
+\BOOKMARK [2][-]{subsection.2.2}{Description}{section.2}% 5
+\BOOKMARK [2][-]{subsection.2.3}{Input}{section.2}% 6
+\BOOKMARK [1][-]{section.3}{Resolution of specific insertion types \(resolve.py\)}{}% 7
+\BOOKMARK [2][-]{subsection.3.1}{Usage}{section.3}% 8
+\BOOKMARK [2][-]{subsection.3.2}{Description}{section.3}% 9
+\BOOKMARK [2][-]{subsection.3.3}{Input}{section.3}% 10
+\BOOKMARK [2][-]{subsection.3.4}{Output}{section.3}% 11

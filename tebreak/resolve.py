@@ -996,7 +996,6 @@ if __name__ == '__main__':
     parser.add_argument('--min_ins_match', default=0.9, help="minumum match to insertion library")
     parser.add_argument('--minmatch', default=0.95, help="minimum match to reference genome")
     parser.add_argument('--annotation_tabix', default=None, help="can be comma-delimited list")
-    parser.add_argument('--map_tabix', default=None, help="tabix-indexed BED of mappability scores")
     parser.add_argument('--refoutdir', default='tebreak_refs', help="output directory for generating tebreak references (default=tebreak_refs)")
     parser.add_argument('--skip_align', action='store_true', default=False, help="skip re-alignment of discordant ends to ref insertion")
     parser.add_argument('--use_rg', action='store_true', default=False, help="use RG instead of BAM filename for samples")

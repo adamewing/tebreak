@@ -10,7 +10,7 @@ import os
 
 
 def usage():
-    return 'usage: %s <tabular output from resolve.py>' % sys.argv[0]
+    return 'usage: %s </path/to/TEBreak directory> <tabular output from resolve.py>' % sys.argv[0]
 
 
 def ref_filter(chrom, start, end, superfams):
@@ -29,7 +29,7 @@ def ref_filter(chrom, start, end, superfams):
 
 def len_filter(rec):
     telen = int(rec['TE_Align_End']) - int(rec['TE_Align_Start'])
-    if 'ALU' in rec['Superfamily'] and telen < 280: return True
+    if 'ALU' in rec['Superfamily'] and telen < 250: return True
     if 'SVA' in rec['Superfamily'] and telen < 1000: return True
     if 'L1' in rec['Superfamily'] and int(rec['TE_Align_End']) < 5950: return True
 
@@ -61,11 +61,16 @@ def avgmap(maptabix, chrom, start, end):
         return 0.0
 
 
-if __name__ == '__main__':
-    l1_ref  = '../lib/mask.L1.hg19.bed.gz'
-    alu_ref = '../lib/mask.Alu.hg19.bed.gz'
-    sva_ref = '../lib/mask.SVA.hg19.bed.gz'
-    map_ref = '../lib/wgEncodeCrgMapabilityAlign50mer.bed.gz'
+if len(sys.argv) == 3:
+    tebreak_dir = sys.argv[1]
+
+    if not os.path.exists(tebreak_dir):
+        sys.exit(usage())
+
+    l1_ref  = tebreak_dir + '/lib/mask.L1.hg19.bed.gz'
+    alu_ref = tebreak_dir + '/lib/mask.Alu.hg19.bed.gz'
+    sva_ref = tebreak_dir + '/lib/mask.SVA.hg19.bed.gz'
+    map_ref = tebreak_dir + '/lib/wgEncodeCrgMapabilityAlign50mer.bed.gz'
 
     for fn in (l1_ref, alu_ref, sva_ref):
         if not os.path.exists(fn): sys.exit('reference %s not found' % fn)
@@ -76,31 +81,30 @@ if __name__ == '__main__':
     sva_tbx = pysam.Tabixfile(sva_ref)
     map_tbx = pysam.Tabixfile(map_ref)
 
-    if len(sys.argv) == 2:
-        header = []
-        with open(sys.argv[1], 'r') as tab:
-            for i, line in enumerate(tab):
+    header = []
+    with open(sys.argv[2], 'r') as tab:
+        for i, line in enumerate(tab):
 
-                if i == 0: # header
-                    header = line.strip().split('\t')
-                    print line.strip()
+            if i == 0: # header
+                header = line.strip().split('\t')
+                print line.strip()
 
-                else:
-                    rec = {}
-                    out = True
-                    for n, field in enumerate(line.strip().split('\t')):
-                        rec[header[n]] = field
+            else:
+                rec = {}
+                out = True
+                for n, field in enumerate(line.strip().split('\t')):
+                    rec[header[n]] = field
 
-                    if int(rec['3p_Cons_Len']) < 120 and int(rec['5p_Cons_Len']) < 120: out = False
-                    if 'NA' in (rec['TE_Align_Start'], rec['TE_Align_End']): out = False
-                    if ref_filter(rec['Chromosome'], rec['Left_Extreme'], rec['Right_Extreme'], rec['Superfamily']): out = False
-                    if max(float(rec['5p_Elt_Match']), float(rec['3p_Elt_Match'])) < 0.95: out = False
-                    if max(float(rec['5p_Genome_Match']), float(rec['3p_Genome_Match'])) < 0.98: out = False
-                    if avgmap(map_tbx, rec['Chromosome'], rec['Left_Extreme'], rec['Right_Extreme']) < 0.5: out = False
-                    if out and len_filter(rec): out = False
+                if int(rec['3p_Cons_Len']) < 120 and int(rec['5p_Cons_Len']) < 120: out = False
+                if 'NA' in (rec['TE_Align_Start'], rec['TE_Align_End']): out = False
+                if ref_filter(rec['Chromosome'], rec['Left_Extreme'], rec['Right_Extreme'], rec['Superfamily']): out = False
+                if max(float(rec['5p_Elt_Match']), float(rec['3p_Elt_Match'])) < 0.95: out = False
+                if max(float(rec['5p_Genome_Match']), float(rec['3p_Genome_Match'])) < 0.98: out = False
+                if avgmap(map_tbx, rec['Chromosome'], rec['Left_Extreme'], rec['Right_Extreme']) < 0.5: out = False
+                if out and len_filter(rec): out = False
 
-                    if out: print line.strip()
+                if out: print line.strip()
 
 
-    else:
-        sys.exit(usage())
+else:
+    sys.exit(usage())

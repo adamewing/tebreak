@@ -12,7 +12,7 @@
 \title{TEBreak: Generalised insertion detection}
 \author{Adam D. Ewing (adam.ewing@mater.uq.edu.au)}
 \begin{document}
- \date{July 14, 2015}
+ \date{July 19, 2015}
  \maketitle
 
 \section{Introduction}
@@ -33,6 +33,105 @@ python setup.py build
 python setup.py install
 \end{verbatim}
 
+\section{Testing / example run}
+\subsection{Prepare reference genome}
+Any number of variations on the human reference genome are available. To obtain the version used to generate the included example BAM please do the following:
+\begin{verbatim}
+wget ftp://ftp.ncbi.nlm.nih.gov/sra/reports/Assembly/GRCh37-HG19_Broad_variant/Homo_sapiens_assembly19.fasta
+bwa index Homo_sapiens_assembly19.fasta
+samtools faidx Homo_sapiens_assembly19.fasta
+\end{verbatim}
+
+\subsection{Run tebreak.py}
+
+Starting in the TEBreak root directory:
+
+\begin{verbatim}
+tebreak/tebreak.py \
+-b test/data/example.ins.bam \
+-r Homo_sapiens_assembly19.fasta \
+-i test/data/example.region.bed \
+--pickle test/example.pickle \
+--detail_out test/example.tebreak.detail.out
+\end{verbatim}
+
+Output should be similar to the following:
+
+\begin{verbatim}
+2015-07-19 17:16:05,185 commandline: tebreak/tebreak.py -b test/data/example.ins.bam -r Homo_sapiens_assembly19.fasta -i test/data/example.region.bed --pickle test/example.pickle --detail_out test/example.tebreak.detail.out
+2015-07-19 17:16:05,186 loading bwa index /home/adam/dev/genomes/broad/Homo_sapiens_assembly19.fasta into shared memory ...
+2015-07-19 17:16:05,192 loaded.
+2015-07-19 17:16:05,244 chunk count: 1
+2015-07-19 17:16:05,248 Processing chunk: 4:57459002-57496002 ...
+2015-07-19 17:16:05,248 Chunk 4:57459002-57496002: Parsing split reads from bam(s): test/data/example.ins.bam ...
+2015-07-19 17:16:05,364 Chunk 4:57459002-57496002: Building clusters from 151 split reads ...
+2015-07-19 17:16:05,369 Chunk 4:57459002-57496002: Building breakends...
+2015-07-19 17:16:05,616 Chunk 4:57459002-57496002: Mapping 74 breakends ...
+2015-07-19 17:16:06,312 Chunk 4:57459002-57496002: Building insertions...
+2015-07-19 17:16:06,333 Chunk 4:57459002-57496002: Processing and filtering 40 potential insertions ...
+2015-07-19 17:16:06,456 Chunk 4:57459002-57496002: Postprocessing 6 filtered insertions, trying to improve consensus breakend sequences ...
+2015-07-19 17:16:08,623 Chunk 4:57459002-57496002: Summarising insertions ...
+2015-07-19 17:16:08,623 Finished chunk: 4:57459002-57496002
+2015-07-19 17:16:08,635 Pickled to test/example.pickle
+\end{verbatim}
+
+\subsection{Run resolve.py}
+
+The second step is to resolve putative insertions, in this case human transposable element insertions, using resolve.py:
+
+\begin{verbatim}
+tebreak/resolve.py \
+-p test/example.pickle \
+-i lib/teref.human.fa \
+--detail_out test/example.resolve.detail.out \
+-v > test/example.tab.txt
+\end{verbatim}
+
+You should see something like the following:
+
+\begin{verbatim}
+2015-07-19 17:25:39,039 resolve.py called with args: tebreak/resolve.py -p test/example.pickle -i lib/teref.human.fa --detail_out test/example.resolve.detail.out -v
+2015-07-19 17:25:39,039 loading pickle: test/example.pickle
+2015-07-19 17:25:39,044 finished loading test/example.pickle
+2015-07-19 17:25:39,044 raw candidate count: 6
+2015-07-19 17:25:39,044 prefiltered candidate count: 6
+2015-07-19 17:25:39,044 Create LAST db for tebreak_refs/teref.human.fa ...
+2015-07-19 17:25:39,093 submitted 0 candidates, last uuid: f7b95d73-07e9-4b6d-868b-6553c5a7c5f9
+2015-07-19 17:25:39,120 Samtools indexing /tmp/tebreak.ref.ALU:AluYa5.f7b95d73-07e9-4b6d-868b-6553c5a7c5f9.fa ...
+2015-07-19 17:25:39,128 Create BWA db for /tmp/tebreak.ref.ALU:AluYa5.f7b95d73-07e9-4b6d-868b-6553c5a7c5f9.fa ...
+2015-07-19 17:25:39,253 Samtools indexing /tmp/tebreak.ref.L1:L1preTa.11f42f35-c098-4d56-b9eb-34d62b2b4faa.fa ...
+2015-07-19 17:25:39,259 Create BWA db for /tmp/tebreak.ref.L1:L1preTa.11f42f35-c098-4d56-b9eb-34d62b2b4faa.fa ...
+2015-07-19 17:25:39,370 Samtools indexing /tmp/tebreak.ref.L1:L1Ta.d9fa11ac-dd69-4267-8774-dc8ed6b312e7.fa ...
+2015-07-19 17:25:39,376 Create BWA db for /tmp/tebreak.ref.L1:L1Ta.d9fa11ac-dd69-4267-8774-dc8ed6b312e7.fa ...
+2015-07-19 17:25:39,502 Samtools indexing /tmp/tebreak.ref.ALU:AluYa5.4c1fa9a7-5fed-44c3-8ca3-84247090dd2c.fa ...
+2015-07-19 17:25:39,508 Create BWA db for /tmp/tebreak.ref.ALU:AluYa5.4c1fa9a7-5fed-44c3-8ca3-84247090dd2c.fa ...
+2015-07-19 17:25:39,643 Samtools indexing /tmp/tebreak.ref.ALU:AluYa5.f805e9b6-6922-47cf-bef3-b4d082e07e8d.fa ...
+2015-07-19 17:25:39,649 Create BWA db for /tmp/tebreak.ref.ALU:AluYa5.f805e9b6-6922-47cf-bef3-b4d082e07e8d.fa ...
+2015-07-19 17:25:39,745 Samtools indexing /tmp/tebreak.ref.SVA:SVA_F.1d70cd96-ed12-40ed-ba2c-3495a4db7b20.fa ...
+2015-07-19 17:25:39,751 Create BWA db for /tmp/tebreak.ref.SVA:SVA_F.1d70cd96-ed12-40ed-ba2c-3495a4db7b20.fa ...
+\end{verbatim}
+
+\subsection{Filter the output table}
+
+Please see the section on filtering for details.
+
+First you'll need to build the hg19 mappability index:
+
+\begin{verbatim}
+cd lib
+./human_mappability.sh
+cd ..
+\end{verbatim}
+
+Once that is completed, filter the results from resolve.py:
+
+\begin{verbatim}
+scripts/filter_hg19.py \
+/home/adam/repos/tebreak \
+test/example.tab.txt > test/example.filtered.tab.txt
+\end{verbatim}
+
+If all went well, test/example.filtered.tab.txt should contain evidence for 5 transposable element insertions (2 L1s and 3 Alus). If it does not, please double check that all prerequisites are installed, read the rest of this document, try again, and e-mail me at adam.ewing@mater.uq.edu.au with error messages if you are still not having any luck.
 
 \section{Insertion site discovery (tebreak.py)}
 \subsection{Usage}
@@ -267,36 +366,54 @@ This is a file containing detailed information about consensus reads, aligned se
 A table (tab-delimited) is output (with a header) is written to STDOUT, so I would recommend redirecting stdout of resolve.py to a file. The output contains the following columns:
 
 \begin{itemize}
-\item Chromosome
-\item Left\_Extreme
-\item Right\_Extreme
-\item 5\_Prime\_End
-\item 3\_Prime\_End
-\item Superfamily
-\item Subfamily
-\item TE\_Align\_Start
-\item TE\_Align\_End
-\item Orient\_5p
-\item Orient\_3p
-\item Inversion
-\item 5p\_Elt\_Match
-\item 3p\_Elt\_Match
-\item 5p\_Genome\_Match
-\item 3p\_Genome\_Match
-\item Split\_reads\_5prime
-\item Split\_reads\_3prime
-\item Remapped\_Discordant
-\item Remapped\_Splitreads
-\item 5p\_Cons\_Len
-\item 3p\_Cons\_Len
-\item 5p\_Improved
-\item 3p\_Improved
-\item TSD\_3prime
-\item TSD\_5prime
-\item Sample\_count
-\item Sample\_support
-\item Consensus\_5p
-\item Consensus\_3p
+\item Chromosome : Chromosome
+\item Left\_Extreme : Coordinate of the left-most reference base mapped to a read supporting the insertion
+\item Right\_Extreme : Coordinate of the right-most reference base mapped to a read supporting the insertion
+\item 5\_Prime\_End : Breakend corresponding to the 5' end of the inserted sequence (where 5' is can be defined e.g. for transposable elements)
+\item 3\_Prime\_End : Breakend corresponding to the 3' end of the inserted sequence (where 3' is can be defined e.g. for transposable elements)
+\item Superfamily : Superfamily of insertions of superfamily is defined (see option -i/--inslib in resolve.py)
+\item Subfamily : Subfamily of insertions of subfamily is defined (see option -i/--inslib in resolve.py)
+\item TE\_Align\_Start : alignment start position within inserted sequence relative to reference
+\item TE\_Align\_End : alignment end position within inserted sequence relative to reference
+\item Orient\_5p : Orientation derived from the 5' end of the insertion (if 5' is defined), assuming insertion reference is read 5' to 3'
+\item Orient\_3p : Orientation derived from the 3' end of the insertion (if 3' is defined), assuming insertion reference is read 5' to 3'
+\item Inversion : If Orient\_5p and Orient\_3p disagree, there may be an inversion in the inserted sequence relative to the reference sequence for the insertion
+\item 5p\_Elt\_Match : Fraction of bases matched to reference for inserted sequence on insertion segment of 5' supporting contig
+\item 3p\_Elt\_Match : Fraction of bases matched to reference for inserted sequence on insertion segment of 3' supporting contig
+\item 5p\_Genome\_Match : Fraction of bases matched to reference genome on genomic segment of 5' supporting contig
+\item 3p\_Genome\_Match : Fraction of bases matched to reference genome on genomic segment of 3' supporting contig
+\item Split\_reads\_5prime : Number of split (clipped) reads supporting 5' end of the insertion
+\item Split\_reads\_3prime : Number of split (clipped) reads supporting 5' end of the insertion
+\item Remapped\_Discordant : Number of discordant read ends re-mappable to insertion reference sequence
+\item Remapped\_Splitreads : Number of split reads re-mappable to insertion reference sequence
+\item 5p\_Cons\_Len : Length of 5' consensus sequence (Column Consensus\_5p)
+\item 3p\_Cons\_Len : Length of 3' consensus sequence (Column Consensus\_3p)
+\item 5p\_Improved : Whether the 5' consensus sequence was able to be improved through local assembly in tebreak.py
+\item 3p\_Improved : Whether the 3' consensus sequence was able to be improved through local assembly in tebreak.py
+\item TSD\_3prime : Target site duplication (if present) based on 5' overlap on consensus sequence
+\item TSD\_5prime : Target site duplication (if present) based on 3' overlap on consensus sequence (can be different from 5' end, but in many cases it is advisable to filter out putative insertions that disagree on TSDs)
+\item Sample\_count : Number of samples (based on BAM files or readgroups, depending on --use\_rg option in resolve.py)
+\item Sample\_support : Per-sample split read count supporting insertion presence (Sample$\vert$Count)
+\item Consensus\_5p : Consensus sequence for 5' supporting contig
+\item Consensus\_3p : Consensus sequence for 3' supporting contig
 \end{itemize}
 
+Additional columns may be present depending on annotation options.
+
+\section{Filtering}
+
+\subsection{Pre-filtering}
+In some cases it is not necessary to analyse the entire genome. Regions of interest in BED format may be input to tebreak.py via the -i/--inverval\_bed option.
+
+\begin{itemize}
+\item If paired-end reads are present, it is possible to pre-select regions where insertions may be indicated by discordant paired-end mappings. This can be accomplished using the script 'discoreads.py' which is in the scripts directory of the TEBreak distribution. 
+\item For whole genome sequencing (WGS) data, it is only the soft-clipped reads and reads in discordant pairs that are informative; the rest of the mapped reads can be discarded. This can be accomplished using the script 'reduce\_bam.py', located in the scripts directory.
+\item For sequence derived from targeted sequencing methods (e.g. whole exome sequencing, RC-seq), it may be useful to only analyse regions covered to at least a certain read depth. This can be accomplished using the script 'covered\_segments.py' in the scripts directory.
+\end{itemize}
+
+\subsection{Post-filtering}
+Generally additional filtering is required on the tabular output to achieve the desired level of accuracy. For example, the positions of transposable element insertions should be filtered against the locations of transposable element insertions in the reference genome used for input to tebreak.py.
+
 \end{document}
+
+

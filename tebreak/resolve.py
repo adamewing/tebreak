@@ -945,7 +945,6 @@ def main(args):
     pool = mp.Pool(processes=int(args.processes))
 
     gc_c = gc.collect()
-    logger.debug('gc: %d' % gc_c)
 
     for counter, ins in enumerate(insertions):
         res = pool.apply_async(resolve_insertion, [args, ins, inslib_fa])

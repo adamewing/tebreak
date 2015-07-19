@@ -15,3 +15,7 @@ Contact: adam.ewing@mater.uq.edu.au
 
 
 (latest versions unless otherwise specified)
+
+# Documentation:
+
+Please find the manual in the doc/ subdirectory.

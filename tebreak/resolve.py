@@ -180,10 +180,24 @@ class Ins:
         if self.end5 + '_sr_count' in self.ins: self.out['Split_reads_5prime'] = self.ins[self.end5 + '_sr_count']
 
         self.out['Remapped_Discordant'] = 0
+        self.out['Remap_Disc_Fraction'] = 0.0
         self.out['Remapped_Splitreads'] = 0
+        self.out['Remap_Split_Fraction'] = 0.0
 
-        if 'remap_dr_count' in self.ins: self.out['Remapped_Discordant'] = self.ins['remap_dr_count']
-        if 'remap_dr_count' in self.ins: self.out['Remapped_Splitreads'] = self.ins['remap_sr_count']
+        if 'remap_dr_count' in self.ins:
+            self.out['Remapped_Discordant'] = self.ins['remap_dr_count']
+            if self.ins['dr_count'] > 0:
+                self.out['Remap_Disc_Fraction'] = self.out['Remapped_Discordant']/float(self.ins['dr_count'])
+
+
+        sr_count = 0
+        for be in ('be1', 'be2'):
+            if be+'_sr_count' in self.ins: sr_count += self.ins[be+'_sr_count']
+
+        if 'remap_sr_count' in self.ins:
+            self.out['Remapped_Splitreads'] = self.ins['remap_sr_count']
+            if sr_count > 0:
+                self.out['Remap_Split_Fraction'] = self.out['Remapped_Splitreads']/float(sr_count)
 
         self.out['5p_Cons_Len'] = 0
         self.out['3p_Cons_Len'] = 0

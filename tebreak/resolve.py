@@ -623,7 +623,7 @@ def best_ref(ins):
             return be1.target_id
         elif be1.score > be2.score:
             return be1.target_id
-        elif be2.score < be1.score:
+        elif be1.score < be2.score:
             return be2.target_id
 
     else:

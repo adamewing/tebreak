@@ -58,15 +58,19 @@ def prepare_ref(fasta, refoutdir='tebreak_refs'):
     return ref_fa
 
 
-def makefq(insertions, tmpdir='/tmp'):
+def makefq(insertions, tmpdir='/tmp', use_distal=False):
     ''' write FASTQ file from consensus sequences in insertions '''
     insfq = tmpdir + '/' + str(uuid4()) + '.fq'
 
     with open(insfq, 'w') as fq:
         for ins in insertions:
             for be in ('be1', 'be2'):
-                if be+'_cons_seq' in ins['INFO'] and ins['INFO'][be+'_cons_seq']:
-                    fq.write('@%s\n%s\n+\n%s\n' % (ins['INFO']['ins_uuid']+'-'+be, ins['INFO'][be+'_cons_seq'], len(ins['INFO'][be+'_cons_seq'])*'B'))
+                if use_distal:
+                    if be+'_dist_seq' in ins['INFO'] and ins['INFO'][be+'_dist_seq']:
+                        fq.write('@%s\n%s\n+\n%s\n' % (ins['INFO']['ins_uuid']+'-'+be, ins['INFO'][be+'_dist_seq'], len(ins['INFO'][be+'_dist_seq'])*'B'))
+                else:
+                    if be+'_cons_seq' in ins['INFO'] and ins['INFO'][be+'_cons_seq']:
+                        fq.write('@%s\n%s\n+\n%s\n' % (ins['INFO']['ins_uuid']+'-'+be, ins['INFO'][be+'_cons_seq'], len(ins['INFO'][be+'_cons_seq'])*'B'))
 
     return insfq
 
@@ -82,7 +86,7 @@ def main(args):
 
     ref = prepare_ref(args.ref)
 
-    fq = makefq(insertions)
+    fq = makefq(insertions, use_distal=args.use_distal)
 
     mapped = map(fq, ref, minscore=args.minscore, threads=int(args.threads))
 
@@ -119,5 +123,6 @@ if __name__ == '__main__':
     parser.add_argument('-o', '--out', default='filtered.pickle', help='output filename (tebreak.py pickle)')
     parser.add_argument('-i', '--invert', default=False, action='store_true', help='retain insertions that do not match library')
     parser.add_argument('-s', '--minscore', default=20, help='minimum alignment score (-T option to bwa mem)')
+    parser.add_argument('-d', '--use_distal', default=False, action='store_true', help='use distal part of consensus for alignment')
     args = parser.parse_args()
     main(args)

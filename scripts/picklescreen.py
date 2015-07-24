@@ -14,10 +14,10 @@ from collections import defaultdict as dd
 logger = logging.getLogger(__name__)
 
 
-def map(fq, ref, threads=4):
+def map(fq, ref, minscore=20, threads=4):
     logger.debug('map %s to %s ...' % (fq, ref))
 
-    bwa = ['bwa', 'mem', '-t', str(threads), '-M', '-Y', '-k', '10', '-P', '-S', '-T', '20', ref, fq]
+    bwa = ['bwa', 'mem', '-t', str(threads), '-M', '-Y', '-k', '10', '-P', '-S', '-T', str(minscore), ref, fq]
 
     keep = {}
 
@@ -84,7 +84,7 @@ def main(args):
 
     fq = makefq(insertions)
 
-    mapped = map(fq, ref, threads=int(args.threads))
+    mapped = map(fq, ref, minscore=args.minscore, threads=int(args.threads))
 
     filtered = []
 
@@ -117,6 +117,7 @@ if __name__ == '__main__':
     parser.add_argument('-r', '--ref', required=True, help='reference to align consensus sequences against')
     parser.add_argument('-t', '--threads', default=4, help='alignment threads')
     parser.add_argument('-o', '--out', default='filtered.pickle', help='output filename (tebreak.py pickle)')
-    parser.add_argument('--invert', default=False, action='store_true', help='retain insertions that do not match library')
+    parser.add_argument('-i', '--invert', default=False, action='store_true', help='retain insertions that do not match library')
+    parser.add_argument('-s', '--minscore', default=20, help='minimum alignment score (-T option to bwa mem)')
     args = parser.parse_args()
     main(args)

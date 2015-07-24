@@ -57,6 +57,7 @@ class Ins:
         self.allow_unmapped=allow_unmapped
 
         self.ins = ins['INFO']
+        self.bestref = best_ref(ins)
         self.out = od()
         self.end3 = 'NA'
         self.end5 = 'NA'
@@ -109,23 +110,16 @@ class Ins:
                 self.end5 = 'be2'
 
     def te_family(self):
-        ''' inslib input should have headers superfamily:subfamily e.g. L1:L1Ta or Alu:AluYa5 '''
-        self.out['Superfamily'] = []
-        self.out['Subfamily']   = []
+        ''' inslib input can have headers superfamily:subfamily e.g. L1:L1Ta or Alu:AluYa5 '''
+        self.out['Superfamily'] = 'NA'
+        self.out['Subfamily']   = 'NA'
 
-        for be in ('be1', 'be2'):
-            if be + '_bestmatch' in self.ins:
-                if ':' in self.ins[be + '_bestmatch'].target_id:
-                    superfam, subfam = self.ins[be + '_bestmatch'].target_id.split(':')
-                else:
-                    superfam = self.ins[be + '_bestmatch'].target_id
-                    subfam = 'NA'
+        if self.bestref:
+            self.out['Superfamily'] = self.bestref.split(':')[0]
 
-                self.out['Superfamily'].append(superfam)
-                self.out['Subfamily'].append(subfam)
+            if ':' in self.bestref:
+                self.out['Subfamily'] = self.bestref.split(':')[1]
 
-        self.out['Superfamily'] = ','.join(list(set(self.out['Superfamily'])))
-        self.out['Subfamily']   = ','.join(list(set(self.out['Subfamily'])))
 
     def elt_coords(self):
         self.out['TE_Align_Start'] = 'NA'

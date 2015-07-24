@@ -34,22 +34,6 @@ def map(fq, ref, threads=4):
     return keep
 
 
-def filter(ins, min_total=2, req_both=False):
-    if req_both:
-        if 'be2_dist_seq' in ins['INFO']:
-            if ins['INFO']['be2_dist_seq'] is None: return True
-        else:
-            return True
-
-    total_support = 0
-    if 'be1_sr_count' in ins['INFO']: total_support += ins['INFO']['be1_sr_count']
-    if 'be2_sr_count' in ins['INFO']: total_support += ins['INFO']['be2_sr_count']
-
-    if total_support < min_total: return True
-
-    return False
-
-
 def prepare_ref(fasta, refoutdir='tebreak_refs'):
     if not os.path.exists(refoutdir):
         os.mkdir(refoutdir)
@@ -100,13 +84,18 @@ def main(args):
 
     fq = makefq(insertions)
 
-    keep = map(fq, ref, threads=int(args.threads))
-
+    mapped = map(fq, ref, threads=int(args.threads))
 
     filtered = []
 
     for ins in insertions:
-        if ins['INFO']['ins_uuid'] in keep and not filter(ins, req_both=args.require_both):
+        keep = True
+        if args.invert:
+            if ins['INFO']['ins_uuid'] in mapped: keep = False
+        else:
+            if ins['INFO']['ins_uuid'] not in mapped: keep = False
+
+        if keep:
             rec = dd(dict)
             rec['INFO'] = ins['INFO']
             rec['READSTORE'] = ins['READSTORE']
@@ -123,11 +112,11 @@ if __name__ == '__main__':
     logging.basicConfig(format=FORMAT)
     logger.setLevel(logging.DEBUG)
 
-    parser = argparse.ArgumentParser(description='trim pickle based on alignments')
-    parser.add_argument('-p', '--pickle', required=True)
-    parser.add_argument('-r', '--ref', required=True)
-    parser.add_argument('-t', '--threads', default=4)
-    parser.add_argument('--out', default='filtered.pickle')
-    parser.add_argument('--require_both', default=False, action='store_true')
+    parser = argparse.ArgumentParser(description='filter pickle based on alignments')
+    parser.add_argument('-p', '--pickle', required=True, help='input filename (tebreak.py pickle)')
+    parser.add_argument('-r', '--ref', required=True, help='reference to align consensus sequences against')
+    parser.add_argument('-t', '--threads', default=4, help='alignment threads')
+    parser.add_argument('-o', '--out', default='filtered.pickle', help='output filename (tebreak.py pickle)')
+    parser.add_argument('--invert', default=False, action='store_true', help='retain insertions that do not match library')
     args = parser.parse_args()
     main(args)

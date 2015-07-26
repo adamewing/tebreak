@@ -53,7 +53,7 @@ class Annotator:
 
 
 class Ins:
-    def __init__(self, ins, annotator, use_rg, allow_unmapped=False):
+    def __init__(self, ins, annotator, use_rg, callmuts=False, allow_unmapped=False):
         self.allow_unmapped=allow_unmapped
 
         self.ins = ins['INFO']
@@ -66,10 +66,10 @@ class Ins:
 
         self.use_rg = use_rg
 
-        self._fill_out()
+        self._fill_out(callmuts=callmuts)
 
 
-    def _fill_out(self):
+    def _fill_out(self, callmuts=False):
         self.out['UUID'] = self.ins['ins_uuid']
 
         self.out['Chromosome']    = chrom = self.ins['chrom']
@@ -85,6 +85,8 @@ class Ins:
         self.consensus()
 
         if self.annotator is not None: self.out.update(self.annotator.annotate(chrom, start, end))
+
+        if callmuts: self.call_mutations()
 
 
     def assign35ends(self):
@@ -305,6 +307,33 @@ class Ins:
     def header(self):
         return '\t'.join(self.out.keys())
 
+    def call_mutations(self):
+        ''' requires bcftools '''
+        if 'support_bam_file' not in self.ins: return 'NA'
+        if not os.path.exists(self.ins['support_bam_file']): return 'NA'
+        if not os.path.exists(self.ins['support_bam_file'] + '.bai'): return 'NA'
+        if not os.path.exists(self.ins['inslib_fa'] + '.fai'): return 'NA'
+
+        samtools_cmd = ['samtools', 'mpileup', '-ugf', self.ins['inslib_fa'], self.ins['support_bam_file']]
+        bcftools_cmd = ['bcftools', 'call', '-vm']
+
+        FNULL = open(os.devnull, 'w')
+
+        p1 = subprocess.Popen(samtools_cmd, stdout=subprocess.PIPE, stderr=FNULL)
+        p2 = subprocess.Popen(bcftools_cmd, stdin=p1.stdout, stdout=subprocess.PIPE, stderr=FNULL)
+
+        logger.debug('Calling muts on %s:%d-%d (%s)' % (self.ins['chrom'], self.ins['min_supporting_base'], self.ins['max_supporting_base'], self.ins['ins_uuid']))
+
+        muts = []
+
+        for vcfline in p2.stdout:
+            if not vcfline.startswith('#'):
+                chrom, pos, uid, ref, alt = vcfline.split()[:5]
+                muts.append('%s:%s:%s>%s' % (chrom, pos, ref, alt))
+
+        self.out['Variants'] = ','.join(muts)
+
+
     def __lt__(self, other):
         if self.out['Chromosome'] == other.out['Chromosome']:
             return self.out['Left_Extreme'] < other.out['Left_Extreme']
@@ -322,7 +351,6 @@ class Ins:
 
 def best_match(last_results, query_name, req_target=None, min_match=0.9):
     qres = []
-
 
     for res in sorted(last_results):
         if res.query_id == query_name:
@@ -803,6 +831,7 @@ def resolve_insertion(args, ins, inslib_fa):
     try:
         last_res = last_alignment(ins, inslib_fa)
         ins = add_insdata(ins, last_res)
+        ins['INFO']['inslib_fa'] = inslib_fa
 
         if not args.skip_align:
             if 'best_ins_matchpct' in ins['INFO'] and ins['INFO']['best_ins_matchpct'] >= float(args.min_ins_match):
@@ -818,20 +847,21 @@ def resolve_insertion(args, ins, inslib_fa):
                         if os.path.exists(tmp_bam): os.remove(tmp_bam)
                         if os.path.exists(tmp_bam + '.bai'): os.remove(tmp_bam + '.bai')
 
-                    if args.keep_ins_bams and ins['INFO']['mapped_target'] > 0:
+                    if (args.keep_ins_bams or args.callmuts) and ins['INFO']['mapped_target'] > int(args.mindiscord):
                         tmp_bam_base = os.path.basename(tmp_bam)
                         ins_obj = Ins(ins, None, False)
+
                         if args.te:
                             if ins_obj.pass_te_filter(None):
-                                if os.path.exists(tmp_bam): shutil.move(tmp_bam, args.refoutdir + '/' + tmp_bam_base)
-                                if os.path.exists(tmp_bam + '.bai'): shutil.move(tmp_bam + '.bai', args.refoutdir + '/' + tmp_bam_base + '.bai')
+                                if os.path.exists(tmp_bam): shutil.copy(tmp_bam, args.refoutdir + '/' + tmp_bam_base)
+                                if os.path.exists(tmp_bam + '.bai'): shutil.copy(tmp_bam + '.bai', args.refoutdir + '/' + tmp_bam_base + '.bai')
                             else:
                                 if os.path.exists(tmp_bam): os.remove(tmp_bam)
                                 if os.path.exists(tmp_bam + '.bai'): os.remove(tmp_bam + '.bai')
                         else:
                             if ins_obj.pass_general_filter(None):
-                                if os.path.exists(tmp_bam): shutil.move(tmp_bam, args.refoutdir + '/' + tmp_bam_base)
-                                if os.path.exists(tmp_bam + '.bai'): shutil.move(tmp_bam + '.bai', args.refoutdir + '/' + tmp_bam_base + '.bai')
+                                if os.path.exists(tmp_bam): shutil.copy(tmp_bam, args.refoutdir + '/' + tmp_bam_base)
+                                if os.path.exists(tmp_bam + '.bai'): shutil.copy(tmp_bam + '.bai', args.refoutdir + '/' + tmp_bam_base + '.bai')
                             else:
                                 if os.path.exists(tmp_bam): os.remove(tmp_bam)
                                 if os.path.exists(tmp_bam + '.bai'): os.remove(tmp_bam + '.bai')
@@ -906,6 +936,8 @@ def prefilter(args, ins, uuids):
 
     if minmatch < float(args.minmatch): return True
 
+    if ins['INFO']['dr_count'] < int(args.mindiscord): return True
+
     if not args.unmapped:
         unmap = True
         if 'be1_dist_seq' in ins['INFO'] and ins['INFO']['be1_dist_seq'] is not None: unmap = False
@@ -938,7 +970,7 @@ def main(args):
 
     logger.debug('prefiltered candidate count: %d' % len(insertions))
 
-    inslib_fa = prepare_ref(args.inslib_fasta, refoutdir=args.refoutdir, makeFAI=False, makeBWA=False, usecached=args.usecachedLAST)
+    inslib_fa = prepare_ref(args.inslib_fasta, refoutdir=args.refoutdir, makeFAI=args.callmuts, makeBWA=False, usecached=args.usecachedLAST)
 
     forest = None
     # set up reference mask BED if available
@@ -976,7 +1008,7 @@ def main(args):
     annotator = None
     if args.annotation_tabix: annotator = Annotator(args.annotation_tabix)
 
-    final_insertions = [Ins(ins, annotator, args.use_rg, allow_unmapped=args.unmapped) for ins in processed_insertions if ins is not None]
+    final_insertions = [Ins(ins, annotator, args.use_rg, callmuts=args.callmuts, allow_unmapped=args.unmapped) for ins in processed_insertions if ins is not None]
 
     if len(final_insertions) > 0: print final_insertions[0].header()
 
@@ -1002,6 +1034,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_bam_count', default=0, help="skip sites with more than this number of BAMs (default = no limit)")
     parser.add_argument('--min_ins_match', default=0.9, help="minumum match to insertion library")
     parser.add_argument('--minmatch', default=0.95, help="minimum match to reference genome")
+    parser.add_argument('--mindiscord', default=0, help="minimum mapped discordant read count")
     parser.add_argument('--annotation_tabix', default=None, help="can be comma-delimited list")
     parser.add_argument('--refoutdir', default='tebreak_refs', help="output directory for generating tebreak references (default=tebreak_refs)")
     parser.add_argument('--skip_align', action='store_true', default=False, help="skip re-alignment of discordant ends to ref insertion")
@@ -1013,6 +1046,7 @@ if __name__ == '__main__':
     parser.add_argument('--te', default=False, action='store_true', help="set if insertion library is transposons")
     parser.add_argument('--usecachedLAST', default=False, action='store_true', help="try to used cached LAST db, if found")
     parser.add_argument('--uuid_list', default=None, help='limit resolution to UUIDs in first column of input list (can be tabular output from previous resolve.py run)')
+    parser.add_argument('--callmuts', default=False, action='store_true', help='detect changes in inserted seq. vs ref. (requires bcftools)')
     parser.add_argument('--tmpdir', default='/tmp', help="directory for temporary files")
     args = parser.parse_args()
     main(args)

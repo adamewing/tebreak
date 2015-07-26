@@ -53,16 +53,17 @@ class Annotator:
 
 
 class Ins:
-    def __init__(self, ins, annotator, use_rg, callmuts=False, allow_unmapped=False):
+    def __init__(self, ins, annotation_tabix, use_rg, callmuts=False, allow_unmapped=False):
         self.allow_unmapped=allow_unmapped
+
+        self.annotator = None
+        if annotation_tabix: annotator = Annotator(annotation_tabix)
 
         self.ins = ins['INFO']
         self.bestref = best_ref(ins)
         self.out = od()
         self.end3 = 'NA'
         self.end5 = 'NA'
-
-        self.annotator = annotator
 
         self.use_rg = use_rg
 
@@ -950,6 +951,23 @@ def prefilter(args, ins, uuids):
     return False
 
 
+def finalise_ins(ins, args):
+    ''' called concurrently; build insertion annotations for output '''
+    try:
+        return Ins(ins, args.annotation_tabix, args.use_rg, callmuts=args.callmuts, allow_unmapped=args.unmapped)
+
+    except Exception, e:
+        sys.stderr.write('*'*60 + '\tencountered error:\n')
+        traceback.print_exc(file=sys.stderr)
+
+        if ins and 'INFO' in ins and 'chrom' in ins['INFO'] and 'be1_breakpos' in ins['INFO']:
+            sys.stderr.write("Insertion location: %s:%d\n" % (ins['INFO']['chrom'], ins['INFO']['be1_breakpos']))
+
+        sys.stderr.write("*"*60 + "\n")
+
+        return None
+
+
 def main(args):
     if args.verbose: logger.setLevel(logging.DEBUG)
     insertions = []
@@ -1005,10 +1023,18 @@ def main(args):
 
     tebreak.text_summary(processed_insertions, outfile=args.detail_out) # debug
 
-    annotator = None
-    if args.annotation_tabix: annotator = Annotator(args.annotation_tabix)
+    results = []
 
-    final_insertions = [Ins(ins, annotator, args.use_rg, callmuts=args.callmuts, allow_unmapped=args.unmapped) for ins in processed_insertions if ins is not None]
+    #final_insertions = [Ins(ins, args.annotation_tabix, args.use_rg, callmuts=args.callmuts, allow_unmapped=args.unmapped) for ins in processed_insertions if ins is not None]
+
+    final_insertions = []
+
+    for ins in processed_insertions:
+        if ins is not None:
+            res = pool.apply_async(finalise_ins, [ins, args])
+            results.append(res)
+
+    final_insertions = [res.get() for res in results if res is not None]
 
     if len(final_insertions) > 0: print final_insertions[0].header()
 
@@ -1035,7 +1061,7 @@ if __name__ == '__main__':
     parser.add_argument('--min_ins_match', default=0.9, help="minumum match to insertion library")
     parser.add_argument('--minmatch', default=0.95, help="minimum match to reference genome")
     parser.add_argument('--mindiscord', default=0, help="minimum mapped discordant read count")
-    parser.add_argument('--annotation_tabix', default=None, help="can be comma-delimited list")
+    parser.add_argument('-a', '--annotation_tabix', default=None, help="can be comma-delimited list")
     parser.add_argument('--refoutdir', default='tebreak_refs', help="output directory for generating tebreak references (default=tebreak_refs)")
     parser.add_argument('--skip_align', action='store_true', default=False, help="skip re-alignment of discordant ends to ref insertion")
     parser.add_argument('--use_rg', action='store_true', default=False, help="use RG instead of BAM filename for samples")

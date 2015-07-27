@@ -57,7 +57,8 @@ class Ins:
         self.allow_unmapped=allow_unmapped
 
         self.annotator = None
-        if annotation_tabix: annotator = Annotator(annotation_tabix)
+        if annotation_tabix is not None:
+            self.annotator = Annotator(annotation_tabix)
 
         self.ins = ins['INFO']
         self.bestref = best_ref(ins)
@@ -86,6 +87,7 @@ class Ins:
         self.consensus()
 
         if self.annotator is not None: self.out.update(self.annotator.annotate(chrom, start, end))
+        self.annotator = None # can't return cython objects through multiprocessing
 
         if callmuts: self.call_mutations()
 

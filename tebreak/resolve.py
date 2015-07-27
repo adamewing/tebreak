@@ -310,6 +310,7 @@ class Ins:
 
     def call_mutations(self):
         ''' requires bcftools '''
+        self.out['Variants'] = 'NA'
         if 'support_bam_file' not in self.ins: return 'NA'
         if not os.path.exists(self.ins['support_bam_file']): return 'NA'
         if not os.path.exists(self.ins['support_bam_file'] + '.bai'): return 'NA'

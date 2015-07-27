@@ -262,7 +262,7 @@ class Ins:
         return False
 
     def pass_te_filter(self, forest):
-        passed = pass_general_filter(forest)
+        passed = self.pass_general_filter(forest)
 
         if 'best_ins_matchpct' in self.ins:
             if self.ins['best_ins_matchpct'] < 0.9: passed = False

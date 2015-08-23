@@ -2,17 +2,87 @@
 
 import os
 import pysam
-import argparse
+import random
 import logging
+import argparse
+import itertools
 logger = logging.getLogger(__name__)
 
 from collections import defaultdict as dd
 from bx.intervals.intersection import Intersecter, Interval
 
 
-
-
 ''' identify clusters of discordant read ends where one end is in BED file '''
+
+
+class Genome:
+    def __init__(self, bamfn):
+        bam = pysam.AlignmentFile(bamfn, 'rb')
+        self.chrlen = {r: l for r,l in zip(bam.references, bam.lengths)}
+        self.bp = sum(bam.lengths)
+
+
+    def addpad(self, interval, pad):
+        ''' pad interval such that it doesn't go out of bounds '''
+        chrom, start, end = interval
+        start = int(start) - int(pad)
+        end   = int(end) + int(pad)
+
+        assert chrom in self.chrlen, "error padding interval %s, %s not a known chromosome" % (str(interval), chrom)
+
+        if start < 0: start = 0
+        if end > self.chrlen[chrom]: end = self.chrlen[chrom]
+
+        return (chrom, start, end)
+
+
+    def chunk(self, n, seed=None, sorted=True, pad=0):
+        ''' break genome into n evenly-sized chunks, return n lists of (chrom, start, end) '''
+        chunklen = int(self.bp/n)
+        
+        chunks = []
+        intervals = []
+ 
+        chunkleft = chunklen # track how much genome needs to go into each chunk
+ 
+        chromlist = self.chrlen.keys()
+ 
+        if sorted:
+            chromlist.sort()
+        else:
+            if seed is not None: random.seed(seed)
+            random.shuffle(chromlist)
+ 
+        for chrom in chromlist:
+            length = self.chrlen[chrom]
+ 
+            lenleft = length
+            if length <= chunkleft:
+                chunkleft -= length
+                lenleft -= length
+                intervals.append( self.addpad((chrom, 0, length), pad) )
+                assert lenleft == 0
+ 
+                if chunkleft == 0:
+                    chunkleft = chunklen
+                    chunks.append(intervals)
+                    intervals = []
+            else:
+                while lenleft > 0:
+                    if lenleft >= chunkleft:
+                        intervals.append( self.addpad((chrom, length-lenleft, length-lenleft+chunkleft), pad) )
+                        lenleft -= chunkleft
+ 
+                        chunkleft = chunklen
+                        chunks.append(intervals)
+                        intervals = []
+ 
+                    else: # lenleft < chunkleft
+                        intervals.append( self.addpad((chrom, length-lenleft, length), pad) )
+                        chunkleft -= lenleft
+                        lenleft -= lenleft
+ 
+        return chunks
 
 
 class Coord:
@@ -45,6 +115,44 @@ class Coord:
     def __str__(self):
         return '\t'.join(map(str, (self.bam, self.label, self.chrom, self.start, self.end, self.strand, self.mchrom, self.mstart, self.mend, self.mstrand)))
 
+
+class InsCall:
+    def __init__(self, coord_list, chrom, start, end, strand, bamlist, mapscore, nonref):
+        self.coord_list = coord_list
+        self.chrom      = chrom
+        self.start      = int(start)
+        self.end        = int(end)
+        self.strand     = strand
+        self.bamlist    = bamlist
+        self.length     = len(coord_list)
+        self.mapscore   = mapscore
+        self.nonref     = nonref
+
+
+    def out(self, verbose=True):
+        output = ['#BEGIN']
+        output.append('%s\t%d\t%d\t%s\t%s\t%d\t%0.3f\t%s' % (self.chrom, self.start, self.end, self.strand, self.bamlist, self.length, self.mapscore, self.nonref))
+        if verbose:
+            for c in self.coord_list: output.append(str(c))
+        output.append('#END')
+
+        return '\n'.join(output)
+
+
+    def overlaps(self, other):
+        ''' return true if overlap > 0 '''
+        return min(self.end, other.end) - max(self.start, other.start) > 0
+
+
+    def __gt__(self, other):
+        if self.chrom == other.chrom:
+            return self.start > other.start
+        else:
+            return self.chrom > other.chrom
+
+
+    def __str__(self):
+        return self.out(verbose=False)
 
 
 def flip(strand):
@@ -90,7 +198,18 @@ def interval_forest(bed_file):
     return forest
 
 
-def get_coords(forest, bams, min_mapq=1, min_dist=10000):
+def read_gen(bam, chrom=None, start=None, end=None):
+    if None in (chrom, start, end):
+        for read in bam.fetch():
+            yield read
+
+    else:
+        for read in bam.fetch(chrom, start, end):
+            yield read
+
+
+
+def get_coords(forest, bams, chrom=None, start=None, end=None, min_mapq=1, min_dist=10000):
     coords = []
 
     for bam in bams:
@@ -103,7 +222,8 @@ def get_coords(forest, bams, min_mapq=1, min_dist=10000):
         except ValueError as e:
             logger.debug('no index found, outputting status every %d reads' % tick)
 
-        for i, read in enumerate(bam.fetch()):
+        #for i, read in enumerate(bam.fetch()):
+        for i, read in enumerate(read_gen(bam, chrom=chrom, start=start, end=end)):
             if not read.is_unmapped and not read.mate_is_unmapped and not read.is_duplicate:
 
                 rchrom = bam.getrname(read.reference_id)
@@ -136,11 +256,6 @@ def get_coords(forest, bams, min_mapq=1, min_dist=10000):
                     logger.debug('parsed %d reads, last position: %s:%d' % (i, bam.getrname(read.tid), read.pos))
 
     return coords
-
-
-def eval_cluster(cluster):
-    ''' check for strand switch, strand consistency '''
-    pass
 
 
 def subcluster_by_label(cluster):
@@ -216,10 +331,7 @@ def output_cluster(cluster, forest, mapping, nonref, min_size=4):
 
                 nr = ','.join(nr)
 
-                print '#BEGIN'
-                print '%s\t%d\t%d\t%s\t%s\t%d\t%0.3f\t%s' % (cluster_chrom, cluster_start, cluster_end, infer_strand(cluster), bamlist, len(cluster), map_score, nr)
-                for c in cluster: print c
-                print '#END\n'
+                return InsCall(cluster, cluster_chrom, cluster_start, cluster_end, infer_strand(cluster), bamlist, map_score, nr)
 
 
 def cluster(forest, coords, mapping, nonref, min_size=4, max_spacing=250):
@@ -227,9 +339,9 @@ def cluster(forest, coords, mapping, nonref, min_size=4, max_spacing=250):
     coords.sort()
 
     cluster = []
+    insertion_list = []
 
     for c in coords:
-        #print c
         if len(cluster) == 0:
             cluster = [c]
         else:
@@ -237,16 +349,20 @@ def cluster(forest, coords, mapping, nonref, min_size=4, max_spacing=250):
                 cluster.append(c)
             else:
                 for cluster in subcluster_by_label(cluster):
-                    output_cluster(cluster, forest, mapping, nonref, min_size=min_size)
+                    i = output_cluster(cluster, forest, mapping, nonref, min_size=min_size)
+                    if i is not None: insertion_list.append(i)
                 cluster = [c]
 
     for cluster in subcluster_by_label(cluster):
-        output_cluster(cluster, forest, mapping, nonref, min_size=min_size)
+        i = output_cluster(cluster, forest, mapping, nonref, min_size=min_size)
+        if i is not None: insertion_list.append(i)
+
+    return insertion_list
 
 
-def main(args):
-    logger.setLevel(logging.DEBUG)
-    assert args.bam.endswith('.bam'), "not a BAM file: %s" % args.bam
+def run_chunk(args, chunk):
+    ''' chunk is a list of (chrom, start, end) tuples '''
+
     bams = [pysam.AlignmentFile(bam, 'rb') for bam in args.bam.split(',')]
 
     mapping = None
@@ -260,11 +376,34 @@ def main(args):
     logger.debug('building interval trees for %s' % args.bed)
     forest = interval_forest(args.bed)
 
-    logger.debug('fetching coordinates from %s' % args.bam)
-    coords = get_coords(forest, bams)
-    logger.debug('found %d anchored reads' % len(coords))
+    coords = []
 
-    cluster(forest, coords, mapping, nonref, min_size=int(args.minsize), max_spacing=int(args.maxspacing))
+    # operate over intervals in chunk
+    for interval in chunk:
+        chrom, start, end = interval
+
+        logger.debug('%s:%d-%d: fetching coordinates from %s' % (chrom, start, end, args.bam))
+
+        coords += get_coords(forest, bams, chrom=chrom, start=start, end=end)
+
+        logger.debug('%s:%d-%d: found %d anchored reads' % (chrom, start, end, len(coords)))
+
+    return cluster(forest, coords, mapping, nonref, min_size=int(args.minsize), max_spacing=int(args.maxspacing))
+
+
+def main(args):
+    logger.setLevel(logging.DEBUG)
+
+    ins_list = []
+
+    g = Genome(args.bam.split(',')[0])
+
+    chunks = g.chunk(int(args.procs), pad=5000)
+
+    for chunk in chunks:
+        ins_list += run_chunk(args, chunk)
+
+    for i in ins_list: print i.out()
 
 
 if __name__ == '__main__':
@@ -277,7 +416,8 @@ if __name__ == '__main__':
     parser.add_argument('--mapping', default=None, help='mappability track tabix')
     parser.add_argument('--nonref', default=None, help='known nonreference element annotation')
     parser.add_argument('--minsize', default=4, help='minimum cluster size to output')
-    parser.add_argument('--maxspacing', default=250, help='maximum spacing between support reads (default=250)')  
+    parser.add_argument('--maxspacing', default=250, help='maximum spacing between support reads (default=250)')
+    parser.add_argument('-p', '--procs', default=1, help='split work over multiple processes')
   
     args = parser.parse_args()
     main(args)

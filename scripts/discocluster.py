@@ -8,6 +8,8 @@ import argparse
 import itertools
 logger = logging.getLogger(__name__)
 
+import multiprocessing as mp
+
 from collections import defaultdict as dd
 from bx.intervals.intersection import Intersecter, Interval
 
@@ -391,18 +393,50 @@ def run_chunk(args, chunk):
     return cluster(forest, coords, mapping, nonref, min_size=int(args.minsize), max_spacing=int(args.maxspacing))
 
 
+def resolve_dups(ins_list):
+    ''' resolve cases where the same insertion has been called in multiple chunks '''
+    ins_list.sort()
+    new_list = []
+
+    last = None
+
+    for ins in ins_list:
+        if last is None:
+            last = ins
+
+        elif last.overlaps(ins):
+            if ins.length > last.length:
+                last = ins
+
+        else:
+            new_list.append(last)
+            last = ins
+
+    if last is not None:
+        new_list.append(last)
+
+    return new_list
+
+
 def main(args):
     logger.setLevel(logging.DEBUG)
-
-    ins_list = []
 
     g = Genome(args.bam.split(',')[0])
 
     chunks = g.chunk(int(args.procs), pad=5000)
 
-    for chunk in chunks:
-        ins_list += run_chunk(args, chunk)
+    pool = mp.Pool(processes=int(args.procs))
 
+    reslist = []
+    for chunk in chunks:
+        res = res = pool.apply_async(run_chunk, [args, chunk])
+        reslist.append(res)
+
+    ins_list = []
+    for res in reslist:
+        ins_list += res.get()
+
+    ins_list = resolve_dups(ins_list)
     for i in ins_list: print i.out()
 
 

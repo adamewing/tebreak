@@ -340,10 +340,23 @@ class SplitCluster(ReadCluster):
         sortable_reads = [SortableRead(sr.read) for sr in self.reads]
         seqs = [sorted_read.seq for sorted_read in sorted(sortable_reads)]
 
-        cons = seqs[0]
+        if len(seqs) == 1: # no consensus necessary
+            return seqs[0], 1.0
+
+        uniq_seqs = [seqs[0]]
+        for i, seq in enumerate(seqs[1:], start=1):
+            if seq != seqs[i-1]:
+                uniq_seqs.append(seq)
+
+        if len(uniq_seqs) == 1: # all seqs were the same!
+            return uniq_seqs[0], 1.0
+
+        cons = uniq_seqs[0]
         scores = []
 
-        for seq in seqs[1:]:
+        if len(uniq_seqs) > 1000: uniq_seqs = np.random.choice(uniq_seqs, size=1000)
+
+        for seq in uniq_seqs[1:]:
 
             s1 = align.string_to_alignment(cons)
             s2 = align.string_to_alignment(seq)
@@ -355,14 +368,12 @@ class SplitCluster(ReadCluster):
             score = float(len(a1) - (len(a1)-s)) / float(len(a1))
             scores.append(score)
 
-            # print('%s\n%s\nScore: %f' % (a1, a2, score))
+            if re.search(a1, cons):
+                cons_start, cons_end = locate_subseq(cons, a1)
 
-            if score < minscore and len(cons) == len(seq):
-                cons = seq
-
-            if score >= minscore:
-                align_end = locate_subseq(seq, a2)[1]
-                cons += seq[align_end:]
+                if score >= minscore and cons_end > len(cons)-5:
+                    align_end = locate_subseq(seq, a2)[1]
+                    cons += seq[align_end:]
 
         return cons, np.mean(score)
 

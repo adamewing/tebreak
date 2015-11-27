@@ -333,9 +333,10 @@ class Ins:
         for vcfline in p2.stdout:
             if not vcfline.startswith('#'):
                 chrom, pos, uid, ref, alt = vcfline.split()[:5]
-                muts.append('%s:%s:%s>%s' % (chrom, pos, ref, alt))
+                muts.append('%s:%s>%s' % (pos, ref, alt))
 
-        self.out['Variants'] = ','.join(muts)
+        if len(muts) > 0:
+            self.out['Variants'] = ','.join(muts)
 
 
     def __lt__(self, other):

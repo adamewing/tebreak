@@ -101,6 +101,7 @@ if len(sys.argv) == 3:
                 if max(float(rec['5p_Elt_Match']), float(rec['3p_Elt_Match'])) < 0.95: out = False
                 if max(float(rec['5p_Genome_Match']), float(rec['3p_Genome_Match'])) < 0.98: out = False
                 if avgmap(map_tbx, rec['Chromosome'], rec['Left_Extreme'], rec['Right_Extreme']) < 0.5: out = False
+                if float(rec['Remapped_Discordant']) < 4 or float(rec['Remap_Disc_Fraction']) < 0.5: out = False
                 if out and len_filter(rec): out = False
 
                 if out: print line.strip()

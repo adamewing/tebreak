@@ -305,7 +305,7 @@ def infer_strand(cluster):
     return 'NA'
 
 
-def output_cluster(cluster, forest, mapping, nonref, min_size=4):
+def output_cluster(cluster, forest, mapping, nonref, min_size=4, min_map=0.5):
     if len(cluster) >= min_size:
         cluster_chrom = cluster[0].chrom
         cluster_start = cluster[0].start
@@ -320,7 +320,7 @@ def output_cluster(cluster, forest, mapping, nonref, min_size=4):
             if mapping is not None:
                 map_score = avgmap(mapping, cluster_chrom, cluster_start, cluster_end)
 
-            if not filter_cluster(cluster) and (map_score >= 0.95 or mapping is None):
+            if not filter_cluster(cluster) and (map_score >= float(min_map) or mapping is None):
                 nr = ['NA']
 
                 if nonref is not None:
@@ -336,7 +336,7 @@ def output_cluster(cluster, forest, mapping, nonref, min_size=4):
                 return InsCall(cluster, cluster_chrom, cluster_start, cluster_end, infer_strand(cluster), bamlist, map_score, nr)
 
 
-def cluster(forest, coords, mapping, nonref, min_size=4, max_spacing=250):
+def cluster(forest, coords, mapping, nonref, min_size=4, min_map=0.5, max_spacing=250):
     logger.debug('sorting coordinates')
     coords.sort()
 
@@ -356,7 +356,7 @@ def cluster(forest, coords, mapping, nonref, min_size=4, max_spacing=250):
                 cluster = [c]
 
     for cluster in subcluster_by_label(cluster):
-        i = output_cluster(cluster, forest, mapping, nonref, min_size=min_size)
+        i = output_cluster(cluster, forest, mapping, nonref, min_size=min_size, min_map=min_map)
         if i is not None: insertion_list.append(i)
 
     return insertion_list
@@ -390,7 +390,7 @@ def run_chunk(args, chunk):
 
         logger.debug('%s:%d-%d: found %d anchored reads' % (chrom, start, end, len(coords)))
 
-    return cluster(forest, coords, mapping, nonref, min_size=int(args.minsize), max_spacing=int(args.maxspacing))
+    return cluster(forest, coords, mapping, nonref, min_size=int(args.minsize), min_map=float(args.minmap), max_spacing=int(args.maxspacing))
 
 
 def resolve_dups(ins_list):
@@ -448,8 +448,9 @@ if __name__ == '__main__':
     parser.add_argument('--bam', required=True, help='can be comma-delimited for multiple BAMs')
     parser.add_argument('--bed', required=True, help='locations of source locations (e.g. reference TEs) in genome')
     parser.add_argument('--mapping', default=None, help='mappability track tabix')
+    parser.add_argument('--minmap', default=0.5, help='minimum region mappability score (default = 0.5)')
     parser.add_argument('--nonref', default=None, help='known nonreference element annotation')
-    parser.add_argument('--minsize', default=4, help='minimum cluster size to output')
+    parser.add_argument('--minsize', default=4, help='minimum cluster size to output (default = 4)')
     parser.add_argument('--maxspacing', default=250, help='maximum spacing between support reads (default=250)')
     parser.add_argument('-p', '--procs', default=1, help='split work over multiple processes')
   

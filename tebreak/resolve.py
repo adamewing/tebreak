@@ -714,7 +714,7 @@ def remap_discordant(ins, inslib_fa=None, useref=None, tmpdir='/tmp'):
 
     sam_cmd = ['bwa', 'mem', '-v', '1', '-k', '10', '-M', '-S', '-P', tmp_ref, tmp_fq]
     bam_cmd = ['samtools', 'view', '-bt', tmp_ref + '.fai', '-o', tmp_bam, tmp_sam]
-    srt_cmd = ['samtools', 'sort', tmp_bam, tmp_srt]
+    srt_cmd = ['samtools', 'sort', '-T', tmp_srt, '-o', tmp_srt, tmp_bam]
     idx_cmd = ['samtools', 'index', tmp_bam]
 
     FNULL = open(os.devnull, 'w')

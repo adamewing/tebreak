@@ -69,7 +69,7 @@ setup(
         'align>=0.1',
     ],
     dependency_links = [
-        'git+http://github.com/adamewing/align.git#egg=align-0.1'
+        'git+https://github.com/adamewing/align.git#egg=align-0.1'
     ],
 
 )

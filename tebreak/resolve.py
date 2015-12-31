@@ -706,7 +706,7 @@ def remap_discordant(ins, inslib_fa=None, useref=None, tmpdir='/tmp'):
     tmp_fq  = '%s/tebreak.%s.discoremap.fq' % (tmpdir, ins['INFO']['ins_uuid'])
     tmp_sam = '.'.join(tmp_fq.split('.')[:-1]) + '.sam'
     tmp_bam = '.'.join(tmp_fq.split('.')[:-1]) + '.bam'
-    tmp_srt = '.'.join(tmp_fq.split('.')[:-1]) + '.srt'
+    tmp_srt = '.'.join(tmp_fq.split('.')[:-1]) + '.srt.bam'
 
     with open(tmp_fq, 'w') as fq:
         for dr in ins['READSTORE']:
@@ -732,7 +732,7 @@ def remap_discordant(ins, inslib_fa=None, useref=None, tmpdir='/tmp'):
     for line in p.stdout: pass
     
     subprocess.call(srt_cmd)
-    shutil.move(tmp_srt+'.bam', tmp_bam)
+    shutil.move(tmp_srt, tmp_bam)
 
     subprocess.call(idx_cmd)
 

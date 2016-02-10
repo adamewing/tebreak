@@ -16,14 +16,14 @@ before_install:
     - sudo make -C htslib
     - git clone https://github.com/samtools/samtools.git
     - sudo make -C samtools
-    - sudo cp samtools/samtools $HOME/bin
-    - sudo cp samtools/misc/wgsim $HOME/bin
+    - sudo cp samtools/samtools . 
+    - sudo cp samtools/misc/wgsim .
     - git clone https://github.com/samtools/bcftools.git
     - sudo make -C bcftools
-    - sudo cp bcftools/bcftools $HOME/bin
+    - sudo cp bcftools/bcftools .
     - git clone https://github.com/lh3/bwa.git
     - sudo make -C bwa
-    - sudo cp bwa/bwa $HOME/bin
+    - sudo cp bwa/bwa.
     - wget https://github.com/broadinstitute/picard/releases/download/1.131/picard-tools-1.131.zip
     - unzip picard-tools-1.131.zip
     - wget http://last.cbrc.jp/last-716.zip

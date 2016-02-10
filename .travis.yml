@@ -1,0 +1,47 @@
+language: python
+python:
+    - 2.7.8
+    - 2.7
+    - pypy
+    - 3.3
+    - 3.4
+    - 3.5
+    - nightly
+    - pypy3
+
+before_install:
+    - sudo apt-get install g++
+    - sudo apt-get install tar
+    - git clone https://github.com/samtools/htslib.git
+    - sudo make -C htslib
+    - git clone https://github.com/samtools/samtools.git
+    - sudo make -C samtools
+    - sudo cp samtools/samtools $HOME/bin
+    - sudo cp samtools/misc/wgsim $HOME/bin
+    - git clone https://github.com/samtools/bcftools.git
+    - sudo make -C bcftools
+    - sudo cp bcftools/bcftools $HOME/bin
+    - git clone https://github.com/lh3/bwa.git
+    - sudo make -C bwa
+    - sudo cp bwa/bwa $HOME/bin
+    - wget https://github.com/broadinstitute/picard/releases/download/1.131/picard-tools-1.131.zip
+    - unzip picard-tools-1.131.zip
+    - wget http://last.cbrc.jp/last-716.zip
+    - unzip last-716.zip
+    - cd last-716
+    - sudo make && make install
+    - cd ..
+    - wget http://gatb-tools.gforge.inria.fr/versions/bin/minia-2.0.3-Linux.tar.gz
+    - tar -xvf minia-2.0.3-Linux.tar.gz
+    - sudo make -C minia-2.0.3-Linux && make install -C minia-2.0.3-Linux
+    - sudo pip install cython
+    - sudo pip install pysam
+
+install: true
+script:
+    # Get out of the source directory before running tests to avoid PYTHONPATH
+    # confusion.  This is necessary to ensure that the speedups module can
+    # be found in the installation directory.
+    # Copy the coveragerc down so coverage.py can find it.
+    - python setup.py build
+    - python setup.py install

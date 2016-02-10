@@ -29,7 +29,7 @@ before_install:
     - wget http://last.cbrc.jp/last-716.zip
     - unzip last-716.zip
     - cd last-716
-    - sudo make && make install
+    - make CXXFLAGS=-O3 && sudo make install
     - cd ..
     - wget http://gatb-tools.gforge.inria.fr/versions/bin/minia-2.0.3-Linux.tar.gz
     - tar -xvf minia-2.0.3-Linux.tar.gz

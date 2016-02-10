@@ -33,7 +33,7 @@ before_install:
     - cd ..
     - wget http://gatb-tools.gforge.inria.fr/versions/bin/minia-2.0.3-Linux.tar.gz
     - tar -xvf minia-2.0.3-Linux.tar.gz
-    - sudo cp minia-2.0.3-Linux/bin* $HOME/bin 
+    - sudo cp -rf minia-2.0.3-Linux/bin $HOME/bin 
     - sudo pip install cython
     - sudo pip install pysam
 

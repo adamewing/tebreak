@@ -13,16 +13,16 @@ before_install:
     - sudo apt-get install g++
     - sudo apt-get install tar
     - git clone https://github.com/samtools/htslib.git
-    - sudo make -C htslib && make install -C htslib
+    - sudo make -C htslib && sudo make install -C htslib
     - git clone https://github.com/samtools/samtools.git
-    - sudo make -C samtools && make install -C samtools
+    - sudo make -C samtools && sudo make install -C samtools
     - sudo cp samtools/samtools /usr/local/bin 
     - sudo cp samtools/misc/wgsim /usr/local/bin
     - git clone https://github.com/samtools/bcftools.git
-    - sudo make -C bcftools && make install -C bcftools
+    - sudo make -C bcftools && sudo make install -C bcftools
     - sudo cp bcftools/bcftools /usr/local/bin
     - git clone https://github.com/lh3/bwa.git
-    - sudo make -C bwa && make install -C bwa
+    - sudo make -C bwa && sudo make install -C bwa
     - sudo cp bwa/bwa /usr/local/bin
     - wget https://github.com/broadinstitute/picard/releases/download/1.131/picard-tools-1.131.zip
     - unzip picard-tools-1.131.zip

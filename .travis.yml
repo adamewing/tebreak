@@ -23,6 +23,17 @@ before_install:
 #    - sudo apt-get install $PYTHON-numpy
 #    - sudo easy_install$PYSUF pip
     - sudo pip install cython
+    - sudo apt-get install python python-dev libatlas-base-dev gcc gfortran g++
+    - wget https://pypi.python.org/packages/source/s/scipy/scipy-0.17.0.tar.gz#md5=5ff2971e1ce90e762c59d2cd84837224
+    - tar -xvf scipy-0.17.0.tar.gz
+    - cd scipy-0.17.0
+    - python setup.py install
+    - cd ..
+    - wget https://pypi.python.org/packages/source/b/bx-python/bx-python-0.7.3.tar.gz#md5=d8c50c01c9e421bae0bbdbfa00fef6e4
+    - tar -xvf bx-python-0.7.3.tar.gz
+    - cd bx-python-0.7.3
+    - python setup.py install
+    - cd ..
     - git clone https://github.com/samtools/htslib.git
     - sudo make -C htslib && sudo make install -C htslib
     - git clone https://github.com/samtools/samtools.git

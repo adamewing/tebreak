@@ -3,16 +3,17 @@ python:
     - 2.7.8
     - 2.7
     - pypy
-    - 3.3
-    - 3.4
-    - 3.5
-    - nightly
-    - pypy3
+#    - 3.3
+#    - 3.4
+#    - 3.5
+#    - nightly
+#    - pypy3
 
 before_install:
     - sudo apt-get update
     - sudo apt-get install g++
     - sudo apt-get install tar
+    - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' ]]; then travis_retry pip install numpy; fi
 #    - sudo pip install cython
 #    - git clone https://github.com/numpy/numpy.git numpy
 #    - cd numpy
@@ -76,3 +77,6 @@ script:
     # Copy the coveragerc down so coverage.py can find it.
     - python setup.py build
     - python setup.py install
+    - samtools faidx lib/teref.human.fa
+    - bwa index lib/teref.human.fa 
+    - python tebreak.py -b ../test/data/example.ins.bam -r ../lib/teref.human.fa

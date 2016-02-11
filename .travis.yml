@@ -77,6 +77,7 @@ script:
     # Copy the coveragerc down so coverage.py can find it.
     - python setup.py build
     - python setup.py install
-    - samtools faidx lib/teref.human.fa
-    - bwa index lib/teref.human.fa 
-    - python tebreak.py -b ../test/data/example.ins.bam -r ../lib/teref.human.fa
+    - wget ftp://ftp.ncbi.nlm.nih.gov/sra/reports/Assembly/GRCh37-HG19_Broad_variant/Homo_sapiens_assembly19.fasta
+    - bwa index Homo_sapiens_assembly19.fasta
+    - samtools faidx Homo_sapiens_assembly19.fasta
+    - python tebreak.py -b test/data/example.ins.bam -r Homo_sapiens_assembly19.fasta -i test/data/example.region.bed --pickle test/example.pickle --detail_out test/example.tebreak.detail.out

@@ -35,7 +35,9 @@ before_install:
     - tar -xvf minia-2.0.3-Linux.tar.gz
     - sudo cp minia-2.0.3-Linux/bin/{dbgh5,dbginfo,h5dump,minia} /usr/local/bin
     - git clone https://github.com/adamewing/align.git
-    - python setup.py install -C align
+    - cd align
+    - python setup.py install
+    - cd ..
     - pip install cython
     - pip install pysam
 

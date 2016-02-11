@@ -1,13 +1,13 @@
 language: python
 python:
-    - 2.7.8
-    - 2.7
-    - pypy
-    - 3.3
-    - 3.4
-    - 3.5
-    - nightly
-    - pypy3
+#    - 2.7.8
+#    - 2.7
+#    - pypy
+#    - 3.3
+#    - 3.4
+#    - 3.5
+#    - nightly
+#    - pypy3
 
 before_install:
     - sudo apt-get update
@@ -18,11 +18,11 @@ before_install:
 #    - cd numpy
 #    - pip install .
 #    - cd .. 
-    - sudo apt-get install $PYTHON-dev
-    - sudo apt-get install $PYTHON-setuptools
-    - sudo apt-get install $PYTHON-numpy
-    - sudo easy_install$PYSUF pip
-    - sudo pip-$PYVER install cython
+#    - sudo apt-get install $PYTHON-dev
+#    - sudo apt-get install $PYTHON-setuptools
+#    - sudo apt-get install $PYTHON-numpy
+#    - sudo easy_install$PYSUF pip
+    - sudo pip install cython
     - git clone https://github.com/samtools/htslib.git
     - sudo make -C htslib && sudo make install -C htslib
     - git clone https://github.com/samtools/samtools.git

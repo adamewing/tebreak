@@ -34,8 +34,13 @@ before_install:
     - wget http://gatb-tools.gforge.inria.fr/versions/bin/minia-2.0.3-Linux.tar.gz
     - tar -xvf minia-2.0.3-Linux.tar.gz
     - sudo cp minia-2.0.3-Linux/bin/{dbgh5,dbginfo,h5dump,minia} /usr/local/bin
-    - sudo pip install cython
+#    - sudo pip install cython
     - sudo pip install pysam
+    - wget https://github.com/cython/cython/archive/master.zip
+    - unzip master.zip 
+    - cd cython-master/
+    - python setup.py install
+    - cd ..
     - git clone https://github.com/adamewing/align.git
     - cd align
     - python setup.py install

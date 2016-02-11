@@ -12,6 +12,7 @@ python:
 before_install:
     - sudo apt-get install g++
     - sudo apt-get install tar
+    - sudo apt-get install python-numpy
     - git clone https://github.com/samtools/htslib.git
     - sudo make -C htslib && sudo make install -C htslib
     - git clone https://github.com/samtools/samtools.git

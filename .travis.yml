@@ -22,7 +22,7 @@ before_install:
     - sudo make -C bcftools && sudo make install -C bcftools
     - sudo cp bcftools/bcftools /usr/local/bin
     - git clone https://github.com/lh3/bwa.git
-    - sudo make -C bwa && sudo make install -C bwa
+    - sudo make -C bwa
     - sudo cp bwa/bwa /usr/local/bin
     - wget https://github.com/broadinstitute/picard/releases/download/1.131/picard-tools-1.131.zip
     - unzip picard-tools-1.131.zip

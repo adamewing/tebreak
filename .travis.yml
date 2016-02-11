@@ -15,8 +15,7 @@ before_install:
     - sudo pip install cython
     - git clone https://github.com/numpy/numpy.git numpy
     - cd numpy
-    - python setup.py build
-    - python setup.py install
+    - pip install .
     - cd .. 
     - git clone https://github.com/samtools/htslib.git
     - sudo make -C htslib && sudo make install -C htslib

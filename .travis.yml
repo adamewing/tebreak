@@ -12,6 +12,7 @@ python:
 before_install:
     - sudo apt-get install g++
     - sudo apt-get install tar
+    - sudo pip install cython
     - git clone https://github.com/numpy/numpy.git numpy
     - cd numpy
     - python setup.py build

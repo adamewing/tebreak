@@ -2,7 +2,7 @@ language: python
 python:
     - 2.7.8
     - 2.7
-    - pypy
+#    - pypy
 #    - 3.3
 #    - 3.4
 #    - 3.5
@@ -68,9 +68,9 @@ before_install:
     - cd align
     - python setup.py install
     - cd ..
-
-install: true
+install: true 
 script:
+    - 60  mvn script
     # Get out of the source directory before running tests to avoid PYTHONPATH
     # confusion.  This is necessary to ensure that the speedups module can
     # be found in the installation directory.

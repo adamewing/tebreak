@@ -63,8 +63,6 @@ install: true
 script:
     - python setup.py build
     - python setup.py install
-    - bwa index test/data/Homo_sapiens_chr22_bamsurgeon_assembly19.fasta
-    - samtools index test/data/Homo_sapiens_chr22_bamsurgeon_assembly19.sorted.bam
-    - samtools faidx test/data/Homo_sapiens_chr22_bamsurgeon_assembly19.fasta
-    - cd tebreak
-    - python tebreak.py -b ../test/data/Homo_sapiens_chr22_bamsurgeon_assembly19.sorted.bam -r ../test/data/Homo_sapiens_chr22_bamsurgeon_assembly19.fasta -i ../test/data/example.region.bed --pickle ../test/data/example.pickle --detail_out ../test/example.tebreak.detail.out
+    - bwa index Homo_sapiens_assembly19.fasta
+    - samtools faidx Homo_sapiens_chr22_bamsurgeon_assembly19.fasta
+    - tebreak/tebreak.py -b test/data/example.ins.bam  -r Homo_sapiens_assembly19.fasta -i test/data/example.region.bed --pickle test/example.pickle --detail_out test/example.tebreak.detail.out

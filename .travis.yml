@@ -7,8 +7,11 @@ sudo: required
 before_install: 
     - bash prerequisites.sh
     - WORKDIR=`pwd`
-    - wget https://github.com/broadinstitute/last/releases/download/1.131/last-tools-1.131.zip
-    - unzip last-tools-1.131.zip
+    - wget http://last.cbrc.jp/last-716.zip
+    - unzip last-716.zip
+#    - cd last-716
+    - make CXXFLAGS=-O3 -C last-716 && sudo make install -C last-716
+#    - cd ..
     - wget http://ftp.ebi.ac.uk/pub/software/vertebrategenomics/exonerate/exonerate-2.2.0-x86_64.tar.gz
     - tar -xvf exonerate-2.2.0-x86_64.tar.gz
     - sudo cp -rf exonerate-2.2.0-x86_64/ $WORKDIR/bin/    

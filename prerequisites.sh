@@ -53,7 +53,7 @@ sudo apt-get install python python-dev libatlas-base-dev gcc gfortran g++
 #cd cython-master/
 #python setup.py install
 #cd ..
-git clone https://github.com/adamewing/align.git
-cd align
-python setup.py install
-cd ..
+#git clone https://github.com/adamewing/align.git
+#cd align
+#python setup.py install
+#cd ..

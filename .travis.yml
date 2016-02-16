@@ -68,6 +68,6 @@ script:
     - tebreak/tebreak.py -b test/data/example.ins.bam  -r lib/teref.human.fa -i test/data/example.region.bed --pickle test/example.pickle --detail_out test/example.tebreak.detail.out
     - tebreak/resolve.py -p test/example.pickle -i lib/teref.human.fa --detail_out test/example.resolve.detail.out -v > test/example.tab.txt
     - cd lib
-    - travis_wait mvn install " ./human_mappability.sh"
+    - travis_wait mvn script " ./human_mappability.sh"
     - cd ..
-    - scripts/filter_hg19.py $WORKDIR test/example.tab.txt > test/example.filtered.tab.txt
+    - scripts/filter_hg19.py /home/travis/build/MischaLundberg/tebreak test/example.tab.txt > test/example.filtered.tab.txt

@@ -64,6 +64,7 @@ script:
     - python setup.py build
     - python setup.py install
     - bwa index lib/teref.human.fa
+    - samtools faidx lib/teref.human.fa
 #    - samtools faidx Homo_sapiens_chr22_bamsurgeon_assembly19.fasta
     - tebreak/tebreak.py -b test/data/example.ins.bam  -r lib/teref.human.fa -i test/data/example.region.bed --pickle test/example.pickle --detail_out test/example.tebreak.detail.out
     - tebreak/resolve.py -p test/example.pickle -i lib/teref.human.fa --detail_out test/example.resolve.detail.out -v > test/example.tab.txt

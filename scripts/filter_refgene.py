@@ -42,9 +42,11 @@ if len(sys.argv) == 3:
 
     map_ref = tebreak_dir + '/lib/wgEncodeCrgMapabilityAlign50mer.bed.gz'
     pgo_ref = tebreak_dir + '/lib/PGO_Build74.coords.bed.gz'
+    gen_ref = tebreak_dir + '/lib/refGene_sorted.txt.gz'
 
     map_tbx = pysam.Tabixfile(map_ref)
     pgo_tbx = pysam.Tabixfile(pgo_ref)
+    gen_tbx = pysam.Tabixfile(gen_ref)
 
     header = []
     with open(sys.argv[2], 'r') as tab:
@@ -83,6 +85,15 @@ if len(sys.argv) == 3:
                 if out:
                     if rec['Chromosome'] in pgo_tbx.contigs:
                         if len(list(pgo_tbx.fetch(rec['Chromosome'], int(rec['Left_Extreme']), int(rec['Right_Extreme'])))) > 0:
+                            out = False
+
+                    if rec['Chromosome'] in gen_tbx.contigs:
+                        gene_overlaps = []
+                        for overlap in gen_tbx.fetch(rec['Chromosome'], int(rec['Left_Extreme']), int(rec['Right_Extreme'])):
+                            gene_overlaps.append(overlap.split()[12])
+
+                        gene = '.'.join(rec['Superfamily'].split('.')[:-1])
+                        if gene in gene_overlaps:
                             out = False
 
                 if out:

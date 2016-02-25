@@ -69,7 +69,8 @@ script:
     - samtools faidx test/data/Homo_sapiens_chr4_assembly19.fasta
     - tebreak/tebreak.py -b test/data/example.ins.bam  -r test/data/Homo_sapiens_chr4_assembly19.fasta -i test/data/example.region.bed --pickle test/example.pickle --detail_out test/example.tebreak.detail.out
     - tebreak/resolve.py -p test/example.pickle -i lib/teref.human.fa --detail_out test/example.resolve.detail.out -v > test/example.tab.txt
-    - cd lib
-    - travis_wait ./human_mappability.sh
-    - cd ..
-    - travis_wait scripts/filter_hg19.py /home/travis/build/MischaLundberg/tebreak test/example.tab.txt > test/example.filtered.tab.txt
+    - sdiff test/example.tab.reference.txt test/example.tab.txt | grep '<' 'exit 1'
+#    - cd lib
+#    - travis_wait ./human_mappability.sh
+#    - cd ..
+#    - travis_wait scripts/filter_hg19.py /home/travis/build/MischaLundberg/tebreak test/example.tab.txt > test/example.filtered.tab.txt

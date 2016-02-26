@@ -5,7 +5,6 @@ class MyTestCase(unittest.TestCase):
 
   def test_equal_output(self):
     expected = open("example.tab.reference.txt" , "rw+")
-    sed 's/^.\{36\}//' example.tab.txt > example.tab1.txt
     output = open("example.tab1.txt" , "rw+")
     self.assertEquals(expected.readlines(), output.readlines())
 

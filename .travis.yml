@@ -9,9 +9,7 @@ before_install:
     - WORKDIR=`pwd`
     - wget http://last.cbrc.jp/last-716.zip
     - unzip last-716.zip
-#    - cd last-716
     - make CXXFLAGS=-O3 -C last-716 && sudo make install -C last-716
-#    - cd ..
     - wget http://ftp.ebi.ac.uk/pub/software/vertebrategenomics/exonerate/exonerate-2.2.0-x86_64.tar.gz
     - tar -xvf exonerate-2.2.0-x86_64.tar.gz
     - sudo cp -rf exonerate-2.2.0-x86_64/ $WORKDIR/bin/    
@@ -32,7 +30,6 @@ before_install:
     - python setup.py build
     - python setup.py install
     - cd ..
-#    - wget ftp://ftp.ncbi.nlm.nih.gov/sra/reports/Assembly/GRCh37-HG19_Broad_variant/Homo_sapiens_assembly19.fasta
     - git clone https://github.com/lh3/bwa.git
     - sudo make -C bwa
     - sudo cp bwa/bwa $WORKDIR/bin
@@ -67,12 +64,16 @@ install: true
 script:
     - python setup.py build
     - python setup.py install
-    - bwa index lib/teref.human.fa
-    - samtools faidx lib/teref.human.fa
-#    - samtools faidx Homo_sapiens_chr22_bamsurgeon_assembly19.fasta
-    - tebreak/tebreak.py -b test/data/example.ins.bam  -r lib/teref.human.fa -i test/data/example.region.bed --pickle test/example.pickle --detail_out test/example.tebreak.detail.out
+    - unzip test/data/Homo_sapiens_chr4_assembly19.fasta.zip
+    - bwa index test/data/Homo_sapiens_chr4_assembly19.fasta
+    - samtools faidx test/data/Homo_sapiens_chr4_assembly19.fasta
+    - tebreak/tebreak.py -b test/data/example.ins.bam  -r test/data/Homo_sapiens_chr4_assembly19.fasta -i test/data/example.region.bed --pickle test/example.pickle --detail_out test/example.tebreak.detail.out
     - tebreak/resolve.py -p test/example.pickle -i lib/teref.human.fa --detail_out test/example.resolve.detail.out -v > test/example.tab.txt
-    - cd lib
-    - travis_wait ./human_mappability.sh
-    - cd ..
-    - travis_wait scripts/filter_hg19.py /home/travis/build/MischaLundberg/tebreak test/example.tab.txt > test/example.filtered.tab.txt
+    - cd test
+    - tail -n +2 example.tab.txt | awk '{ $1=""; print $0 }' - > example.tab1.txt
+#    - sed 's/^.\{36\}//' example.tab.txt > example.tab1.txt
+    - python unitTest.py
+#    - cd lib
+#    - travis_wait ./human_mappability.sh
+#    - cd ..
+#    - travis_wait scripts/filter_hg19.py /home/travis/build/MischaLundberg/tebreak test/example.tab.txt > test/example.filtered.tab.txt

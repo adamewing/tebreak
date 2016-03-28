@@ -1,7 +1,5 @@
 ## TEBreak 
 
-<img src="https://travis-ci.org/MischaLundberg/tebreak.svg?branch=master" alt="Build Status" />
-
 Contact: adam.ewing@mater.uq.edu.au
 
 *Tools for analysing insertion mutations*

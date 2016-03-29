@@ -510,6 +510,14 @@ def add_insdata(ins, last_res, max_bam_count=0):
                 if newmatch is not None and be1_bestmatch.score - newmatch.score < better_match_maxdiff:
                     be1_bestmatch = newmatch
 
+            # if targets still don't match and one is clearly polyA, no confidence in polyA end family call.
+            if be1_bestmatch.target_id != be2_bestmatch.target_id:
+                if be1_bestmatch.only_polyA():
+                    be1_bestmatch = None
+
+                if be2_bestmatch.only_polyA():
+                    be2_bestmatch = None
+
     if be1_bestmatch is not None: ins['INFO']['be1_bestmatch'] = be1_bestmatch
     if be2_bestmatch is not None: ins['INFO']['be2_bestmatch'] = be2_bestmatch
 
@@ -648,8 +656,16 @@ def best_ref(ins):
     if None not in (be1, be2):
         if be1.target_id == be2.target_id:
             return be1.target_id
+
+        elif be1.only_polyA():
+            return be2.target_id
+
+        elif be2.only_polyA():
+            return be1.target_id
+
         elif be1.score > be2.score:
             return be1.target_id
+
         elif be1.score < be2.score:
             return be2.target_id
 

@@ -151,6 +151,11 @@ class LASTResult:
     def pct_match(self):
         return float(sum([a.upper()==b.upper() for a,b in zip(list(self.query_align), list(self.target_align))])) / float(self.query_alnsize)
 
+    def only_polyA(self):
+        ''' guess if alignment corresponds to only polyA sequence (>95 pct A or T)'''
+        a = [b for b in list(self.query_align) if b in ('A', 'T')]
+        return len(a)/float(len(self.query_align)) > 0.95
+
     def __lt__(self, other):
         return self.score > other.score
 

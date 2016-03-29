@@ -1,5 +1,7 @@
 ## TEBreak 
 
+[![Build Status](https://travis-ci.org/adamewing/tebreak.svg?branch=master)](https://travis-ci.org/adamewing/tebreak)
+
 Contact: adam.ewing@mater.uq.edu.au
 
 *Tools for analysing insertion mutations*

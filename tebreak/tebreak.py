@@ -742,6 +742,9 @@ class Insertion:
                         read = r.read
                         name = read.qname
                         unseen = True
+
+                        assert not (read.is_read1 and read.is_read2)
+
                         if read.is_read1:
                             if name + '/1' in usedreads: unseen = False
                             usedreads[name + '/1'] = True
@@ -756,6 +759,7 @@ class Insertion:
 
                         if rtype == 'DR' and r.mate_read is not None: # get discordant mates
                             read = r.mate_read
+                            name = r.mate_read.qname
                             unseen = True
 
                             if read.is_read1:

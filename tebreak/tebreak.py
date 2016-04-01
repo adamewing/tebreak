@@ -181,11 +181,12 @@ class SortableRead:
  
 class SplitRead:
     ''' store information about split read alignment '''
-    def __init__(self, chrom, read, bamfn):
+    def __init__(self, chrom, read, bamfn, minqual):
         self.uuid  = str(uuid4())
         self.chrom = chrom
         self.read  = read
         self.bamfn = os.path.basename(bamfn)
+        self.minqual = minqual
 
         self.cliplen = len(read.seq) - len(read.query_alignment_sequence)
 
@@ -209,7 +210,7 @@ class SplitRead:
         for tag, val in self.read.tags:
             if tag == 'RG': return val
         return None
- 
+
     def __gt__(self, other):
         ''' enables sorting of SplitRead objects '''
         if self.chrom == other.chrom:
@@ -342,8 +343,14 @@ class SplitCluster(ReadCluster):
         S = -np.ones((256, 256)) + 2 * np.identity(256)
         S = S.astype(np.int16)
 
+        minqual = self.reads[0].minqual
+
         sortable_reads = [SortableRead(sr.read) for sr in self.reads]
-        seqs = [sorted_read.seq for sorted_read in sorted(sortable_reads)]
+        seqs = [qualtrim(sorted_read.read, minqual=minqual) for sorted_read in sorted(sortable_reads)]
+        seqs = [s for s in seqs if len(s) > 20]
+
+        if len(seqs) == 0:
+            return '', 0.0
 
         if len(seqs) == 1: # no consensus necessary
             return seqs[0], 1.0
@@ -953,8 +960,19 @@ def ref_dist(read1, read2):
     iv2 = sorted((read2.get_reference_positions()[0], read2.get_reference_positions()[-1]))
  
     return max(iv1[0], iv2[0]) - min(iv1[1], iv2[1])
- 
- 
+
+
+def qualtrim(read, minqual=35):
+    ''' return quality-trimmed sequence given a pysam.AlignedSegment '''
+    q = [ord(b)-minqual for b in list(read.qual)]
+
+    for i in range(0,len(q)-4): # sliding window, 4bp
+        if np.mean(q[i:i+4]) < 5:
+            return read.seq[:i]
+
+    return read.seq
+
+
 def orient_subseq(longseq, shortseq):
     ''' return shortseq in same orientation as longseq '''
     assert len(longseq) >= len(shortseq), 'orient_subseq: %s < %s' % (longseq, shortseq)
@@ -999,6 +1017,8 @@ def fetch_clipped_reads(bams, chrom, start, end, filters):
     assert start < end
  
     for bam in bams:
+        minqual = guess_minqual(bam) # used for quality trimming when building consensus
+
         for read in bam.fetch(chrom, start, end):
             masked = False
             if filters['genome_mask'] is not None and chrom in filters['genome_mask']:
@@ -1018,7 +1038,7 @@ def fetch_clipped_reads(bams, chrom, start, end, filters):
                         if N_count <= filters['max_N_consensus'] and splitqual(read) <= filters['max_D_score']:
                             chrom = str(bam.getrname(read.tid))
                             if len(read.get_reference_positions()) > 0:
-                                splitreads.append(SplitRead(chrom, read, bam.filename))
+                                splitreads.append(SplitRead(chrom, read, bam.filename, minqual))
  
     return splitreads
  
@@ -1329,6 +1349,21 @@ def avgmap(maptabix, chrom, start, end):
         return 0.0
 
 
+def guess_minqual(bam):
+    minscore = None
+    n = 0
+
+    for read in bam:
+        n += 1
+        m = min([ord(q) for q in list(read.qual)])
+        if minscore is None or minscore > m:
+            minscore = m
+
+        if n > 10000: break
+
+    return minscore
+
+
 def summarise_insertion(ins):
     ''' returns a pickleable version of the insertion information '''
     pi = dd(dict)
@@ -1455,6 +1490,13 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
 
     try:
         bams = [pysam.AlignmentFile(bam, 'rb') for bam in args.bam.split(',')]
+
+        # table of minimum quality scores
+        minqual = {}
+
+        #for bam in bams:
+        #    minqual[bam.filename] = guess_minqual(bam)
+        #    logger.debug('MinQual for %s: %d' % (bam.filename, minqual[bam.filename]))
 
         # would do this outside but can't pass a non-pickleable object
         if args.mask is not None: args.mask = build_mask(args.mask)

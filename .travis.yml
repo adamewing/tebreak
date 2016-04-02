@@ -10,14 +10,6 @@ before_install:
     - wget http://last.cbrc.jp/last-716.zip
     - unzip last-716.zip
     - make CXXFLAGS=-O3 -C last-716 && sudo make install -C last-716
-    - wget http://ftp.ebi.ac.uk/pub/software/vertebrategenomics/exonerate/exonerate-2.2.0-x86_64.tar.gz
-    - tar -xvf exonerate-2.2.0-x86_64.tar.gz
-    - sudo cp -rf exonerate-2.2.0-x86_64/ $WORKDIR/bin/    
-    - wget https://www.ebi.ac.uk/~zerbino/velvet/velvet_1.2.10.tgz
-    - tar xvzf velvet_1.2.10.tgz
-    - sudo make -C velvet_1.2.10
-    - sudo cp velvet_1.2.10/velvetg $WORKDIR/bin/
-    - sudo cp velvet_1.2.10/velveth $WORKDIR/bin/
     - wget https://github.com/pysam-developers/pysam/archive/9c4c00a22fbf0f836347283cb008dbc9183e5e56.zip
     - unzip 9c4c00a22fbf0f836347283cb008dbc9183e5e56.zip
     - mv pysam-9c4c00a22fbf0f836347283cb008dbc9183e5e56 pysam 
@@ -70,10 +62,4 @@ script:
     - tebreak/tebreak.py -b test/data/example.ins.bam  -r test/data/Homo_sapiens_chr4_assembly19.fasta -i test/data/example.region.bed --pickle test/example.pickle --detail_out test/example.tebreak.detail.out
     - tebreak/resolve.py -p test/example.pickle -i lib/teref.human.fa --detail_out test/example.resolve.detail.out -v > test/example.tab.txt
     - cd test
-    - tail -n +2 example.tab.txt | awk '{ $1=""; print $0 }' - > example.tab1.txt
-#    - sed 's/^.\{36\}//' example.tab.txt > example.tab1.txt
-    - python unitTest.py
-#    - cd lib
-#    - travis_wait ./human_mappability.sh
-#    - cd ..
-#    - travis_wait scripts/filter_hg19.py /home/travis/build/MischaLundberg/tebreak test/example.tab.txt > test/example.filtered.tab.txt
+    - python checktest.py

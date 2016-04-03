@@ -354,6 +354,69 @@ class Ins:
 #######################################
 
 
+def extend_consensus(ins, bam):
+    ''' extend consensus sequence using teref pileup '''
+    covered_segs = get_covered_segs(bam.filename)
+
+    #print covered_segs
+
+    if ins['INFO']['be1_dist_seq'] is not None and ins['INFO']['be1_bestmatch'] is not None:
+        target_start = ins['INFO']['be1_bestmatch'].target_start
+        target_end = ins['INFO']['be1_bestmatch'].target_end
+
+        target_seg = []
+
+        for seg in covered_segs:
+            # check for overlap with covered segment
+            if min(seg['end'], target_end) - max(seg['start'], target_start) > 0:
+                print target_start, target_end, seg
+
+
+        #if (ins['INFO']['be1_prox_str']) == '-':
+            #print tebreak.rc(ins['INFO']['be1_dist_seq'])
+
+
+def get_covered_segs(bam, mindepth=1, minlength=1):
+    ''' return covered segments from BAM file '''
+    seglist = []
+    cmd = ['samtools', 'mpileup', bam]
+    
+    FNULL = open(os.devnull, 'w')
+
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=FNULL)
+
+    seg = {'chrom': None, 'start': None, 'end': None}
+
+    for line in p.stdout:
+        chrom, pos, base, depth = line.strip().split()[:4]
+        #sys.stderr.write(line)
+
+        depth = int(depth)
+        pos   = int(pos)
+
+        if seg['chrom'] != chrom:
+            if seg['chrom'] is not None:
+                if seg['end'] - seg['start'] >= minlength:
+                    seglist.append(seg)
+
+            seg = {'chrom': chrom, 'start': pos, 'end': pos}
+
+        else:
+            if pos == seg['end']+1 and depth > mindepth:
+                seg['end'] = pos
+
+            else:
+                if seg['end'] - seg['start'] >= minlength:
+                    seglist.append(seg)
+
+                seg = {'chrom': chrom, 'start': pos, 'end': pos}
+
+    if seg['chrom'] is not None:
+        seglist.append(seg)
+
+    return seglist
+
+
 def best_match(last_results, query_name, req_target=None, min_match=0.9):
     qres = []
 
@@ -726,6 +789,7 @@ def remap_discordant(ins, inslib_fa=None, useref=None, tmpdir='/tmp'):
 
     with open(tmp_fq, 'w') as fq:
         for dr in ins['READSTORE']:
+            #TODO: quality trim reads
             fq.write(dr)
 
     sam_cmd = ['bwa', 'mem', '-v', '1', '-k', '10', '-M', '-S', '-P', tmp_ref, tmp_fq]
@@ -843,6 +907,10 @@ def get_bam_info(bam, ins):
 
     ins['INFO']['remap_sr_count'] = sr_count
     ins['INFO']['remap_dr_count'] = dr_count
+
+    # work in progress: extend consensus
+
+    #extend_consensus(ins, bam)
 
     return ins
 

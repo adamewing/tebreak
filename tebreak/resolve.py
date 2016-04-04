@@ -2,6 +2,7 @@
 
 import os
 import gc
+import re
 import sys
 import shutil
 import cPickle as pickle
@@ -11,6 +12,8 @@ import tebreak
 import pysam
 import subprocess
 import traceback
+import numpy as np
+import align
 
 import multiprocessing as mp
 
@@ -356,24 +359,44 @@ class Ins:
 
 def extend_consensus(ins, bam):
     ''' extend consensus sequence using teref pileup '''
-    covered_segs = get_covered_segs(bam.filename)
+
+    ctglen = dict(zip(bam.references, bam.lengths))
+
+    covered_segs = get_covered_segs(bam.filename, mindepth=2)
+
+    mq = tebreak.guess_minqual(bam)
 
     #print covered_segs
 
-    if ins['INFO']['be1_dist_seq'] is not None and ins['INFO']['be1_bestmatch'] is not None:
-        target_start = ins['INFO']['be1_bestmatch'].target_start
-        target_end = ins['INFO']['be1_bestmatch'].target_end
+    if len(covered_segs) > 0:
 
-        target_seg = []
+        for be in ('be1', 'be2'):
+            if be+'_cons_seq' in ins['INFO'] and ins['INFO'][be+'_cons_seq'] is not None:
+                seg = None
 
-        for seg in covered_segs:
-            # check for overlap with covered segment
-            if min(seg['end'], target_end) - max(seg['start'], target_start) > 0:
-                print target_start, target_end, seg
+                if (ins['INFO']['be1_is_3prime'] and be == 'be1') or (ins['INFO']['be2_is_3prime'] and be == 'be2'):
+                    seg = covered_segs[-1]
+
+                else: # 5'
+                    seg = covered_segs[0]
+
+                seqs = [qualtrim(read, ctglen[seg['chrom']], minqual=mq) for read in bam.fetch(seg['chrom'], seg['start'], seg['end'])]
+                seqs = [s for s in seqs if len(s) > 50]
+
+                #print seqs
+
+                te_cons_seq, te_cons_score = consensus(seqs,minscore=0.95)
+
+                old_cons_seq = ins['INFO']['be1_cons_seq']
+
+                if (ins['INFO']['be1_prox_str']) == '-':
+                    old_cons_seq = tebreak.rc(old_cons_seq)
 
 
-        #if (ins['INFO']['be1_prox_str']) == '-':
-            #print tebreak.rc(ins['INFO']['be1_dist_seq'])
+                ins['INFO'][be+'_te_cons_seq'] = te_cons_seq
+
+    return ins
+
 
 
 def get_covered_segs(bam, mindepth=1, minlength=1):
@@ -389,7 +412,6 @@ def get_covered_segs(bam, mindepth=1, minlength=1):
 
     for line in p.stdout:
         chrom, pos, base, depth = line.strip().split()[:4]
-        #sys.stderr.write(line)
 
         depth = int(depth)
         pos   = int(pos)
@@ -417,6 +439,78 @@ def get_covered_segs(bam, mindepth=1, minlength=1):
     return seglist
 
 
+def qualtrim(read, ctglen, minqual=35):
+    ''' return quality-trimmed sequence given a pysam.AlignedSegment '''
+
+    seq = read.seq
+    qual = read.qual
+
+    if read.reference_end < ctglen:
+        seq = seq[:read.query_alignment_end]
+        qual = qual[:read.query_alignment_end]
+
+    if read.reference_start > 1:
+        seq = seq[read.query_alignment_start:]
+        qual = qual[read.query_alignment_start:]
+
+
+    q = [ord(b)-minqual for b in list(qual)]
+
+    for i in range(0,len(q)-4): # sliding window, 4bp
+        if np.mean(q[i:i+4]) < 5:
+            return seq[:i]
+
+    return seq
+
+
+def consensus(seqs, minscore=0.95):
+    ''' build consensus from sorted aligned reads iteratively, expects seqs to be sorted in ref genome order '''
+
+    S = -np.ones((256, 256)) + 2 * np.identity(256)
+    S = S.astype(np.int16)
+
+    if len(seqs) == 0:
+        return '', 0.0
+
+    if len(seqs) == 1: # no consensus necessary
+        return seqs[0], 1.0
+
+    uniq_seqs = [seqs[0]]
+    for i, seq in enumerate(seqs[1:], start=1):
+        if seq != seqs[i-1]:
+            uniq_seqs.append(seq)
+
+    if len(uniq_seqs) == 1: # all seqs were the same!
+        return uniq_seqs[0], 1.0
+
+    cons = uniq_seqs[0]
+    scores = []
+
+    if len(uniq_seqs) > 1000: uniq_seqs = np.random.choice(uniq_seqs, size=1000)
+
+    for seq in uniq_seqs[1:]:
+
+        s1 = align.string_to_alignment(cons)
+        s2 = align.string_to_alignment(seq)
+
+        (s, a1, a2) = align.align(s1, s2, -2, -2, S, local=True)
+        a1 = align.alignment_to_string(a1)
+        a2 = ''.join([b for b in list(align.alignment_to_string(a2)) if b != '-'])
+
+        score = float(len(a1) - (len(a1)-s)) / float(len(a1))
+
+        scores.append(score)
+
+        if re.search(a1, cons):
+            cons_start, cons_end = locate_subseq(cons, a1)
+
+            if score >= minscore and cons_end > len(cons)-5:
+                align_end = locate_subseq(seq, a2)[1]
+                cons += seq[align_end:]
+
+    return cons, np.mean(scores)
+
+
 def best_match(last_results, query_name, req_target=None, min_match=0.9):
     qres = []
 
@@ -426,6 +520,17 @@ def best_match(last_results, query_name, req_target=None, min_match=0.9):
                 if res.pct_match() > min_match:
                     return res
 
+    return None
+
+
+def locate_subseq(longseq, shortseq):
+    ''' return (start, end) of shortseq in longseq '''
+    assert len(longseq) >= len(shortseq), 'orient_subseq: %s < %s' % (longseq, shortseq)
+ 
+    match = re.search(shortseq, longseq)
+    if match is not None:
+        return sorted((match.start(0), match.end(0)))
+ 
     return None
 
 
@@ -908,10 +1013,6 @@ def get_bam_info(bam, ins):
     ins['INFO']['remap_sr_count'] = sr_count
     ins['INFO']['remap_dr_count'] = dr_count
 
-    # work in progress: extend consensus
-
-    #extend_consensus(ins, bam)
-
     return ins
 
 
@@ -931,6 +1032,10 @@ def resolve_insertion(args, ins, inslib_fa):
                     ins['INFO']['support_bam_file'] = tmp_bam
                     ins['INFO']['mapped_target'] = bam.mapped
                     ins = get_bam_info(bam, ins)
+
+                    # work in progress: extend consensus
+
+                    #extend_consensus(ins, bam)
 
                     if not args.keep_all_tmp_bams and not args.keep_ins_bams:
                         if os.path.exists(tmp_bam): os.remove(tmp_bam)

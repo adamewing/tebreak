@@ -1353,7 +1353,7 @@ def guess_minqual(bam):
     minscore = None
     n = 0
 
-    for read in bam:
+    for read in bam.fetch():
         n += 1
         m = min([ord(q) for q in list(read.qual)])
         if minscore is None or minscore > m:

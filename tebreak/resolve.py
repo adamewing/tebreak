@@ -387,13 +387,24 @@ def extend_consensus(ins, bam):
 
                 te_cons_seq, te_cons_score = consensus(seqs,minscore=0.95)
 
-                old_cons_seq = ins['INFO']['be1_cons_seq']
-
-                if (ins['INFO']['be1_prox_str']) == '-':
-                    old_cons_seq = tebreak.rc(old_cons_seq)
-
+                ge_cons_seq = ins['INFO'][be+'_cons_seq']
 
                 ins['INFO'][be+'_te_cons_seq'] = te_cons_seq
+
+                joined_cons_seq, join_score, join_len = join_cons(ge_cons_seq, te_cons_seq)
+
+                if join_score > 0.95 and join_len > 20:
+                    #print joined_cons_seq
+                    ins['INFO'][be+'_joined_cons'] = joined_cons_seq
+
+                else:
+                    joined_cons_seq, join_score, join_len = join_cons(tebreak.rc(ge_cons_seq), te_cons_seq)
+
+                    if join_score > 0.95 and join_len > 20:
+                        #print joined_cons_seq
+                        ins['INFO'][be+'_joined_cons'] = joined_cons_seq
+
+                #print ins['INFO']['ins_uuid'], join_score, join_len
 
     return ins
 
@@ -461,6 +472,43 @@ def qualtrim(read, ctglen, minqual=35):
             return seq[:i]
 
     return seq
+
+
+def join_cons(left_seq, right_seq):
+    #print left_seq
+    #print right_seq
+
+    S = -np.ones((256, 256)) + 2 * np.identity(256)
+    S = S.astype(np.int16)
+
+    left_seq_obj = align.string_to_alignment(left_seq)
+    right_seq_obj = align.string_to_alignment(right_seq)
+
+    (s, left_align, right_align) = align.align(left_seq_obj, right_seq_obj, -2, -1, S, local=True)
+
+    score = 0.0
+
+    if len(align.alignment_to_string(left_align)) > 0:
+        score = float(len(align.alignment_to_string(left_align)) - (len(align.alignment_to_string(left_align))-s)) / float(len(align.alignment_to_string(left_align)))
+
+    
+    #print align.alignment_to_string(left_align)
+    #print align.alignment_to_string(right_align)
+    #print score
+
+    left_align = ''.join([b for b in list(align.alignment_to_string(left_align)) if b != '-'])
+    right_align = ''.join([b for b in list(align.alignment_to_string(right_align)) if b != '-'])
+
+    joined_cons = None
+
+    if score > 0.95 and len(left_align) > 20:
+        cons_align_start, cons_align_end = locate_subseq(right_seq, right_align)
+        te_align_start, te_align_end = locate_subseq(left_seq, left_align)
+
+        joined_cons = left_seq[:te_align_start] + right_seq[cons_align_start:]
+
+
+    return joined_cons, score, len(left_align)
 
 
 def consensus(seqs, minscore=0.95):
@@ -1035,7 +1083,7 @@ def resolve_insertion(args, ins, inslib_fa):
 
                     # work in progress: extend consensus
 
-                    #extend_consensus(ins, bam)
+                    extend_consensus(ins, bam)
 
                     if not args.keep_all_tmp_bams and not args.keep_ins_bams:
                         if os.path.exists(tmp_bam): os.remove(tmp_bam)

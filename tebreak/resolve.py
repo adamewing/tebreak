@@ -29,7 +29,6 @@ logger = logging.getLogger(__name__)
 ## Classes                           ##
 #######################################
 
-
 class Annotator:
     def __init__(self, tabix_list):
         self.tbx = od()
@@ -240,11 +239,21 @@ class Ins:
             self.out['Sample_support'] = ','.join(['%s|%d' % (sample, count) for sample, count in samples.iteritems()])
 
     def consensus(self):
-        self.out['Consensus_5p'] = 'NA'
-        self.out['Consensus_3p'] = 'NA'
+        self.out['Genomic_Consensus_5p'] = 'NA'
+        self.out['Genomic_Consensus_3p'] = 'NA'
 
-        if self.end5 + '_cons_seq' in self.ins: self.out['Consensus_5p'] = self.ins[self.end5 + '_cons_seq']
-        if self.end3 + '_cons_seq' in self.ins: self.out['Consensus_3p'] = self.ins[self.end3 + '_cons_seq']
+        self.out['Insert_Consensus_5p'] = 'NA'
+        self.out['Insert_Consensus_3p'] = 'NA'
+
+        if self.end5 + '_cons_seq' in self.ins: self.out['Genomic_Consensus_5p'] = self.ins[self.end5 + '_cons_seq']
+        if self.end3 + '_cons_seq' in self.ins: self.out['Genomic_Consensus_3p'] = self.ins[self.end3 + '_cons_seq']
+
+        if self.end5 + '_joined_cons' in self.ins: self.out['Genomic_Consensus_5p'] = self.ins[self.end5 + '_joined_cons']
+        if self.end3 + '_joined_cons' in self.ins: self.out['Genomic_Consensus_3p'] = self.ins[self.end3 + '_joined_cons']
+
+        if self.end5 + '_te_cons_seq' in self.ins: self.out['Insert_Consensus_5p'] = self.ins[self.end5 + '_te_cons_seq']
+        if self.end3 + '_te_cons_seq' in self.ins: self.out['Insert_Consensus_3p'] = self.ins[self.end3 + '_te_cons_seq']
+
 
     def polyA_filter(self):
         ''' return true if only supported by poly-A matches '''
@@ -380,28 +389,34 @@ def extend_consensus(ins, bam):
                 else: # 5'
                     seg = covered_segs[0]
 
+                #print ins['INFO']['ins_uuid'], be, 'seg', str(seg)
+
                 seqs = [qualtrim(read, ctglen[seg['chrom']], minqual=mq) for read in bam.fetch(seg['chrom'], seg['start'], seg['end'])]
                 seqs = [s for s in seqs if len(s) > 50]
-
-                #print seqs
 
                 te_cons_seq, te_cons_score = consensus(seqs,minscore=0.95)
 
                 ge_cons_seq = ins['INFO'][be+'_cons_seq']
 
+                ins['INFO'][be+'_te_cons_score'] = te_cons_score
                 ins['INFO'][be+'_te_cons_seq'] = te_cons_seq
+
+                #print ins['INFO']['ins_uuid'], be, 'te_cons', te_cons_seq
+                #print ins['INFO']['ins_uuid'], be, 'ge_cons', ge_cons_seq
 
                 joined_cons_seq, join_score, join_len = join_cons(ge_cons_seq, te_cons_seq)
 
                 if join_score > 0.95 and join_len > 20:
-                    #print joined_cons_seq
+                    ins['INFO'][be+'_join_score'] = join_score
+                    ins['INFO'][be+'_join_overlap'] = join_len
                     ins['INFO'][be+'_joined_cons'] = joined_cons_seq
 
                 else:
                     joined_cons_seq, join_score, join_len = join_cons(tebreak.rc(ge_cons_seq), te_cons_seq)
 
                     if join_score > 0.95 and join_len > 20:
-                        #print joined_cons_seq
+                        ins['INFO'][be+'_join_score'] = join_score
+                        ins['INFO'][be+'_join_overlap'] = join_len
                         ins['INFO'][be+'_joined_cons'] = joined_cons_seq
 
                 #print ins['INFO']['ins_uuid'], join_score, join_len
@@ -410,7 +425,7 @@ def extend_consensus(ins, bam):
 
 
 
-def get_covered_segs(bam, mindepth=1, minlength=1):
+def get_covered_segs(bam, mindepth=1, minlength=50):
     ''' return covered segments from BAM file '''
     seglist = []
     cmd = ['samtools', 'mpileup', bam]
@@ -444,7 +459,7 @@ def get_covered_segs(bam, mindepth=1, minlength=1):
 
                 seg = {'chrom': chrom, 'start': pos, 'end': pos}
 
-    if seg['chrom'] is not None:
+    if seg['chrom'] is not None and seg['end'] - seg['start'] >= minlength:
         seglist.append(seg)
 
     return seglist
@@ -475,9 +490,7 @@ def qualtrim(read, ctglen, minqual=35):
 
 
 def join_cons(left_seq, right_seq):
-    #print left_seq
-    #print right_seq
-
+    ''' attempt to join left and right consensus sequences together - this bit needs work '''
     S = -np.ones((256, 256)) + 2 * np.identity(256)
     S = S.astype(np.int16)
 
@@ -491,10 +504,9 @@ def join_cons(left_seq, right_seq):
     if len(align.alignment_to_string(left_align)) > 0:
         score = float(len(align.alignment_to_string(left_align)) - (len(align.alignment_to_string(left_align))-s)) / float(len(align.alignment_to_string(left_align)))
 
-    
-    #print align.alignment_to_string(left_align)
-    #print align.alignment_to_string(right_align)
-    #print score
+    #print 'left aligned segment', align.alignment_to_string(left_align)
+    #print 'right aligned segment', align.alignment_to_string(right_align)
+    #print 'alignment score', score
 
     left_align = ''.join([b for b in list(align.alignment_to_string(left_align)) if b != '-'])
     right_align = ''.join([b for b in list(align.alignment_to_string(right_align)) if b != '-'])
@@ -508,6 +520,7 @@ def join_cons(left_seq, right_seq):
         joined_cons = left_seq[:te_align_start] + right_seq[cons_align_start:]
 
 
+    #print 'joined consensus', joined_cons
     return joined_cons, score, len(left_align)
 
 
@@ -1170,24 +1183,34 @@ def load_uuids(fn):
 
 
 def prefilter(args, ins, uuids):
-    if int(args.max_bam_count) > 0 and bamcount(ins) > int(args.max_bam_count): return True
+    if int(args.max_bam_count) > 0 and bamcount(ins) > int(args.max_bam_count):
+        logger.debug('filtered %s due to max_bam_count > %d' % (ins['INFO']['ins_uuid'], args.max_bam_count))
+        return True
 
     minmatch = 0.0
     if 'be1_avgmatch' in ins['INFO'] and ins['INFO']['be1_avgmatch'] > minmatch: minmatch = ins['INFO']['be1_avgmatch']
     if 'be2_avgmatch' in ins['INFO'] and ins['INFO']['be2_avgmatch'] > minmatch: minmatch = ins['INFO']['be2_avgmatch']
 
-    if minmatch < float(args.minmatch): return True
+    if minmatch < float(args.minmatch):
+        logger.debug('filtered %s due to minmatch < %f' % (ins['INFO']['ins_uuid'], float(args.minmatch)))
+        return True
 
-    if ins['INFO']['dr_count'] < int(args.mindiscord): return True
+    if ins['INFO']['dr_count'] < int(args.mindiscord):
+        logger.debug('filtered %s due to discordant reads < %d' % (ins['INFO']['ins_uuid'], int(args.mindiscord)))
+        return True
 
     if not args.unmapped:
         unmap = True
         if 'be1_dist_seq' in ins['INFO'] and ins['INFO']['be1_dist_seq'] is not None: unmap = False
         if 'be2_dist_seq' in ins['INFO'] and ins['INFO']['be2_dist_seq'] is not None: unmap = False
 
-        if unmap: return True
+        if unmap:
+            logger.debug('filtered %s due to no mapped distal breakends' % ins['INFO']['ins_uuid'])
+            return True
 
-    if uuids is not None and ins['INFO']['ins_uuid'] not in uuids: return True
+    if uuids is not None and ins['INFO']['ins_uuid'] not in uuids:
+        logger.debug('filtered %s for not being in uuid list' % ins['INFO']['ins_uuid'])
+        return True
 
     return False
 

@@ -248,8 +248,13 @@ class Ins:
         if self.end5 + '_cons_seq' in self.ins: self.out['Genomic_Consensus_5p'] = self.ins[self.end5 + '_cons_seq']
         if self.end3 + '_cons_seq' in self.ins: self.out['Genomic_Consensus_3p'] = self.ins[self.end3 + '_cons_seq']
 
-        if self.end5 + '_joined_cons' in self.ins: self.out['Genomic_Consensus_5p'] = self.ins[self.end5 + '_joined_cons']
-        if self.end3 + '_joined_cons' in self.ins: self.out['Genomic_Consensus_3p'] = self.ins[self.end3 + '_joined_cons']
+        if self.end5 + '_joined_cons' in self.ins:
+            self.out['Genomic_Consensus_5p'] = self.ins[self.end5 + '_joined_cons']
+            self.out['5p_Cons_Len'] = len(self.ins[self.end5 + '_joined_cons'])
+
+        if self.end3 + '_joined_cons' in self.ins:
+            self.out['Genomic_Consensus_3p'] = self.ins[self.end3 + '_joined_cons']
+            self.out['3p_Cons_Len'] = len(self.ins[self.end3 + '_joined_cons'])
 
         if self.end5 + '_te_cons_seq' in self.ins: self.out['Insert_Consensus_5p'] = self.ins[self.end5 + '_te_cons_seq']
         if self.end3 + '_te_cons_seq' in self.ins: self.out['Insert_Consensus_3p'] = self.ins[self.end3 + '_te_cons_seq']
@@ -419,8 +424,6 @@ def extend_consensus(ins, bam):
                         ins['INFO'][be+'_join_overlap'] = join_len
                         ins['INFO'][be+'_joined_cons'] = joined_cons_seq
 
-                #print ins['INFO']['ins_uuid'], join_score, join_len
-
     return ins
 
 
@@ -499,13 +502,19 @@ def join_cons(left_seq, right_seq):
 
     (s, left_align, right_align) = align.align(left_seq_obj, right_seq_obj, -2, -1, S, local=True)
 
+    aln_len = len(align.alignment_to_string(left_align))
+    mismatch = (aln_len - s)/2.0   # count mm against one strand
+
     score = 0.0
 
     if len(align.alignment_to_string(left_align)) > 0:
-        score = float(len(align.alignment_to_string(left_align)) - (len(align.alignment_to_string(left_align))-s)) / float(len(align.alignment_to_string(left_align)))
+        #print 'len:',float(len(align.alignment_to_string(left_align)))
+        #print 'mismatch',mismatch
 
-    #print 'left aligned segment', align.alignment_to_string(left_align)
-    #print 'right aligned segment', align.alignment_to_string(right_align)
+        score = (aln_len-mismatch) / aln_len
+
+    #print 'left aligned segment\t' + align.alignment_to_string(left_align)
+    #print 'right aligned segment\t' + align.alignment_to_string(right_align)
     #print 'alignment score', score
 
     left_align = ''.join([b for b in list(align.alignment_to_string(left_align)) if b != '-'])
@@ -514,10 +523,22 @@ def join_cons(left_seq, right_seq):
     joined_cons = None
 
     if score > 0.95 and len(left_align) > 20:
-        cons_align_start, cons_align_end = locate_subseq(right_seq, right_align)
-        te_align_start, te_align_end = locate_subseq(left_seq, left_align)
+        right_align_start, right_align_end = locate_subseq(right_seq, right_align)
+        left_align_start, left_align_end = locate_subseq(left_seq, left_align)
 
-        joined_cons = left_seq[:te_align_start] + right_seq[cons_align_start:]
+        #print 'len_left_seq', len(left_seq), left_align_start, left_align_end
+        #print 'len_right_seq', len(right_seq), right_align_start, right_align_end
+
+        flip = False
+        if float(left_align_end)/len(left_seq) < float(right_align_start)/len(right_seq):
+            flip = True
+
+        #print 'flip', flip
+
+        joined_cons = left_seq[:left_align_start] + right_seq[right_align_start:]
+
+        if flip:
+            joined_cons = right_seq[:right_align_end] + left_seq[left_align_end:]
 
 
     #print 'joined consensus', joined_cons
@@ -584,13 +605,22 @@ def best_match(last_results, query_name, req_target=None, min_match=0.9):
     return None
 
 
-def locate_subseq(longseq, shortseq):
+def locate_subseq(longseq, shortseq, end='L'):
     ''' return (start, end) of shortseq in longseq '''
     assert len(longseq) >= len(shortseq), 'orient_subseq: %s < %s' % (longseq, shortseq)
  
-    match = re.search(shortseq, longseq)
-    if match is not None:
-        return sorted((match.start(0), match.end(0)))
+    matches = [[match.start(0), match.end(0)] for match in re.finditer(shortseq, longseq) if match]
+
+    if len(matches) > 0:
+        if end == 'L':
+            return sorted(matches[0])
+        else:
+            return sorted(matches[-1])
+
+    #match = re.search(shortseq, longseq)
+    #if match:
+    #    print 'matchlen', len(match.groups())
+    #    return sorted((match.start(0), match.end(0)))
  
     return None
 
@@ -1285,6 +1315,9 @@ def main(args):
     new_insertions = resolve_transductions(new_insertions)
     processed_insertions += new_insertions
 
+    if args.detail_out is None:
+        args.detail_out = '.'.join(args.pickle.split('.')[:-1]) + '.resolve.out'
+
     tebreak.text_summary(processed_insertions, outfile=args.detail_out) # debug
 
     results = []
@@ -1331,7 +1364,7 @@ if __name__ == '__main__':
     parser.add_argument('--use_rg', action='store_true', default=False, help="use RG instead of BAM filename for samples")
     parser.add_argument('--keep_all_tmp_bams', action='store_true', default=False, help="leave ALL temporary BAMs (warning: lots of files!)")
     parser.add_argument('--keep_ins_bams', action='store_true', default=False, help="insertion-specific BAMs will be kept in --refoutdir")
-    parser.add_argument('--detail_out', default='resolve.out', help="file to write detailed output")
+    parser.add_argument('--detail_out', default=None, help="file to write detailed output")
     parser.add_argument('--unmapped', default=False, action='store_true', help="report insertions that do not match insertion library")
     parser.add_argument('--te', default=False, action='store_true', help="set if insertion library is transposons")
     parser.add_argument('--usecachedLAST', default=False, action='store_true', help="try to used cached LAST db, if found")

@@ -7,6 +7,18 @@
 import pysam
 import sys
 import os
+import logging
+
+verbose=True
+
+FORMAT = '%(asctime)s %(message)s'
+logging.basicConfig(format=FORMAT)
+logger = logging.getLogger(__name__)
+if verbose:
+    logger.setLevel(logging.DEBUG)
+else:
+    logger.setLevel(logging.INFO)
+
 
 
 def usage():
@@ -95,14 +107,39 @@ if len(sys.argv) == 3:
                 for n, field in enumerate(line.strip().split('\t')):
                     rec[header[n]] = field
 
-                if int(rec['3p_Cons_Len']) < 120 and int(rec['5p_Cons_Len']) < 120: out = False
-                if 'NA' in (rec['TE_Align_Start'], rec['TE_Align_End']): out = False
-                if ref_filter(rec['Chromosome'], rec['Left_Extreme'], rec['Right_Extreme'], rec['Superfamily']): out = False
-                if max(float(rec['5p_Elt_Match']), float(rec['3p_Elt_Match'])) < 0.95: out = False
-                if max(float(rec['5p_Genome_Match']), float(rec['3p_Genome_Match'])) < 0.98: out = False
-                if avgmap(map_tbx, rec['Chromosome'], rec['Left_Extreme'], rec['Right_Extreme']) < 0.5: out = False
-                if float(rec['Remapped_Discordant']) < 4 or float(rec['Remap_Disc_Fraction']) < 0.5: out = False
-                if out and len_filter(rec): out = False
+                #logger.debug(rec['UUID'])
+
+                if int(rec['3p_Cons_Len']) < 120 and int(rec['5p_Cons_Len']) < 120:
+                    logger.debug('Filtered %s: consensus length < %d' % (rec['UUID'], 120))
+                    out = False
+
+                if 'NA' in (rec['TE_Align_Start'], rec['TE_Align_End']):
+                    logger.debug('Filtered %s: TE_Align_Start or TE_Align_End is "NA"' % rec['UUID'])
+                    out = False
+
+                if ref_filter(rec['Chromosome'], rec['Left_Extreme'], rec['Right_Extreme'], rec['Superfamily']):
+                    logger.debug('Filtered %s: proximity to reference TE of same superfamily' % rec['UUID']) 
+                    out = False
+
+                if max(float(rec['5p_Elt_Match']), float(rec['3p_Elt_Match'])) < 0.95:
+                    logger.debug('Filtered %s: max(5p_Elt_Match, 3p_Elt_Match) < 0.95' % rec['UUID'])
+                    out = False
+
+                if max(float(rec['5p_Genome_Match']), float(rec['3p_Genome_Match'])) < 0.98:
+                    logger.debug('Filtered %s: max(5p_Genome_Match, 3p_Genome_Match) < 0.98' % rec['UUID'])
+                    out = False
+
+                if avgmap(map_tbx, rec['Chromosome'], rec['Left_Extreme'], rec['Right_Extreme']) < 0.5:
+                    logger.debug('Filtered %s: mappability < 0.5' % rec['UUID'])
+                    out = False
+
+                if float(rec['Remapped_Discordant']) < 4 or float(rec['Remap_Disc_Fraction']) < 0.5:
+                    logger.debug('Filtered %s: low discordant evidence (< 4 reads or < 50pct supporting)' % rec['UUID'])
+                    out = False
+
+                if out and len_filter(rec):
+                    logger.debug('Filtered %s: TE length filter' % rec['UUID'])
+                    out = False
 
                 if out: print line.strip()
 

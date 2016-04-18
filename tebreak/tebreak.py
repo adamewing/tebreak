@@ -734,7 +734,7 @@ class Insertion:
         outreads  = od()
         usedreads = {}
 
-        out_fastq = outdir + '/' + '.'.join(('supportreads', self.be1.chrom, str(self.be1.breakpos), 'fq'))
+        out_fastq = outdir + '/' + '.'.join(('supportreads', self.be1.chrom, str(self.be1.breakpos), str(uuid4()), 'fq'))
         with open(out_fastq, 'w') as out:
             for readstore in (self.be1, self.be2, self.discoreads):
                 if readstore:

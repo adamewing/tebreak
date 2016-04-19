@@ -82,7 +82,7 @@ if len(sys.argv) == 3:
     l1_ref  = tebreak_dir + '/lib/mask.L1.hg19.bed.gz'
     alu_ref = tebreak_dir + '/lib/mask.Alu.hg19.bed.gz'
     sva_ref = tebreak_dir + '/lib/mask.SVA.hg19.bed.gz'
-    map_ref = tebreak_dir + '/lib/wgEncodeCrgMapabilityAlign50mer.bed.gz'
+    map_ref = tebreak_dir + '/lib/wgEncodeCrgMapabilityAlign100mer.bed.gz'
 
     for fn in (l1_ref, alu_ref, sva_ref):
         if not os.path.exists(fn): sys.exit('reference %s not found' % fn)
@@ -129,8 +129,8 @@ if len(sys.argv) == 3:
                     logger.debug('Filtered %s: max(5p_Genome_Match, 3p_Genome_Match) < 0.98' % rec['UUID'])
                     out = False
 
-                if avgmap(map_tbx, rec['Chromosome'], rec['Left_Extreme'], rec['Right_Extreme']) < 0.5:
-                    logger.debug('Filtered %s: mappability < 0.5' % rec['UUID'])
+                if avgmap(map_tbx, rec['Chromosome'], rec['Left_Extreme'], rec['Right_Extreme']) < 0.1:
+                    logger.debug('Filtered %s: mappability < 0.1' % rec['UUID'])
                     out = False
 
                 if float(rec['Remapped_Discordant']) < 4 or float(rec['Remap_Disc_Fraction']) < 0.5:

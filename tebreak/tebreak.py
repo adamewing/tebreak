@@ -1374,9 +1374,13 @@ def summarise_insertion(ins):
     return pi
 
 
-def filter_insertions(insertions, filters, tmpdir='/tmp'):
+def filter_insertions(insertions, filters, tmpdir='/tmp', debug=True, logger=None):
     filtered = []
+    if logger is None: debug = False
+
     for ins in insertions:
+        ins_debug_name = '%s:%d-%d' % (ins.be1.chrom, ins.min_supporting_base(), ins.max_supporting_base())
+
         exclude = False
 
         mapq = map(lambda x : str(x.mapq), ins.be1.proximal_subread())
@@ -1390,24 +1394,39 @@ def filter_insertions(insertions, filters, tmpdir='/tmp'):
 
         bams = list(set(bams)) # uniqify
 
-        if len(ins) >= filters['max_ins_reads']: exclude = True
-        if max(mapq) < filters['min_prox_mapq']: exclude = True
+        if len(ins) >= filters['max_ins_reads']:
+            if debug: logger.debug('%s filtered due to max_ins_reads: %d >= %d' % (ins_debug_name, len(ins), filters['max_ins_reads']))
+            exclude = True
 
-        if ins.num_sr() < filters['min_split_reads']: exclude = True
+        if max(mapq) < filters['min_prox_mapq']:
+            if debug: logger.debug('%s filtered due to min_prox_mapq: %d < %d' % (ins_debug_name, max(mapq), filters['min_prox_mapq']))
+            exclude = True
+
+        if ins.num_sr() < filters['min_split_reads']:
+            if debug: logger.debug('%s filtered due to min_split_reads: %d < %d' % (ins_debug_name, ins.num_sr(), filters['min_split_reads']))
+            exclude = True
 
         if filters['exclude_bam']:
             for bam in bams:
-                if bam in filters['exclude_bam']: exclude = True
+                if bam in filters['exclude_bam']:
+                    if debug: logger.debug('%s filtered due to bam %s in exclude_bam' % (ins_debug_name, bam))
+                    exclude = True
 
         if filters['exclude_readgroup']:
             for rg in rgs:
-                if rg in filters['exclude_rg']: exclude = True
+                if rg in filters['exclude_rg']:
+                    if debug: logger.debug('%s filtered due to readgroup %s in exclude_readgroup' % (ins_debug_name, rg))
+                    exclude = True
 
         if filters['max_bam_count'] > 0:
-            if len(bams) > filters['max_bam_count']: exclude = True
+            if len(bams) > filters['max_bam_count']:
+                if debug: logger.debug('%s filtered due to max_bam_count: %d > %d' % (ins_debug_name, len(bams), filters['max_bam_count']))
+                exclude = True
 
         if filters['insertion_library'] is not None and not exclude:
-            if ins.align_filter(filters['insertion_library'], tmpdir=tmpdir): exclude = True
+            if ins.align_filter(filters['insertion_library'], tmpdir=tmpdir):
+                # this filter is going to be deleted soon as it turns out to be pretty useless
+                exclude = True
 
         if filters['map_tabix'] is not None and not exclude:
             if ins.be1.chrom in filters['map_tabix'].contigs:
@@ -1415,7 +1434,9 @@ def filter_insertions(insertions, filters, tmpdir='/tmp'):
             else:
                 ins.mappability = 0.0
 
-            if ins.mappability < filters['min_mappability']: exclude = True
+            if ins.mappability < filters['min_mappability']:
+                if debug: logger.debug('%s filtered due to min_mappability: %d < %d' % (ins_debug_name, ins.mappability, filters['min_mappability']))
+                exclude = True
 
         if not exclude: filtered.append(ins)
 
@@ -1571,7 +1592,7 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
 
             logger.debug('Chunk %s: Processing and filtering %d potential insertions ...' % (chunkname, len(insertions)))
 
-            insertions = filter_insertions(insertions, filters, tmpdir=args.tmpdir)
+            insertions = filter_insertions(insertions, filters, tmpdir=args.tmpdir, logger=logger)
 
             for ins in insertions:
                 ins.fetch_discordant_reads(bams)

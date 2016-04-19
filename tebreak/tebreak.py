@@ -1806,7 +1806,7 @@ if __name__ == '__main__':
     parser.add_argument('--rpkm_bam', default=None, help='use alternate BAM(s) for RPKM calculation: use original BAMs if using reduced BAM(s) for -b/--bam')
     parser.add_argument('--max_fold_rpkm', default=10, help='ignore insertions supported by rpkm*max_fold_rpkm reads (default = 10)')
     parser.add_argument('--max_ins_reads', default=1000, help='maximum number of reads per insertion call (default = 1000)')
-    parser.add_argument('--min_split_reads', default=4, help='minimum total split reads per insertion call (default = 4)')
+    parser.add_argument('--min_split_reads', default=2, help='minimum total split reads per insertion call (default = 2)')
     #parser.add_argument('--min_discordant_reads', default=4, help='minimum discordant read count (default = 4)')
     parser.add_argument('--min_prox_mapq', default=10, help='minimum map quality for proximal subread (default = 10)')
     parser.add_argument('--max_N_consensus', default=4, help='exclude breakend seqs with > this number of N bases (default = 4)')

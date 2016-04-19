@@ -1035,16 +1035,22 @@ def fetch_clipped_reads(bams, chrom, start, end, filters):
                     if 'N' in read.seq: N_count = Counter(read.seq)['N']
      
                     if altclip <= 2: # could add as a filter
-                        if N_count <= filters['max_N_consensus'] and splitqual(read) <= filters['max_D_score']:
+                        if N_count <= filters['max_N_consensus'] and splitqual(read) >= filters['min_MW_P']:
                             chrom = str(bam.getrname(read.tid))
                             if len(read.get_reference_positions()) > 0:
                                 splitreads.append(SplitRead(chrom, read, bam.filename, minqual))
+                                #print read.qname, read.cigarstring, N_count, splitqual(read), filters['min_MW_P']
+                                #print read.qual
+                        else:
+                            #print read.qname, read.cigarstring, N_count, splitqual(read), filters['min_MW_P']
+                            #print read.qual
+                            pass
  
     return splitreads
  
  
 def splitqual(read):
-    ''' return KS-test D value for clipped vs. unclipped bases'''
+    ''' return Mann-Whitney P for clipped vs unclipped quals '''
     
     breakpos = None
  
@@ -1053,7 +1059,7 @@ def splitqual(read):
     q1 = map(ord, list(read.qual[:breakpos]))
     q2 = map(ord, list(read.qual[breakpos:]))
  
-    return ss.ks_2samp(q1, q2)[0]
+    return ss.mannwhitneyu(q1, q2)[1]
  
 
 def load_falib(infa):
@@ -1532,7 +1538,7 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
             'min_minclip':           int(args.min_minclip),
             'min_sr_per_break':      int(args.min_sr_per_break),
             'min_consensus_score':   int(args.min_consensus_score),
-            'max_D_score':           float(args.maxD),
+            'min_MW_P':              float(args.minMWP),
             'max_ins_reads':         int(args.max_ins_reads),
             'min_split_reads':       int(args.min_split_reads),
             #'min_discordant_reads':  int(args.min_discordant_reads),
@@ -1796,7 +1802,7 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--processes', default=1, help='split work across multiple processes')
     parser.add_argument('-c', '--chunks', default=1, help='split genome into chunks (default = # processes), helps control memory usage')
     parser.add_argument('-i', '--interval_bed', default=None, help='BED file with intervals to scan')
-    parser.add_argument('-D', '--maxD', default=0.8, help='maximum value of KS D statistic for split qualities (default = 0.8)')
+    parser.add_argument('-D', '--minMWP', default=0.01, help='minimum Mann-Whitney P-value for split qualities (default = 0.01)')
     parser.add_argument('--min_minclip', default=3, help='min. shortest clipped bases per cluster (default = 3)')
     parser.add_argument('--min_maxclip', default=10, help='min. longest clipped bases per cluster (default = 10)')
     parser.add_argument('--min_sr_per_break', default=1, help='minimum split reads per breakend (default = 1)')
@@ -1806,7 +1812,7 @@ if __name__ == '__main__':
     parser.add_argument('--rpkm_bam', default=None, help='use alternate BAM(s) for RPKM calculation: use original BAMs if using reduced BAM(s) for -b/--bam')
     parser.add_argument('--max_fold_rpkm', default=10, help='ignore insertions supported by rpkm*max_fold_rpkm reads (default = 10)')
     parser.add_argument('--max_ins_reads', default=1000, help='maximum number of reads per insertion call (default = 1000)')
-    parser.add_argument('--min_split_reads', default=2, help='minimum total split reads per insertion call (default = 2)')
+    parser.add_argument('--min_split_reads', default=4, help='minimum total split reads per insertion call (default = 4)')
     #parser.add_argument('--min_discordant_reads', default=4, help='minimum discordant read count (default = 4)')
     parser.add_argument('--min_prox_mapq', default=10, help='minimum map quality for proximal subread (default = 10)')
     parser.add_argument('--max_N_consensus', default=4, help='exclude breakend seqs with > this number of N bases (default = 4)')

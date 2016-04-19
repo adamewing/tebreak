@@ -17,30 +17,30 @@ then
     exit 1 
 fi
 
-wget http://hgdownload.cse.ucsc.edu/goldenPath/hg19/encodeDCC/wgEncodeMapability/wgEncodeCrgMapabilityAlign50mer.bigWig
+wget http://hgdownload.cse.ucsc.edu/goldenPath/hg19/encodeDCC/wgEncodeMapability/wgEncodeCrgMapabilityAlign100mer.bigWig
 
 wget http://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/bigWigToWig
 chmod +x bigWigToWig
 
-./bigWigToWig wgEncodeCrgMapabilityAlign50mer.bigWig wgEncodeCrgMapabilityAlign50mer.wig
+./bigWigToWig wgEncodeCrgMapabilityAlign100mer.bigWig wgEncodeCrgMapabilityAlign100mer.wig
 
-if [ ! -e wgEncodeCrgMapabilityAlign50mer.wig ]
+if [ ! -e wgEncodeCrgMapabilityAlign100mer.wig ]
 then
     echo "could not create wig file"
     exit 1
 fi
 
-grep -v '^#' wgEncodeCrgMapabilityAlign50mer.wig | sed -e s'/^chr//' > wgEncodeCrgMapabilityAlign50mer.bed
+grep -v '^#' wgEncodeCrgMapabilityAlign100mer.wig | sed -e s'/^chr//' > wgEncodeCrgMapabilityAlign100mer.bed
 
-tabix/bgzip wgEncodeCrgMapabilityAlign50mer.bed
-tabix/tabix -s 1 -b 2 -e 3 wgEncodeCrgMapabilityAlign50mer.bed.gz
+tabix/bgzip wgEncodeCrgMapabilityAlign100mer.bed
+tabix/tabix -s 1 -b 2 -e 3 wgEncodeCrgMapabilityAlign100mer.bed.gz
 
-if [ ! -e wgEncodeCrgMapabilityAlign50mer.bed.gz.tbi ]
+if [ ! -e wgEncodeCrgMapabilityAlign100mer.bed.gz.tbi ]
 then
     echo "could not create tabix index"
     exit 1
 else
     echo "mappability index created successfully"
-    rm wgEncodeCrgMapabilityAlign50mer.bigWig
-    rm wgEncodeCrgMapabilityAlign50mer.wig
+    rm wgEncodeCrgMapabilityAlign100mer.bigWig
+    rm wgEncodeCrgMapabilityAlign100mer.wig
 fi

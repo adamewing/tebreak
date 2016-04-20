@@ -8,6 +8,7 @@ import pysam
 import sys
 import os
 import logging
+import argparse
 
 verbose=True
 
@@ -25,16 +26,16 @@ def usage():
     return 'usage: %s </path/to/TEBreak directory> <tabular output from resolve.py>' % sys.argv[0]
 
 
-def ref_filter(chrom, start, end, superfams):
+def ref_filter(chrom, start, end, superfams, tbx):
     for sf in superfams.split(','):
         if sf == 'L1':
-            for ins in l1_tbx.fetch(chrom, int(start), int(end)): return True
+            for ins in tbx[sf].fetch(chrom, int(start), int(end)): return True
 
         if sf in ('ALU', 'SVA'):
-            for ins in alu_tbx.fetch(chrom, int(start), int(end)): return True
+            for ins in tbx[sf].fetch(chrom, int(start), int(end)): return True
 
         if sf == 'SVA':
-            for ins in sva_tbx.fetch(chrom, int(start), int(end)): return True
+            for ins in tbx[sf].fetch(chrom, int(start), int(end)): return True
 
     return False
 
@@ -73,8 +74,8 @@ def avgmap(maptabix, chrom, start, end):
         return 0.0
 
 
-if len(sys.argv) == 3:
-    tebreak_dir = sys.argv[1]
+def main(args):
+    tebreak_dir = args.tebreak
 
     if not os.path.exists(tebreak_dir):
         sys.exit(usage())
@@ -88,13 +89,15 @@ if len(sys.argv) == 3:
         if not os.path.exists(fn): sys.exit('reference %s not found' % fn)
         if not os.path.exists(fn + '.tbi'): sys.exit('index for reference %s not found' %fn)
 
-    l1_tbx  = pysam.Tabixfile(l1_ref)
-    alu_tbx = pysam.Tabixfile(alu_ref)
-    sva_tbx = pysam.Tabixfile(sva_ref)
+    tbx = {}
+    tbx['L1']  = pysam.Tabixfile(l1_ref)
+    tbx['ALU'] = pysam.Tabixfile(alu_ref)
+    tbx['SVA'] = pysam.Tabixfile(sva_ref)
+
     map_tbx = pysam.Tabixfile(map_ref)
 
     header = []
-    with open(sys.argv[2], 'r') as tab:
+    with open(args.tabfile, 'r') as tab:
         for i, line in enumerate(tab):
 
             if i == 0: # header
@@ -117,7 +120,7 @@ if len(sys.argv) == 3:
                     logger.debug('Filtered %s: TE_Align_Start or TE_Align_End is "NA"' % rec['UUID'])
                     out = False
 
-                if ref_filter(rec['Chromosome'], rec['Left_Extreme'], rec['Right_Extreme'], rec['Superfamily']):
+                if ref_filter(rec['Chromosome'], rec['Left_Extreme'], rec['Right_Extreme'], rec['Superfamily'], tbx) and not args.ignore_ref_filter:
                     logger.debug('Filtered %s: proximity to reference TE of same superfamily' % rec['UUID']) 
                     out = False
 
@@ -145,5 +148,10 @@ if len(sys.argv) == 3:
                 if out: print line.strip()
 
 
-else:
-    sys.exit(usage())
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='filter script for TEs on hg19')
+    parser.add_argument('--tabfile', required=True, help='tabular output from resolve.py, requires header to be present')
+    parser.add_argument('--tebreak', required=True, help='path to tebreak repo directory (needed to find annotation files)')
+    parser.add_argument('--ignore_ref_filter', default=False, action='store_true', help='turn of filtering vs. reference elements')
+    args = parser.parse_args()
+    main(args)

@@ -129,8 +129,9 @@ if len(sys.argv) == 3:
                     logger.debug('Filtered %s: max(5p_Genome_Match, 3p_Genome_Match) < 0.98' % rec['UUID'])
                     out = False
 
-                if avgmap(map_tbx, rec['Chromosome'], rec['Left_Extreme'], rec['Right_Extreme']) < 0.1:
-                    logger.debug('Filtered %s: mappability < 0.1' % rec['UUID'])
+                mapscore = avgmap(map_tbx, rec['Chromosome'], rec['Left_Extreme'], rec['Right_Extreme']) * (max(int(rec['3p_Cons_Len']), int(rec['5p_Cons_Len']))/100.)
+                if mapscore < 0.1:
+                    logger.debug('Filtered %s: mappability of %f < 0.1' % (rec['UUID'], mapscore))
                     out = False
 
                 if float(rec['Remapped_Discordant']) < 4 or float(rec['Remap_Disc_Fraction']) < 0.5:

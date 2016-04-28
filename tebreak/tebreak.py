@@ -606,42 +606,53 @@ class Insertion:
 
         assert start < end, 'Ins: %s fetch_discordant_reads: start > end' % ins_debug_name
 
-        mapped   = {}
-        unmapped = {}
+        # track across all BAMs
+        all_mapped   = {}
+        all_unmapped = {}
 
         for bam in bams:
-            if logger and debug:
-                logger.debug('Ins: %s fetch discordant from BAM: %s' % (ins_debug_name, bam.filename))
+            # track for just this BAM
+            bam_mapped   = {}
+            bam_unmapped = {}
 
             for read in bam.fetch(chrom, start, end):
-                if read.is_paired and not read.is_unmapped and not read.is_duplicate:
+                if read.is_paired and not read.is_unmapped and not read.is_secondary and not is_supplementary(read) and not read.is_duplicate and read.mapq > 0:
                     chrom = str(bam.getrname(read.tid))
          
                     if read.mate_is_unmapped:
-                        unmapped[read.qname] = DiscoRead(chrom, read, bam.filename)
+                        bam_unmapped[read.qname] = DiscoRead(chrom, read, bam.filename)
          
                     else:
                         pair_dist = abs(read.reference_start - read.next_reference_start)
                         if read.tid != read.next_reference_id or pair_dist > isize:
                             mate_chrom = str(bam.getrname(read.next_reference_id))
-                            mapped[read.qname] = DiscoRead(chrom, read, bam.filename, mate_chrom)
+                            bam_mapped[read.qname] = DiscoRead(chrom, read, bam.filename, mate_chrom)
+
+            #if logger and debug:
+                #logger.debug('Ins: %s fetch discordant from BAM %s: %d mapped, %d unmapped' % (ins_debug_name, bam.filename, len(bam_mapped), len(bam_unmapped)))
 
             # get mate info
 
             # mate mapped
-            for qname, dr in mapped.iteritems():
+            for qname, dr in bam_mapped.iteritems():
                 for read in bam.fetch(dr.mate_chrom, dr.read.next_reference_start, dr.read.next_reference_start+1):
                     if read.qname == qname and not read.is_secondary and not is_supplementary(read):
-                        if read.seq != mapped[qname].read.seq:
-                            mapped[qname].mate_read = read
+                        if read.seq != bam_mapped[qname].read.seq:
+                            bam_mapped[qname].mate_read = read
+                            break
 
             # mate unmapped
             for read in bam.fetch(chrom, start, end):
-                if read.is_unmapped and read.qname in unmapped:
+                if read.is_unmapped and read.qname in bam_unmapped:
                     if not read.is_secondary and not is_supplementary(read):
-                        unmapped[read.qname].mate_read = read
+                        bam_unmapped[read.qname].mate_read = read
+                        break
 
-        self.discoreads = mapped.values() + unmapped.values()
+            # merge into all_(un)mapped
+            all_mapped.update(bam_mapped)
+            all_unmapped.update(bam_unmapped)
+
+        self.discoreads = all_mapped.values() + all_unmapped.values()
 
 
     def align_filter(self, insref_fa, tmpdir='/tmp'):

@@ -19,7 +19,7 @@ def check_samtools():
     p = subprocess.Popen(['samtools'], stderr=subprocess.PIPE)
     for line in p.stderr:
         if line.startswith('Version:'):
-            major, minor = line.strip().split()[1].split('.')
+            major, minor = line.strip().split()[1].split('.')[:2]
             minor = minor.split('-')[0]
             if int(major) >= 1 and int(minor) >= 2:
                 return True

@@ -27,7 +27,8 @@ from collections import defaultdict as dd
 from bx.intervals.intersection import Intersecter, Interval # pip install bx-python
 
 import profile
- 
+
+
 #######################################
 ## Classes                           ##
 #######################################
@@ -37,10 +38,8 @@ class Genome:
     def __init__(self, gfn):
         ''' gfn = genome file name (.fai or chrom, length tsv) '''
         self.chrlen = {} # length of each chromosome
-        self.chrmap = [] # used for picking chromosomes
  
         self.bp = 0
-        bins = 100000
  
         with open(gfn, 'r') as g:
             for line in g:
@@ -48,16 +47,7 @@ class Genome:
                     chrom, length = line.strip().split()[:2]
                     self.chrlen[chrom] = int(length)
                     self.bp += int(length)
-     
-        for chrom, length in self.chrlen.iteritems():
-            self.chrmap += [chrom] * int(float(length) / float(self.bp) * bins)
- 
-    def pick(self):
-        ''' return a random chromosome and position '''
-        rchrom = random.choice(self.chrmap)
-        rpos   = int(random.uniform(1, self.chrlen[rchrom]))
- 
-        return rchrom, rpos
+
  
     def addpad(self, interval, pad):
         ''' pad interval such that it doesn't go out of bounds '''
@@ -1520,10 +1510,6 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
 
         # table of minimum quality scores
         minqual = {}
-
-        #for bam in bams:
-        #    minqual[bam.filename] = guess_minqual(bam)
-        #    logger.debug('MinQual for %s: %d' % (bam.filename, minqual[bam.filename]))
 
         # would do this outside but can't pass a non-pickleable object
         if args.mask is not None: args.mask = build_mask(args.mask)

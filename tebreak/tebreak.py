@@ -594,7 +594,7 @@ class Insertion:
 
             return tsdseq1, tsdseq2
 
-    def fetch_discordant_reads(self, bams, isize=10000):
+    def fetch_discordant_reads(self, bams, isize=10000, debug=True, logger=None):
         ''' Return list of DiscoRead objects '''
         chrom = self.be1.chrom
         start = self.min_supporting_base()
@@ -602,12 +602,17 @@ class Insertion:
 
         if None in (start, end): return []
      
-        assert start < end, 'fetch_discordant_reads: start > end'
+        ins_debug_name = '%s:%d-%d' % (self.be1.chrom, self.min_supporting_base(), self.max_supporting_base())
+
+        assert start < end, 'Ins: %s fetch_discordant_reads: start > end' % ins_debug_name
 
         mapped   = {}
         unmapped = {}
 
         for bam in bams:
+            if logger and debug:
+                logger.debug('Ins: %s fetch discordant from BAM: %s' % (ins_debug_name, bam.filename))
+
             for read in bam.fetch(chrom, start, end):
                 if read.is_paired and not read.is_unmapped and not read.is_duplicate:
                     chrom = str(bam.getrname(read.tid))
@@ -1589,7 +1594,7 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
             for ins in insertions:
                 ins_debug_name = '%s:%d-%d' % (ins.be1.chrom, ins.min_supporting_base(), ins.max_supporting_base())
                 logger.debug('Chunk: %s, fetch discordant mates for insertion %s ...' % (chunkname, ins_debug_name))
-                ins.fetch_discordant_reads(bams)
+                ins.fetch_discordant_reads(bams, logger=logger)
                 ins.compile_info(bams)
 
             logger.debug('Chunk %s: Postprocessing %d filtered insertions, trying to improve consensus breakend sequences ...' % (chunkname, len(insertions)))

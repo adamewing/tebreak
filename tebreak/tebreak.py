@@ -1587,6 +1587,8 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
             insertions = filter_insertions(insertions, filters, tmpdir=args.tmpdir, logger=logger)
 
             for ins in insertions:
+                ins_debug_name = '%s:%d-%d' % (ins.be1.chrom, ins.min_supporting_base(), ins.max_supporting_base())
+                logger.debug('Chunk: %s, fetch discordant mates for insertion %s ...' % (chunkname, ins_debug_name))
                 ins.fetch_discordant_reads(bams)
                 ins.compile_info(bams)
 
@@ -1732,10 +1734,11 @@ def main(args):
                 exp_rpkm = expected_rpkm(args.bam.split(','), genome)
 
     else:
-        if args.rpkm_bam:
-            exp_rpkm = expected_rpkm(args.rpkm_bam.split(','), genome, intervals=args.interval_bed)
-        else:
-            exp_rpkm = expected_rpkm(args.bam.split(','), genome, intervals=args.interval_bed)
+        if not args.no_rpkm:
+            if args.rpkm_bam:
+                exp_rpkm = expected_rpkm(args.rpkm_bam.split(','), genome, intervals=args.interval_bed)
+            else:
+                exp_rpkm = expected_rpkm(args.bam.split(','), genome, intervals=args.interval_bed)
 
 
     if args.interval_bed is not None:

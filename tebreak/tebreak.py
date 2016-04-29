@@ -594,7 +594,7 @@ class Insertion:
 
             return tsdseq1, tsdseq2
 
-    def fetch_discordant_reads(self, bams, isize=10000, debug=True, logger=None):
+    def fetch_discordant_reads(self, bams, isize=10000, debug=True, logger=None, max_fetch=50):
         ''' Return list of DiscoRead objects '''
         chrom = self.be1.chrom
         start = self.min_supporting_base()
@@ -604,7 +604,7 @@ class Insertion:
      
         ins_debug_name = '%s:%d-%d' % (self.be1.chrom, self.min_supporting_base(), self.max_supporting_base())
 
-        assert start < end, 'Ins: %s fetch_discordant_reads: start > end' % ins_debug_name
+        assert start < end, 'Ins %s: fetch_discordant_reads: start > end' % ins_debug_name
 
         # track across all BAMs
         all_mapped   = {}
@@ -629,7 +629,19 @@ class Insertion:
                             bam_mapped[read.qname] = DiscoRead(chrom, read, bam.filename, mate_chrom)
 
             #if logger and debug:
-                #logger.debug('Ins: %s fetch discordant from BAM %s: %d mapped, %d unmapped' % (ins_debug_name, bam.filename, len(bam_mapped), len(bam_unmapped)))
+                #logger.debug('Ins %s: fetch discordant from BAM %s: %d mapped, %d unmapped' % (ins_debug_name, bam.filename, len(bam_mapped), len(bam_unmapped)))
+
+            if len(bam_mapped) + len(bam_unmapped) > max_fetch:
+                total_drc = len(bam_mapped) + len(bam_unmapped)
+                logger.debug('Ins %s: discordant read count (%d) is over --max_disc_fetch (%d), subsampling discordant reads' % (ins_debug_name, total_drc, max_fetch))
+
+                mapped_sub   = (len(bam_mapped) / float(len(bam_mapped) + len(bam_unmapped))) * max_fetch
+                unmapped_sub = (len(bam_unmapped) / float(len(bam_mapped) + len(bam_unmapped))) * max_fetch
+
+                #logger.debug('mapped subsamp: %d, unmapped subsamp: %d' % (mapped_sub, unmapped_sub))
+
+                bam_mapped   = subsample_dict(bam_mapped, int(mapped_sub))
+                bam_unmapped = subsample_dict(bam_unmapped, int(unmapped_sub))
 
             # get mate info
 
@@ -930,6 +942,20 @@ def rc(dna):
     ''' reverse complement '''
     complements = maketrans('acgtrymkbdhvACGTRYMKBDHV', 'tgcayrkmvhdbTGCAYRKMVHDB')
     return dna.translate(complements)[::-1]
+
+
+def subsample_dict(orig, n):
+    assert len(orig) >= n
+
+    if n == 0:
+        return {}
+
+    sample = random.sample(orig.keys(), n)
+    d = {}
+    for k in sample:
+        d[k] = orig[k]
+
+    return d
  
 
 def read_matchpct(read):
@@ -1011,7 +1037,7 @@ def is_supplementary(read):
     return bin(read.flag & 2048) == bin(2048)
 
  
-def fetch_clipped_reads(bams, chrom, start, end, filters):
+def fetch_clipped_reads(bams, chrom, start, end, filters, logger=None):
     ''' Return list of SplitRead objects '''
     assert filters['min_minclip'] > 2
  
@@ -1021,6 +1047,8 @@ def fetch_clipped_reads(bams, chrom, start, end, filters):
     end   = int(end)
  
     assert start < end
+
+    masked_read_count = 0
  
     for bam in bams:
         minqual = guess_minqual(bam) # used for quality trimming when building consensus
@@ -1028,7 +1056,9 @@ def fetch_clipped_reads(bams, chrom, start, end, filters):
         for read in bam.fetch(chrom, start, end):
             masked = False
             if filters['genome_mask'] is not None and chrom in filters['genome_mask']:
-                if filters['genome_mask'][chrom].find(read.pos, read.pos+1): masked = True
+                if filters['genome_mask'][chrom].find(read.pos, read.pos+1):
+                    masked = True
+                    masked_read_count += 1
 
             if not masked and not read.is_unmapped and not read.is_duplicate: #and read.mapq > 0:
                 if read.rlen - read.alen >= int(filters['min_minclip']): # 'soft' clipped?
@@ -1051,6 +1081,9 @@ def fetch_clipped_reads(bams, chrom, start, end, filters):
                             #print read.qname, read.cigarstring, N_count, splitqual(read), filters['min_MW_P']
                             #print read.qual
                             pass
+
+    if logger:
+        logger.debug('Chunk %s:%d-%d: masked %d reads due to -m/--mask' % (chrom, start, end, masked_read_count))
  
     return splitreads
  
@@ -1563,7 +1596,7 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
      
         logger.debug('Processing chunk: %s ...' % chunkname)
         logger.debug('Chunk %s: Parsing split reads from bam(s): %s ...' % (chunkname, args.bam))
-        sr = fetch_clipped_reads(bams, chrom, start, end, filters)
+        sr = fetch_clipped_reads(bams, chrom, start, end, filters, logger=logger)
         sr.sort()
 
 
@@ -1605,7 +1638,7 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
             for ins in insertions:
                 ins_debug_name = '%s:%d-%d' % (ins.be1.chrom, ins.min_supporting_base(), ins.max_supporting_base())
                 logger.debug('Chunk: %s, fetch discordant mates for insertion %s ...' % (chunkname, ins_debug_name))
-                ins.fetch_discordant_reads(bams, logger=logger)
+                ins.fetch_discordant_reads(bams, logger=logger, max_fetch=int(args.max_disc_fetch))
                 ins.compile_info(bams)
 
             logger.debug('Chunk %s: Postprocessing %d filtered insertions, trying to improve consensus breakend sequences ...' % (chunkname, len(insertions)))
@@ -1624,7 +1657,7 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
             return []
 
     except Exception, e:
-        sys.stderr.write('*'*60 + '\tencountered error in chunk: %s\n' % chunkname)
+        sys.stderr.write('*'*60 + '\nencountered error in chunk: %s\n' % chunkname)
         traceback.print_exc(file=sys.stderr)
         sys.stderr.write("*"*60 + "\n")
 
@@ -1826,7 +1859,8 @@ if __name__ == '__main__':
     parser.add_argument('--max_bam_count', default=0, help='maximum number of bams supporting per insertion')
     parser.add_argument('--insertion_library', default=None, help='for pre-selecting insertion types')
     parser.add_argument('--map_tabix', default=None, help='tabix-indexed BED of mappability scores')
-    parser.add_argument('--min_mappability', default=0.5, help='minimum mappability (default = 0.5; only matters with --map_tabix)')
+    parser.add_argument('--min_mappability', default=0.1, help='minimum mappability (default = 0.1; only matters with --map_tabix)')
+    parser.add_argument('--max_disc_fetch', default=50, help='maximum number of discordant reads to fetch per insertion site per BAM (default = 50)')
 
     parser.add_argument('--tmpdir', default='/tmp', help='temporary directory (default = /tmp)')
     parser.add_argument('--pickle', default=None, help='pickle output name')

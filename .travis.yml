@@ -59,6 +59,6 @@ script:
     - bwa index test/data/Homo_sapiens_chr4_assembly19.fasta
     - samtools faidx test/data/Homo_sapiens_chr4_assembly19.fasta
     - tebreak/tebreak.py -b test/data/example.ins.bam  -r test/data/Homo_sapiens_chr4_assembly19.fasta -i test/data/example.region.bed --pickle test/example.pickle --detail_out test/example.tebreak.detail.out
-    - tebreak/resolve.py -p test/example.pickle -i lib/teref.human.fa --detail_out test/example.resolve.detail.out -v > test/example.tab.txt
+    - tebreak/resolve.py -p test/example.pickle -i lib/teref.human.fa --detail_out test/example.resolve.detail.out -v -o test/example.tab.txt
     - cd test
     - python checktest.py

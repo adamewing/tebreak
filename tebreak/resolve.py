@@ -1333,14 +1333,22 @@ def main(args):
 
     final_insertions = [res.get() for res in results if res is not None]
 
-    if len(final_insertions) > 0: print final_insertions[0].header()
+    out_table_fn = args.out
+    if out_table_fn is None:
+        out_table_fn = '.'.join(args.pickle.split('.')[:-1]) + '.table.txt'
 
-    if args.te:
-        for te_ins in sorted(final_insertions):
-            if te_ins.pass_te_filter(forest): print te_ins
-    else:
-        for out_ins in sorted(final_insertions):
-            if out_ins.pass_general_filter(forest): print out_ins
+    with open(out_table_fn, 'w') as out_table:
+        if len(final_insertions) > 0:
+            out_table.write('%s\n' % final_insertions[0].header())
+
+        if args.te:
+            for te_ins in sorted(final_insertions):
+                if te_ins.pass_te_filter(forest):
+                    out_table.write('%s\n' % te_ins)
+        else:
+            for out_ins in sorted(final_insertions):
+                if out_ins.pass_general_filter(forest):
+                    out_table.write('%s\n' % out_ins)
 
 
 if __name__ == '__main__':
@@ -1354,6 +1362,7 @@ if __name__ == '__main__':
     parser.add_argument('-i', '--inslib_fasta', required=True, help="reference for insertions (not genome)")
     parser.add_argument('-m', '--filter_bed', default=None, help="BED file of regions to mask")
     parser.add_argument('-v', '--verbose', action='store_true', default=False, help="output status information")
+    parser.add_argument('-o', '--out', default=None, help="output table")
     parser.add_argument('--max_bam_count', default=0, help="skip sites with more than this number of BAMs (default = no limit)")
     parser.add_argument('--min_ins_match', default=0.9, help="minumum match to insertion library")
     parser.add_argument('--minmatch', default=0.95, help="minimum match to reference genome")

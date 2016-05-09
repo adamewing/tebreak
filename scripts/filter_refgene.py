@@ -74,13 +74,13 @@ if len(sys.argv) == 3:
 
                 if rec['TSD_3prime'] != rec['TSD_5prime']: out = False
 
-                if min(int(rec['Split_reads_5prime']), int(rec['Split_reads_3prime'])) < 2: out = False
+                if min(int(rec['Split_reads_5prime']), int(rec['Split_reads_3prime'])) < 1: out = False
                 if float(rec['Remap_Disc_Fraction']) < 0.5 : out = False
                 if max(float(rec['5p_Elt_Match']), float(rec['3p_Elt_Match'])) < 0.95: out = False
                 if min(float(rec['5p_Elt_Match']), float(rec['3p_Elt_Match'])) < 0.90: out = False
                 if max(float(rec['5p_Genome_Match']), float(rec['3p_Genome_Match'])) < 0.98: out = False
                 if min(float(rec['5p_Genome_Match']), float(rec['3p_Genome_Match'])) < 0.95: out = False
-                if int(rec['Remapped_Discordant']) < 8 : out = False
+                if int(rec['Remapped_Discordant']) < 4: out = False
 
                 if out:
                     if rec['Chromosome'] in pgo_tbx.contigs:

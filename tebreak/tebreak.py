@@ -1098,9 +1098,6 @@ def splitqual(read):
     q1 = map(ord, list(read.qual[:breakpos]))
     q2 = map(ord, list(read.qual[breakpos:]))
 
-    print 'q1:',q1
-    print 'q2:',q2
-
     if min(q1) == max(q1) == min(q2) == max(q2):
         return 1.0
  

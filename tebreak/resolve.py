@@ -409,20 +409,20 @@ def extend_consensus(ins, bam):
                 #print ins['INFO']['ins_uuid'], be, 'te_cons', te_cons_seq
                 #print ins['INFO']['ins_uuid'], be, 'ge_cons', ge_cons_seq
 
-                joined_cons_seq, join_score, join_len = join_cons(ge_cons_seq, te_cons_seq)
+                #joined_cons_seq, join_score, join_len = join_cons(ge_cons_seq, te_cons_seq)
 
-                if join_score > 0.95 and join_len > 20:
-                    ins['INFO'][be+'_join_score'] = join_score
-                    ins['INFO'][be+'_join_overlap'] = join_len
-                    ins['INFO'][be+'_joined_cons'] = joined_cons_seq
+                #if join_score > 0.95 and join_len > 20:
+                #    ins['INFO'][be+'_join_score'] = join_score
+                #    ins['INFO'][be+'_join_overlap'] = join_len
+                #    ins['INFO'][be+'_joined_cons'] = joined_cons_seq
 
-                else:
-                    joined_cons_seq, join_score, join_len = join_cons(tebreak.rc(ge_cons_seq), te_cons_seq)
+                #else:
+                #    joined_cons_seq, join_score, join_len = join_cons(tebreak.rc(ge_cons_seq), te_cons_seq)
 
-                    if join_score > 0.95 and join_len > 20:
-                        ins['INFO'][be+'_join_score'] = join_score
-                        ins['INFO'][be+'_join_overlap'] = join_len
-                        ins['INFO'][be+'_joined_cons'] = joined_cons_seq
+                #    if join_score > 0.95 and join_len > 20:
+                #        ins['INFO'][be+'_join_score'] = join_score
+                #        ins['INFO'][be+'_join_overlap'] = join_len
+                #        ins['INFO'][be+'_joined_cons'] = joined_cons_seq
 
     return ins
 
@@ -492,57 +492,57 @@ def qualtrim(read, ctglen, minqual=35):
     return seq
 
 
-def join_cons(left_seq, right_seq):
-    ''' attempt to join left and right consensus sequences together - this bit needs work '''
-    S = -np.ones((256, 256)) + 2 * np.identity(256)
-    S = S.astype(np.int16)
+# def join_cons(left_seq, right_seq):
+#     ''' attempt to join left and right consensus sequences together - this bit needs work '''
+#     S = -np.ones((256, 256)) + 2 * np.identity(256)
+#     S = S.astype(np.int16)
 
-    left_seq_obj = align.string_to_alignment(left_seq)
-    right_seq_obj = align.string_to_alignment(right_seq)
+#     left_seq_obj = align.string_to_alignment(left_seq)
+#     right_seq_obj = align.string_to_alignment(right_seq)
 
-    (s, left_align, right_align) = align.align(left_seq_obj, right_seq_obj, -2, -1, S, local=True)
+#     (s, left_align, right_align) = align.align(left_seq_obj, right_seq_obj, -2, -1, S, local=True)
 
-    aln_len = len(align.alignment_to_string(left_align))
-    mismatch = (aln_len - s)/2.0   # count mm against one strand
+#     aln_len = len(align.alignment_to_string(left_align))
+#     mismatch = (aln_len - s)/2.0   # count mm against one strand
 
-    score = 0.0
+#     score = 0.0
 
-    if len(align.alignment_to_string(left_align)) > 0:
-        #print 'len:',float(len(align.alignment_to_string(left_align)))
-        #print 'mismatch',mismatch
+#     if len(align.alignment_to_string(left_align)) > 0:
+#         #print 'len:',float(len(align.alignment_to_string(left_align)))
+#         #print 'mismatch',mismatch
 
-        score = (aln_len-mismatch) / aln_len
+#         score = (aln_len-mismatch) / aln_len
 
-    #print 'left aligned segment\t' + align.alignment_to_string(left_align)
-    #print 'right aligned segment\t' + align.alignment_to_string(right_align)
-    #print 'alignment score', score
+#     #print 'left aligned segment\t' + align.alignment_to_string(left_align)
+#     #print 'right aligned segment\t' + align.alignment_to_string(right_align)
+#     #print 'alignment score', score
 
-    left_align = ''.join([b for b in list(align.alignment_to_string(left_align)) if b != '-'])
-    right_align = ''.join([b for b in list(align.alignment_to_string(right_align)) if b != '-'])
+#     left_align = ''.join([b for b in list(align.alignment_to_string(left_align)) if b != '-'])
+#     right_align = ''.join([b for b in list(align.alignment_to_string(right_align)) if b != '-'])
 
-    joined_cons = None
+#     joined_cons = None
 
-    if score > 0.95 and len(left_align) > 20:
-        right_align_start, right_align_end = locate_subseq(right_seq, right_align)
-        left_align_start, left_align_end = locate_subseq(left_seq, left_align)
+#     if score > 0.95 and len(left_align) > 20:
+#         right_align_start, right_align_end = locate_subseq(right_seq, right_align)
+#         left_align_start, left_align_end = locate_subseq(left_seq, left_align)
 
-        #print 'len_left_seq', len(left_seq), left_align_start, left_align_end
-        #print 'len_right_seq', len(right_seq), right_align_start, right_align_end
+#         #print 'len_left_seq', len(left_seq), left_align_start, left_align_end
+#         #print 'len_right_seq', len(right_seq), right_align_start, right_align_end
 
-        flip = False
-        if float(left_align_end)/len(left_seq) < float(right_align_start)/len(right_seq):
-            flip = True
+#         flip = False
+#         if float(left_align_end)/len(left_seq) < float(right_align_start)/len(right_seq):
+#             flip = True
 
-        #print 'flip', flip
+#         #print 'flip', flip
 
-        joined_cons = left_seq[:left_align_start] + right_seq[right_align_start:]
+#         joined_cons = left_seq[:left_align_start] + right_seq[right_align_start:]
 
-        if flip:
-            joined_cons = right_seq[:right_align_end] + left_seq[left_align_end:]
+#         if flip:
+#             joined_cons = right_seq[:right_align_end] + left_seq[left_align_end:]
 
 
-    #print 'joined consensus', joined_cons
-    return joined_cons, score, len(left_align)
+#     #print 'joined consensus', joined_cons
+#     return joined_cons, score, len(left_align)
 
 
 def consensus(seqs, minscore=0.95):

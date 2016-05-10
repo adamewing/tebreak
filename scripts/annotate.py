@@ -16,9 +16,9 @@ if len(sys.argv) == 4:
                 continue
 
             c = line.strip().split()
-            chrom = c[0]
-            start = int(c[1])
-            end   = int(c[2])
+            chrom = c[1]
+            start = int(c[2])
+            end   = int(c[3])
 
             annotations = []
 

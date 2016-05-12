@@ -20,6 +20,7 @@ import multiprocessing as mp
 from uuid import uuid4
 from collections import OrderedDict as od
 from collections import defaultdict as dd
+from collections import Counter
 from bx.intervals.intersection import Intersecter, Interval # pip install bx-python
 
 logger = logging.getLogger(__name__)
@@ -1213,21 +1214,22 @@ def load_uuids(fn):
 
 
 def prefilter(args, ins, uuids):
+
     if int(args.max_bam_count) > 0 and bamcount(ins) > int(args.max_bam_count):
-        logger.debug('filtered %s due to max_bam_count > %d' % (ins['INFO']['ins_uuid'], args.max_bam_count))
-        return True
+        #logger.debug('filtered %s due to max_bam_count > %d' % (ins['INFO']['ins_uuid'], args.max_bam_count))
+        return 'maxbam'
 
     minmatch = 0.0
     if 'be1_avgmatch' in ins['INFO'] and ins['INFO']['be1_avgmatch'] > minmatch: minmatch = ins['INFO']['be1_avgmatch']
     if 'be2_avgmatch' in ins['INFO'] and ins['INFO']['be2_avgmatch'] > minmatch: minmatch = ins['INFO']['be2_avgmatch']
 
     if minmatch < float(args.minmatch):
-        logger.debug('filtered %s due to minmatch < %f' % (ins['INFO']['ins_uuid'], float(args.minmatch)))
-        return True
+        #logger.debug('filtered %s due to minmatch < %f' % (ins['INFO']['ins_uuid'], float(args.minmatch)))
+        return 'minmatch'
 
     if ins['INFO']['dr_count'] < int(args.mindiscord):
-        logger.debug('filtered %s due to discordant reads < %d' % (ins['INFO']['ins_uuid'], int(args.mindiscord)))
-        return True
+        #logger.debug('filtered %s due to discordant reads < %d' % (ins['INFO']['ins_uuid'], int(args.mindiscord)))
+        return 'mindisc'
 
     if not args.unmapped:
         unmap = True
@@ -1235,12 +1237,12 @@ def prefilter(args, ins, uuids):
         if 'be2_dist_seq' in ins['INFO'] and ins['INFO']['be2_dist_seq'] is not None: unmap = False
 
         if unmap:
-            logger.debug('filtered %s due to no mapped distal breakends' % ins['INFO']['ins_uuid'])
-            return True
+            #logger.debug('filtered %s due to no mapped distal breakends' % ins['INFO']['ins_uuid'])
+            return 'mapends'
 
     if uuids is not None and ins['INFO']['ins_uuid'] not in uuids:
-        logger.debug('filtered %s for not being in uuid list' % ins['INFO']['ins_uuid'])
-        return True
+        #logger.debug('filtered %s for not being in uuid list' % ins['INFO']['ins_uuid'])
+        return 'uuidlist'
 
     return False
 
@@ -1264,21 +1266,39 @@ def finalise_ins(ins, args):
 
 def main(args):
     if args.verbose: logger.setLevel(logging.DEBUG)
-    insertions = []
+    raw_insertions = []
 
     logger.debug('resolve.py called with args: %s' % ' '.join(sys.argv))
     logger.debug('loading pickle: %s' % args.pickle)
 
     with open(args.pickle, 'r') as pickin:
-        insertions = pickle.load(pickin)
+        raw_insertions = pickle.load(pickin)
 
     logger.debug('finished loading %s' % args.pickle)
-    logger.debug('raw candidate count: %d' % len(insertions))
+    logger.debug('raw candidate count: %d' % len(raw_insertions))
 
     uuids = None
-    if args.uuid_list is not None: uuids = load_uuids(args.uuid_list)
 
-    insertions = [ins for ins in insertions if not prefilter(args, ins, uuids)]
+    if args.uuid_list is not None:
+        uuids = load_uuids(args.uuid_list)
+
+    insertions = []
+    prefilter_reasons = []
+
+    for ins in raw_insertions:
+        prefiltered = prefilter(args, ins, uuids)
+
+        if not prefiltered:
+            insertions.append(ins)
+
+        else:
+            prefilter_reasons.append(prefiltered)
+
+
+    logger.debug('prefiltering stats:')
+    for pfr, count in Counter(prefilter_reasons).iteritems():
+        logger.debug('reason %s: %d' % (pfr, count))
+
 
     logger.debug('prefiltered candidate count: %d' % len(insertions))
 

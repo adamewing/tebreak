@@ -1299,6 +1299,10 @@ def main(args):
     for pfr, count in Counter(prefilter_reasons).iteritems():
         logger.debug('reason %s: %d' % (pfr, count))
 
+    # clean up memory?
+    raw_insertions = []
+    gc_c = gc.collect()
+
 
     logger.debug('prefiltered candidate count: %d' % len(insertions))
 

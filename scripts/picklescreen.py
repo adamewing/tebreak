@@ -123,6 +123,6 @@ if __name__ == '__main__':
     parser.add_argument('-o', '--out', default='filtered.pickle', help='output filename (tebreak.py pickle)')
     parser.add_argument('-i', '--invert', default=False, action='store_true', help='retain insertions that do not match library')
     parser.add_argument('-s', '--minscore', default=20, help='minimum alignment score (-T option to bwa mem)')
-    parser.add_argument('-d', '--use_distal', default=False, action='store_true', help='use distal part of consensus for alignment')
+    parser.add_argument('-d', '--use_distal', default=False, action='store_true', help='use only distal part of consensus for alignment')
     args = parser.parse_args()
     main(args)

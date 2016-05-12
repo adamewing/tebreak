@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import os
+import re
 import shutil
 import cPickle as pickle
 import argparse
@@ -14,7 +15,26 @@ from collections import defaultdict as dd
 logger = logging.getLogger(__name__)
 
 
-def map(fq, ref, minscore=20, threads=4):
+def count_alen(samrec):
+    ''' return number of "M" bases in CIGAR string '''
+    cigar = samrec[5]
+    return float(sum([int(m[0]) for m in re.findall(r'(\d+)([M]{1})', cigar)]))
+
+
+def count_mm(samrec):
+    ''' parse NM flag for mismatches in SAM record, return -1 if no NM tag is present '''
+    for field in samrec:
+        if field.startswith('NM'):
+            return float(field.split(':')[-1])
+
+    return -1.
+
+
+def matchpct(samrec):
+    return 1.0-(count_mm(samrec)/count_alen(samrec))
+
+
+def mapfilter(fq, ref, minscore=20, minmatch=0.95, threads=4):
     logger.debug('map %s to %s ...' % (fq, ref))
 
     bwa = ['bwa', 'mem', '-t', str(threads), '-M', '-Y', '-k', '10', '-P', '-S', '-T', str(minscore), ref, fq]
@@ -29,7 +49,8 @@ def map(fq, ref, minscore=20, threads=4):
             name = '-'.join(rec[0].split('-')[:-1])
             flag = int(rec[1])
             if bin(flag & 4) != bin(4): # not unmapped
-                keep[name] = True
+                if matchpct(rec) > minmatch:
+                    keep[name] = True
 
     return keep
 
@@ -88,7 +109,7 @@ def main(args):
 
     fq = makefq(insertions, use_distal=args.use_distal)
 
-    mapped = map(fq, ref, minscore=args.minscore, threads=int(args.threads))
+    mapped = mapfilter(fq, ref, minscore=args.minscore, minmatch=float(args.minmatch), threads=int(args.threads))
 
     filtered = []
 
@@ -122,7 +143,8 @@ if __name__ == '__main__':
     parser.add_argument('-t', '--threads', default=4, help='alignment threads')
     parser.add_argument('-o', '--out', default='filtered.pickle', help='output filename (tebreak.py pickle)')
     parser.add_argument('-i', '--invert', default=False, action='store_true', help='retain insertions that do not match library')
-    parser.add_argument('-s', '--minscore', default=20, help='minimum alignment score (-T option to bwa mem)')
+    parser.add_argument('-s', '--minscore', default=20, help='minimum alignment score (-T option to bwa mem) default=20')
+    parser.add_argument('-m', '--minmatch', default=0.95, help='minimum match pct/100 (default 0.95)')
     parser.add_argument('-d', '--use_distal', default=False, action='store_true', help='use only distal part of consensus for alignment')
     args = parser.parse_args()
     main(args)

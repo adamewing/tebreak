@@ -10,7 +10,7 @@ import os
 import logging
 import argparse
 
-verbose=False
+verbose=True
 
 FORMAT = '%(asctime)s %(message)s'
 logging.basicConfig(format=FORMAT)

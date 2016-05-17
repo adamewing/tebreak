@@ -368,16 +368,17 @@ class SplitCluster(ReadCluster):
             a2 = ''.join([b for b in list(align.alignment_to_string(a2)) if b != '-'])
 
             score = float(len(a1) - (len(a1)-s)) / float(len(a1))
-            scores.append(score)
 
             if re.search(a1, cons):
                 cons_start, cons_end = locate_subseq(cons, a1)
 
                 if score >= minscore and cons_end > len(cons)-5:
+                    scores.append(score)
                     align_end = locate_subseq(seq, a2)[1]
                     cons += seq[align_end:]
+                    #print self.start, self.end, cons
 
-        return cons, np.mean(score)
+        return cons, np.mean(scores)
 
     def all_breakpoints(self):
         ''' returns uniquified list of breakpoints '''
@@ -720,7 +721,9 @@ class Insertion:
             for res in la_results:
                 if res.query_id == self.be1.uuid:
                     # criteria for deciding the new consensus is better
-                    if res.target_seqsize > len(self.be1.consensus) and len(self.be1.consensus) - res.query_alnsize < 10 and res.pct_match() > 0.95:
+                    unaln_frac = float(len(self.be1.consensus) - res.query_alnsize) / len(self.be1.consensus)
+
+                    if res.target_seqsize > len(self.be1.consensus) and unaln_frac < 0.1 and res.pct_match() > 0.95:
                         self.be1_alt = self.be1
                         self.be1.consensus = ctg_falib[res.target_id]
                         self.be1_improved_cons = True
@@ -732,7 +735,9 @@ class Insertion:
             for res in la_results:
                 if res.query_id == self.be2.uuid:
                     # criteria for deciding the new consensus is better
-                    if res.target_seqsize > len(self.be2.consensus) and len(self.be2.consensus) - res.query_alnsize < 10 and res.pct_match() > 0.95:
+                    unaln_frac = float(len(self.be2.consensus) - res.query_alnsize) / len(self.be2.consensus)
+
+                    if res.target_seqsize > len(self.be2.consensus) and unaln_frac < 0.1 and res.pct_match() > 0.95:
                         self.be2_alt = self.be2
                         self.be2.consensus = ctg_falib[res.target_id]
                         self.be2_improved_cons = True
@@ -799,7 +804,19 @@ class Insertion:
 
                             if len(read.seq) > min_readlen and unseen: outreads[name] = read.seq + '\n+\n' + read.qual
 
-            if len(outreads) >= limit or len(outreads) == 0: return None
+            #if len(outreads) >= limit or len(outreads) == 0: return None
+            if len(outreads) == 0:
+                return None
+
+            if len(outreads) > limit:
+                sampled = random.sample(outreads, limit)
+                subsamp = od()
+
+                for name, data in outreads.iteritems():
+                    if name in sampled:
+                        subsamp[name] = data
+
+                outreads = subsamp
 
             for name, data in outreads.iteritems():
                 out.write('@%s\n%s\n' % (name, data))
@@ -1102,6 +1119,23 @@ def splitqual(read):
         return 1.0
  
     return ss.mannwhitneyu(q1, q2)[1]
+
+
+def concat_fa(falist, tmpdir='/tmp'):
+    outfn = '%s/tebreak.concat.fa.%s.fa' % (tmpdir, str(uuid4()))
+    out = open(outfn, 'w')
+
+    for fn in falist:
+        with open(fn, 'r') as fa:
+            for line in fa:
+                out.write(line)
+
+    out.close()
+
+    for fn in falist:
+        os.remove(fn)
+
+    return outfn
  
 
 def load_falib(infa):
@@ -1165,6 +1199,8 @@ def build_breakends(cluster, filters, tmpdir='/tmp'):
 
                 if seq != '' and score >= filters['min_consensus_score'] and N_count <= filters['max_N_consensus']:
                     breakends.append(BreakEnd(cluster.chrom, breakpos, subcluster, seq, score, dir))
+                #else:
+                    #print 'filtered:',breakpos,score
  
     return breakends
 
@@ -1270,6 +1306,9 @@ def score_breakend_pair(be1, be2, k=2.5, s=3.0):
         if overlap == 0: distance_penalty = abs(be1.breakpos-be2.breakpos) # no TSD
 
         score = weighted_overlap - distance_penalty + len(be1) + len(be2)
+
+        #print str(be1), str(be1), score
+
         return score
  
     return None
@@ -1341,20 +1380,30 @@ def minia(fq, tmpdir='/tmp'):
     if not os.path.exists(fq):
         fq = oldcwd + '/' + fq
 
-    ctgbase = tmpdir + '/tebreak.minia.%s' % str(uuid4())
-    
-    cmd = ['minia', '-in', fq, '-abundance-min', '1', '-no-length-cutoff', '-verbose', '0', '-nb-cores', '1', '-out', ctgbase]
+    ctg_fa_list = []
 
-    FNULL = open(os.devnull, 'w')
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=FNULL)
-    for line in p.stdout: pass
+    for param in ('1', '3'):
+        ctgbase = tmpdir + '/tebreak.minia.%s' % str(uuid4())
 
-    if os.path.exists(ctgbase + '.h5'): os.remove(ctgbase + '.h5')
+        cmd = ['minia', '-in', fq, '-abundance-min', param, '-no-length-cutoff', '-nb-cores', '1', '-out', ctgbase]
+
+        FNULL = open(os.devnull, 'w')
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=FNULL)
+        for line in p.stdout:
+            if line.strip().startswith('max_length'):
+                max_len = int(line.strip()[-1]) 
+
+        if os.path.exists(ctgbase + '.h5'):
+            os.remove(ctgbase + '.h5')
+
+        if os.path.exists(ctgbase + '.contigs.fa'):
+            ctg_fa_list.append(ctgbase + '.contigs.fa')
 
     os.chdir(oldcwd)
     os.rmdir(tmpcwd)
 
-    return ctgbase + '.contigs.fa'
+    #return ctgbase + '.contigs.fa'
+    return concat_fa(ctg_fa_list, tmpdir=tmpdir)
 
 
 def build_mask(bedfile):
@@ -1443,8 +1492,8 @@ def filter_insertions(insertions, filters, tmpdir='/tmp', debug=True, logger=Non
         bams = list(set(bams)) # uniqify
 
         if len(ins) >= filters['max_ins_reads']:
-            if debug: logger.debug('%s filtered due to max_ins_reads: %d >= %d' % (ins_debug_name, len(ins), filters['max_ins_reads']))
-            exclude = True
+            if debug: logger.debug('%s downsampled due to max_ins_reads: %d >= %d' % (ins_debug_name, len(ins), filters['max_ins_reads']))
+            #exclude = True
 
         if max(mapq) < filters['min_prox_mapq']:
             if debug: logger.debug('%s filtered due to min_prox_mapq: %d < %d' % (ins_debug_name, max(mapq), filters['min_prox_mapq']))
@@ -1509,7 +1558,7 @@ def postprocess_insertions(insertions, filters, bwaref, bams, tmpdir='/tmp'):
             sys.stderr.write('***Assembly failed!: %s:%d\n' % (ins.be1.chrom, ins.be1.breakpos))
 
         else:
-            #sys.stderr.write('Assembled: %s:%d, filename: %s\n' % (ins.be1.chrom, ins.be1.breakpos, support_asm))
+            #sys.stderr.write('Assembled: %s:%d, filename: %s from %s\n' % (ins.be1.chrom, ins.be1.breakpos, support_asm, support_fq))
             ins.improve_consensus(support_asm, bwaref, tmpdir=tmpdir)
 
         if os.path.exists(support_fq): os.remove(support_fq)
@@ -1575,7 +1624,7 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
             'min_maxclip':           int(args.min_maxclip),
             'min_minclip':           int(args.min_minclip),
             'min_sr_per_break':      int(args.min_sr_per_break),
-            'min_consensus_score':   int(args.min_consensus_score),
+            'min_consensus_score':   float(args.min_consensus_score),
             'min_MW_P':              float(args.minMWP),
             'max_ins_reads':         int(args.max_ins_reads),
             'min_split_reads':       int(args.min_split_reads),
@@ -1847,12 +1896,12 @@ if __name__ == '__main__':
     parser.add_argument('--min_minclip', default=3, help='min. shortest clipped bases per cluster (default = 3)')
     parser.add_argument('--min_maxclip', default=10, help='min. longest clipped bases per cluster (default = 10)')
     parser.add_argument('--min_sr_per_break', default=1, help='minimum split reads per breakend (default = 1)')
-    parser.add_argument('--min_consensus_score', default=0.95, help='quality of consensus alignment (default = 0.95)')
+    parser.add_argument('--min_consensus_score', default=0.9, help='quality of consensus alignment (default = 0.9)')
     parser.add_argument('-m', '--mask', default=None, help='BED file of masked regions')
 
     parser.add_argument('--rpkm_bam', default=None, help='use alternate BAM(s) for RPKM calculation: use original BAMs if using reduced BAM(s) for -b/--bam')
     parser.add_argument('--max_fold_rpkm', default=10, help='ignore insertions supported by rpkm*max_fold_rpkm reads (default = 10)')
-    parser.add_argument('--max_ins_reads', default=1000, help='maximum number of reads per insertion call (default = 1000)')
+    parser.add_argument('--max_ins_reads', default=100000, help='maximum number of reads to use per insertion call (default = 100000)')
     parser.add_argument('--min_split_reads', default=4, help='minimum total split reads per insertion call (default = 4)')
     #parser.add_argument('--min_discordant_reads', default=4, help='minimum discordant read count (default = 4)')
     parser.add_argument('--min_prox_mapq', default=10, help='minimum map quality for proximal subread (default = 10)')

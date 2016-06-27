@@ -20,11 +20,7 @@ if verbose:
 else:
     logger.setLevel(logging.INFO)
 
-
-
-def usage():
-    return 'usage: %s </path/to/TEBreak directory> <tabular output from resolve.py>' % sys.argv[0]
-
+tebreak_dir = os.path.dirname(os.path.realpath(__file__))
 
 def ref_filter(chrom, start, end, superfams, tbx):
     for sf in superfams.split(','):
@@ -75,15 +71,11 @@ def avgmap(maptabix, chrom, start, end):
 
 
 def main(args):
-    tebreak_dir = args.tebreak
 
-    if not os.path.exists(tebreak_dir):
-        sys.exit(usage())
-
-    l1_ref  = tebreak_dir + '/lib/mask.L1.hg19.bed.gz'
-    alu_ref = tebreak_dir + '/lib/mask.Alu.hg19.bed.gz'
-    sva_ref = tebreak_dir + '/lib/mask.SVA.hg19.bed.gz'
-    map_ref = tebreak_dir + '/lib/wgEncodeCrgMapabilityAlign100mer.bed.gz'
+    l1_ref  = tebreak_dir + '/../lib/mask.L1.hg19.bed.gz'
+    alu_ref = tebreak_dir + '/../lib/mask.Alu.hg19.bed.gz'
+    sva_ref = tebreak_dir + '/../lib/mask.SVA.hg19.bed.gz'
+    map_ref = tebreak_dir + '/../lib/wgEncodeCrgMapabilityAlign100mer.bed.gz'
 
     for fn in (l1_ref, alu_ref, sva_ref):
         if not os.path.exists(fn): sys.exit('reference %s not found' % fn)
@@ -141,6 +133,10 @@ def main(args):
                     logger.debug('Filtered %s: low discordant evidence (< 4 reads or < 50pct supporting)' % rec['UUID'])
                     out = False
 
+                if rec['Insert_Consensus_5p'] == rec['Insert_Consensus_3p'] == 'NA':
+                    logger.debug('Filtered %s: no insertion consensus mapped to insertion reference' % rec['UUID'])
+                    out = False
+
                 if out and len_filter(rec):
                     logger.debug('Filtered %s: TE length filter' % rec['UUID'])
                     out = False
@@ -151,7 +147,6 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='filter script for TEs on hg19')
     parser.add_argument('--tabfile', required=True, help='tabular output from resolve.py, requires header to be present')
-    parser.add_argument('--tebreak', required=True, help='path to tebreak repo directory (needed to find annotation files)')
     parser.add_argument('--ignore_ref_filter', default=False, action='store_true', help='turn of filtering vs. reference elements')
     args = parser.parse_args()
     main(args)

@@ -1848,7 +1848,7 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--processes', default=1, help='split work across multiple processes')
     parser.add_argument('-c', '--chunks', default=1, help='split genome into chunks (default = # processes), helps control memory usage')
     parser.add_argument('-i', '--interval_bed', default=None, help='BED file with intervals to scan')
-    parser.add_argument('-D', '--minMWP', default=0.01, help='minimum Mann-Whitney P-value for split qualities (default = 0.01)')
+    parser.add_argument('--minMWP', default=0.01, help='minimum Mann-Whitney P-value for split qualities (default = 0.01)')
     parser.add_argument('--min_minclip', default=3, help='min. shortest clipped bases per cluster (default = 3)')
     parser.add_argument('--min_maxclip', default=10, help='min. longest clipped bases per cluster (default = 10)')
     parser.add_argument('--min_sr_per_break', default=1, help='minimum split reads per breakend (default = 1)')

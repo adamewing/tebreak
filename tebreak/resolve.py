@@ -407,24 +407,6 @@ def extend_consensus(ins, bam):
                 ins['INFO'][be+'_te_cons_score'] = te_cons_score
                 ins['INFO'][be+'_te_cons_seq'] = te_cons_seq
 
-                #print ins['INFO']['ins_uuid'], be, 'te_cons', te_cons_seq
-                #print ins['INFO']['ins_uuid'], be, 'ge_cons', ge_cons_seq
-
-                #joined_cons_seq, join_score, join_len = join_cons(ge_cons_seq, te_cons_seq)
-
-                #if join_score > 0.95 and join_len > 20:
-                #    ins['INFO'][be+'_join_score'] = join_score
-                #    ins['INFO'][be+'_join_overlap'] = join_len
-                #    ins['INFO'][be+'_joined_cons'] = joined_cons_seq
-
-                #else:
-                #    joined_cons_seq, join_score, join_len = join_cons(tebreak.rc(ge_cons_seq), te_cons_seq)
-
-                #    if join_score > 0.95 and join_len > 20:
-                #        ins['INFO'][be+'_join_score'] = join_score
-                #        ins['INFO'][be+'_join_overlap'] = join_len
-                #        ins['INFO'][be+'_joined_cons'] = joined_cons_seq
-
     return ins
 
 
@@ -491,59 +473,6 @@ def qualtrim(read, ctglen, minqual=35):
             return seq[:i]
 
     return seq
-
-
-# def join_cons(left_seq, right_seq):
-#     ''' attempt to join left and right consensus sequences together - this bit needs work '''
-#     S = -np.ones((256, 256)) + 2 * np.identity(256)
-#     S = S.astype(np.int16)
-
-#     left_seq_obj = align.string_to_alignment(left_seq)
-#     right_seq_obj = align.string_to_alignment(right_seq)
-
-#     (s, left_align, right_align) = align.align(left_seq_obj, right_seq_obj, -2, -1, S, local=True)
-
-#     aln_len = len(align.alignment_to_string(left_align))
-#     mismatch = (aln_len - s)/2.0   # count mm against one strand
-
-#     score = 0.0
-
-#     if len(align.alignment_to_string(left_align)) > 0:
-#         #print 'len:',float(len(align.alignment_to_string(left_align)))
-#         #print 'mismatch',mismatch
-
-#         score = (aln_len-mismatch) / aln_len
-
-#     #print 'left aligned segment\t' + align.alignment_to_string(left_align)
-#     #print 'right aligned segment\t' + align.alignment_to_string(right_align)
-#     #print 'alignment score', score
-
-#     left_align = ''.join([b for b in list(align.alignment_to_string(left_align)) if b != '-'])
-#     right_align = ''.join([b for b in list(align.alignment_to_string(right_align)) if b != '-'])
-
-#     joined_cons = None
-
-#     if score > 0.95 and len(left_align) > 20:
-#         right_align_start, right_align_end = locate_subseq(right_seq, right_align)
-#         left_align_start, left_align_end = locate_subseq(left_seq, left_align)
-
-#         #print 'len_left_seq', len(left_seq), left_align_start, left_align_end
-#         #print 'len_right_seq', len(right_seq), right_align_start, right_align_end
-
-#         flip = False
-#         if float(left_align_end)/len(left_seq) < float(right_align_start)/len(right_seq):
-#             flip = True
-
-#         #print 'flip', flip
-
-#         joined_cons = left_seq[:left_align_start] + right_seq[right_align_start:]
-
-#         if flip:
-#             joined_cons = right_seq[:right_align_end] + left_seq[left_align_end:]
-
-
-#     #print 'joined consensus', joined_cons
-#     return joined_cons, score, len(left_align)
 
 
 def consensus(seqs, minscore=0.95):
@@ -617,11 +546,6 @@ def locate_subseq(longseq, shortseq, end='L'):
             return sorted(matches[0])
         else:
             return sorted(matches[-1])
-
-    #match = re.search(shortseq, longseq)
-    #if match:
-    #    print 'matchlen', len(match.groups())
-    #    return sorted((match.start(0), match.end(0)))
  
     return None
 
@@ -1117,7 +1041,7 @@ def resolve_insertion(args, ins, inslib_fa):
 
         if not args.skip_align:
             if 'best_ins_matchpct' in ins['INFO'] and ins['INFO']['best_ins_matchpct'] >= float(args.min_ins_match):
-                tmp_bam = remap_discordant(ins, inslib_fa=inslib_fa, tmpdir=args.tmpdir)
+                tmp_bam = remap_discordant(ins, inslib_fa=inslib_fa, tmpdir=args.refoutdir)
 
                 if tmp_bam is not None:
                     bam = pysam.AlignmentFile(tmp_bam, 'rb')
@@ -1129,28 +1053,20 @@ def resolve_insertion(args, ins, inslib_fa):
 
                     extend_consensus(ins, bam)
 
-                    if not args.keep_all_tmp_bams and not args.keep_ins_bams:
-                        if os.path.exists(tmp_bam): os.remove(tmp_bam)
-                        if os.path.exists(tmp_bam + '.bai'): os.remove(tmp_bam + '.bai')
-
-                    if (args.keep_ins_bams or args.callmuts) and ins['INFO']['mapped_target'] > int(args.mindiscord):
+                    if args.callmuts and ins['INFO']['mapped_target'] > int(args.mindiscord):
                         tmp_bam_base = os.path.basename(tmp_bam)
                         ins_obj = Ins(ins, None, False)
 
                         if args.te:
-                            if ins_obj.pass_te_filter(None):
-                                if os.path.exists(tmp_bam): shutil.copy(tmp_bam, args.refoutdir + '/' + tmp_bam_base)
-                                if os.path.exists(tmp_bam + '.bai'): shutil.copy(tmp_bam + '.bai', args.refoutdir + '/' + tmp_bam_base + '.bai')
-                            else:
-                                if os.path.exists(tmp_bam): os.remove(tmp_bam)
-                                if os.path.exists(tmp_bam + '.bai'): os.remove(tmp_bam + '.bai')
+                            if not ins_obj.pass_te_filter(None):
+                                if not args.keep_all_tmp_bams:
+                                    if os.path.exists(tmp_bam): os.remove(tmp_bam)
+                                    if os.path.exists(tmp_bam + '.bai'): os.remove(tmp_bam + '.bai')
                         else:
-                            if ins_obj.pass_general_filter(None):
-                                if os.path.exists(tmp_bam): shutil.copy(tmp_bam, args.refoutdir + '/' + tmp_bam_base)
-                                if os.path.exists(tmp_bam + '.bai'): shutil.copy(tmp_bam + '.bai', args.refoutdir + '/' + tmp_bam_base + '.bai')
-                            else:
-                                if os.path.exists(tmp_bam): os.remove(tmp_bam)
-                                if os.path.exists(tmp_bam + '.bai'): os.remove(tmp_bam + '.bai')
+                            if not ins_obj.pass_general_filter(None):
+                                if not args.keep_all_tmp_bams:
+                                    if os.path.exists(tmp_bam): os.remove(tmp_bam)
+                                    if os.path.exists(tmp_bam + '.bai'): os.remove(tmp_bam + '.bai')
 
                 ins = identify_transductions(ins)
 
@@ -1396,7 +1312,6 @@ if __name__ == '__main__':
     parser.add_argument('--skip_align', action='store_true', default=False, help="skip re-alignment of discordant ends to ref insertion")
     parser.add_argument('--use_rg', action='store_true', default=False, help="use RG instead of BAM filename for samples")
     parser.add_argument('--keep_all_tmp_bams', action='store_true', default=False, help="leave ALL temporary BAMs (warning: lots of files!)")
-    parser.add_argument('--keep_ins_bams', action='store_true', default=False, help="insertion-specific BAMs will be kept in --refoutdir")
     parser.add_argument('--detail_out', default=None, help="file to write detailed output")
     parser.add_argument('--unmapped', default=False, action='store_true', help="report insertions that do not match insertion library")
     parser.add_argument('--te', default=False, action='store_true', help="set if insertion library is transposons")

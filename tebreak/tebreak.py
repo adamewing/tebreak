@@ -668,43 +668,6 @@ class Insertion:
         self.discoreads = all_mapped.values() + all_unmapped.values()
 
 
-    def align_filter(self, insref_fa, tmpdir='/tmp'):
-        ''' check whether insertion consensus aligns to '''
-        if not os.path.exists(insref_fa + '.tis'): build_last_db(insref_fa)
-
-        out_fa = '%s/tebreak.align_filter.%s.fa' % (tmpdir, str(uuid4()))
-
-        d1, d2, u1, u2 = (None, None, None, None)
-
-        if self.be1 is not None:
-            d1 = self.be1.distal_subread()       # pysam.AlignedSegment or None
-            u1 = self.be1.unmapped_subread()[1]  # seq strings or None
-            if d1 is not None: d1 = map(lambda x: x.seq, d1)
-
-        if self.be2 is not None:
-            d2 = self.be2.distal_subread()
-            u2 = self.be2.unmapped_subread()[1]
-            if d2 is not None: d2 = map(lambda x: x.seq, d2)
-
-        seqsizes = [20]
-
-        with open(out_fa, 'w') as fa:
-            for seqlist in (d1, d2, u1, u2):
-                if seqlist is not None:
-                    for seq in seqlist:
-                        if len(seq) >= 10:
-                            seqsizes.append(len(seq))
-                            fa.write('>%s\n%s\n' % (str(uuid4()), seq))
-
-        la_results = align_last(out_fa, insref_fa, e=min(seqsizes)-2)
-
-        os.remove(out_fa)
-
-        if len(la_results) == 0: return True
-
-        return False
-
-
     def improve_consensus(self, ctg_fa, bwaref, tmpdir='/tmp'):
         ''' attempt to use assembly of all supporting reads to build a better consensus '''
         cons_fasta = self.consensus_fasta(tmpdir)
@@ -1520,11 +1483,6 @@ def filter_insertions(insertions, filters, tmpdir='/tmp', debug=True, logger=Non
                 if debug: logger.debug('%s filtered due to max_bam_count: %d > %d' % (ins_debug_name, len(bams), filters['max_bam_count']))
                 exclude = True
 
-        if filters['insertion_library'] is not None and not exclude:
-            if ins.align_filter(filters['insertion_library'], tmpdir=tmpdir):
-                # this filter is going to be deleted soon as it turns out to be pretty useless
-                exclude = True
-
         if filters['map_tabix'] is not None and not exclude:
             if ins.be1.chrom in filters['map_tabix'].contigs:
                 ins.mappability = avgmap(filters['map_tabix'], ins.be1.chrom, ins.min_supporting_base(), ins.max_supporting_base())
@@ -1628,14 +1586,12 @@ def run_chunk(args, exp_rpkm, chrom, start, end):
             'min_MW_P':              float(args.minMWP),
             'max_ins_reads':         int(args.max_ins_reads),
             'min_split_reads':       int(args.min_split_reads),
-            #'min_discordant_reads':  int(args.min_discordant_reads),
             'min_prox_mapq':         int(args.min_prox_mapq),
             'max_N_consensus':       int(args.max_N_consensus),
             'max_rpkm':              int(args.max_fold_rpkm)*exp_rpkm,
             'exclude_bam':           [],
             'exclude_readgroup':     [],
             'max_bam_count':         int(args.max_bam_count),
-            'insertion_library':     args.insertion_library,
             'genome_mask':           args.mask,
             'map_tabix':             args.map_tabix,
             'min_mappability':       float(args.min_mappability)
@@ -1903,13 +1859,11 @@ if __name__ == '__main__':
     parser.add_argument('--max_fold_rpkm', default=10, help='ignore insertions supported by rpkm*max_fold_rpkm reads (default = 10)')
     parser.add_argument('--max_ins_reads', default=100000, help='maximum number of reads to use per insertion call (default = 100000)')
     parser.add_argument('--min_split_reads', default=4, help='minimum total split reads per insertion call (default = 4)')
-    #parser.add_argument('--min_discordant_reads', default=4, help='minimum discordant read count (default = 4)')
     parser.add_argument('--min_prox_mapq', default=10, help='minimum map quality for proximal subread (default = 10)')
     parser.add_argument('--max_N_consensus', default=4, help='exclude breakend seqs with > this number of N bases (default = 4)')
     parser.add_argument('--exclude_bam', default=None, help='may be comma delimited')
     parser.add_argument('--exclude_readgroup', default=None, help='may be comma delimited')
     parser.add_argument('--max_bam_count', default=0, help='maximum number of bams supporting per insertion')
-    parser.add_argument('--insertion_library', default=None, help='for pre-selecting insertion types')
     parser.add_argument('--map_tabix', default=None, help='tabix-indexed BED of mappability scores')
     parser.add_argument('--min_mappability', default=0.1, help='minimum mappability (default = 0.1; only matters with --map_tabix)')
     parser.add_argument('--max_disc_fetch', default=50, help='maximum number of discordant reads to fetch per insertion site per BAM (default = 50)')

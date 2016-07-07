@@ -23,6 +23,9 @@ else:
 tebreak_dir = os.path.dirname(os.path.realpath(__file__))
 
 def ref_filter(chrom, start, end, superfams, tbx):
+    if chrom not in tbx.contigs:
+        return True
+
     for sf in superfams.split(','):
         if sf == 'L1':
             for ins in tbx[sf].fetch(chrom, int(start), int(end)): return True

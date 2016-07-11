@@ -1,6 +1,6 @@
 ## TEBreak 
 
-[![Build Status](https://travis-ci.org/adamewing/tebreak.svg?branch=master)](https://travis-ci.org/adamewing/tebreak)
+[![Build Status](https://travis-ci.org/MischaLundberg/tebreak.svg?branch=master)](https://travis-ci.org/MischaLundberg/tebreak)
 
 Contact: adam.ewing@mater.uq.edu.au
 

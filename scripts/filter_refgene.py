@@ -40,7 +40,7 @@ if len(sys.argv) == 3:
     if not os.path.exists(tebreak_dir):
         sys.exit(usage())
 
-    map_ref = tebreak_dir + '/lib/wgEncodeCrgMapabilityAlign50mer.bed.gz'
+    map_ref = tebreak_dir + '/lib/wgEncodeCrgMapabilityAlign100mer.bed.gz'
     pgo_ref = tebreak_dir + '/lib/PGO_Build74.coords.bed.gz'
     gen_ref = tebreak_dir + '/lib/refGene_sorted.txt.gz'
 

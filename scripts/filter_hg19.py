@@ -9,6 +9,8 @@ import sys
 import os
 import logging
 import argparse
+import align
+import numpy as np
 
 verbose=False
 
@@ -22,18 +24,41 @@ else:
 
 tebreak_dir = os.path.dirname(os.path.realpath(__file__))
 
-def ref_filter(chrom, start, end, superfams, tbx):
-    if chrom not in tbx.contigs:
-        return True
 
+def load_falib(infa):
+    seqdict = {}
+
+    with open(infa, 'r') as fa:
+        seqid = ''
+        seq   = ''
+        for line in fa:
+            if line.startswith('>'):
+                if seq != '':
+                    seqdict[seqid] = seq
+                seqid = line.lstrip('>').strip().split()[0]
+                seq   = ''
+            else:
+                assert seqid != ''
+                seq = seq + line.strip()
+
+    if seqid not in seqdict and seq != '':
+        seqdict[seqid] = seq
+
+    return seqdict
+
+
+def ref_filter(chrom, start, end, superfams, tbx):
     for sf in superfams.split(','):
         if sf == 'L1':
+            if chrom not in tbx[sf].contigs: return True
             for ins in tbx[sf].fetch(chrom, int(start), int(end)): return True
 
         if sf in ('ALU', 'SVA'):
+            if chrom not in tbx[sf].contigs: return True
             for ins in tbx[sf].fetch(chrom, int(start), int(end)): return True
 
         if sf == 'SVA':
+            if chrom not in tbx[sf].contigs: return True
             for ins in tbx[sf].fetch(chrom, int(start), int(end)): return True
 
     return False
@@ -73,12 +98,54 @@ def avgmap(maptabix, chrom, start, end):
         return 0.0
 
 
+def rc(dna):
+    ''' reverse complement '''
+    complements = maketrans('acgtrymkbdhvACGTRYMKBDHV', 'tgcayrkmvhdbTGCAYRKMVHDB')
+    return dna.translate(complements)[::-1]
+
+
+def realign_filter(rec, inslib):
+    S = -np.ones((256, 256)) + 2 * np.identity(256)
+    S = S.astype(np.int16)
+
+    seqn = rec['Superfamily'] + ':' + rec['Subfamily']
+    if seqn not in inslib:
+        return False
+
+    seq_headers = ['Genomic_Consensus_5p', 'Genomic_Consensus_3p', 'Insert_Consensus_5p', 'Insert_Consensus_3p']
+
+    for seqtype in seq_headers:
+        s1 = align.string_to_alignment(rec[seqtype])
+        s2 = align.string_to_alignment(inslib[seqn])
+
+        (s, a1, a2) = align.align(s1, s2, -2, -2, S, local=True)
+        a1 = align.alignment_to_string(a1)
+        a2 = ''.join([b for b in list(align.alignment_to_string(a2)) if b != '-'])
+
+        score = 0.0
+        if len(a1) > 0:
+            score = float(len(a1) - (len(a1)-s)) / float(len(a1))
+
+        #print seqtype, score, len(a1)
+
+        if score > 0.9 and len(a1) > 25:
+            return False
+
+        return True
+
+
 def main(args):
 
     l1_ref  = tebreak_dir + '/../lib/mask.L1.hg19.bed.gz'
     alu_ref = tebreak_dir + '/../lib/mask.Alu.hg19.bed.gz'
     sva_ref = tebreak_dir + '/../lib/mask.SVA.hg19.bed.gz'
     map_ref = tebreak_dir + '/../lib/wgEncodeCrgMapabilityAlign100mer.bed.gz'
+
+    inslib = None
+
+    if args.insref:
+        inslib = load_falib(args.insref)
+
 
     for fn in (l1_ref, alu_ref, sva_ref):
         if not os.path.exists(fn): sys.exit('reference %s not found' % fn)
@@ -140,9 +207,12 @@ def main(args):
                     logger.debug('Filtered %s: no insertion consensus mapped to insertion reference' % rec['UUID'])
                     out = False
 
-                if out and len_filter(rec):
-                    logger.debug('Filtered %s: TE length filter' % rec['UUID'])
-                    out = False
+                #if out and len_filter(rec):
+                #    logger.debug('Filtered %s: TE length filter' % rec['UUID'])
+                #    out = False
+
+                if args.insref:
+                    if realign_filter(rec, inslib): out = False
 
                 if out: print line.strip()
 
@@ -150,6 +220,7 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='filter script for TEs on hg19')
     parser.add_argument('--tabfile', required=True, help='tabular output from resolve.py, requires header to be present')
+    parser.add_argument('--insref', default=None, help='req. alignment to insertion sequence reference')
     parser.add_argument('--ignore_ref_filter', default=False, action='store_true', help='turn of filtering vs. reference elements')
     args = parser.parse_args()
     main(args)

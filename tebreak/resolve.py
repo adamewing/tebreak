@@ -400,7 +400,9 @@ def extend_consensus(ins, bam):
                 seqs = [qualtrim(read, ctglen[seg['chrom']], minqual=mq) for read in bam.fetch(seg['chrom'], seg['start'], seg['end'])]
                 seqs = [s for s in seqs if len(s) > 50]
 
-                te_cons_seq, te_cons_score = consensus(seqs,minscore=0.95)
+                #print '***debug, cons:', be, ins['INFO'][be+'_is_3prime']
+
+                te_cons_seq, te_cons_score = consensus(seqs,minscore=0.92)
 
                 ge_cons_seq = ins['INFO'][be+'_cons_seq']
 
@@ -451,19 +453,20 @@ def get_covered_segs(bam, mindepth=1, minlength=50):
     return seglist
 
 
-def qualtrim(read, ctglen, minqual=35):
+def qualtrim(read, ctglen, chopclip=False, minqual=35):
     ''' return quality-trimmed sequence given a pysam.AlignedSegment '''
 
     seq = read.seq
     qual = read.qual
 
-    if read.reference_end < ctglen:
-        seq = seq[:read.query_alignment_end]
-        qual = qual[:read.query_alignment_end]
+    if chopclip:
+        if read.reference_end < ctglen:
+            seq = seq[:read.query_alignment_end]
+            qual = qual[:read.query_alignment_end]
 
-    if read.reference_start > 1:
-        seq = seq[read.query_alignment_start:]
-        qual = qual[read.query_alignment_start:]
+        if read.reference_start > 1:
+            seq = seq[read.query_alignment_start:]
+            qual = qual[read.query_alignment_start:]
 
 
     q = [ord(b)-minqual for b in list(qual)]
@@ -475,7 +478,7 @@ def qualtrim(read, ctglen, minqual=35):
     return seq
 
 
-def consensus(seqs, minscore=0.95):
+def consensus(seqs, minscore=0.92):
     ''' build consensus from sorted aligned reads iteratively, expects seqs to be sorted in ref genome order '''
 
     S = -np.ones((256, 256)) + 2 * np.identity(256)
@@ -495,12 +498,16 @@ def consensus(seqs, minscore=0.95):
     if len(uniq_seqs) == 1: # all seqs were the same!
         return uniq_seqs[0], 1.0
 
-    cons = uniq_seqs[0]
+    start_index = 0
+    cons = uniq_seqs[start_index]
     scores = []
 
-    if len(uniq_seqs) > 1000: uniq_seqs = np.random.choice(uniq_seqs, size=1000)
+    align_init = False
 
-    for seq in uniq_seqs[1:]:
+    for i, seq in enumerate(uniq_seqs[1:]):
+
+        #print 'cons :', cons
+        #print 'seq  :', seq
 
         s1 = align.string_to_alignment(cons)
         s2 = align.string_to_alignment(seq)
@@ -511,6 +518,8 @@ def consensus(seqs, minscore=0.95):
 
         score = float(len(a1) - (len(a1)-s)) / float(len(a1))
 
+        #print 'score:', score
+
         scores.append(score)
 
         if re.search(a1, cons):
@@ -519,6 +528,11 @@ def consensus(seqs, minscore=0.95):
             if score >= minscore and cons_end > len(cons)-5:
                 align_end = locate_subseq(seq, a2)[1]
                 cons += seq[align_end:]
+                align_init = True
+
+            elif not align_init: # haven't found a scaffold yet
+                start_index += 1
+                cons = uniq_seqs[start_index]
 
     return cons, np.mean(scores)
 

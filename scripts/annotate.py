@@ -2,16 +2,17 @@
 
 import sys
 import pysam
+import argparse
 
-if len(sys.argv) == 4:
-    tbx = pysam.Tabixfile(sys.argv[2])
+def main(args):
+    tbx = pysam.Tabixfile(args.tabix)
     
-    with open(sys.argv[1]) as l1seq:
+    with open(args.table) as l1seq:
         for line in l1seq:
 
             if line.startswith('UUID'):
                 header = line.strip().split()
-                header.append(sys.argv[3])
+                header.append(args.name)
                 print '\t'.join(header)
                 continue
 
@@ -24,7 +25,13 @@ if len(sys.argv) == 4:
 
             if chrom in tbx.contigs:
                 for rec in tbx.fetch(chrom, start, end):
-                    annotations.append('|'.join(rec.strip().split()))
+                    if args.nonref:
+                        sfam = c[6]
+                        annot = rec.strip().split()
+                        if annot[3] == sfam:
+                            annotations.append('|'.join(annot))
+                    else:
+                        annotations.append('|'.join(rec.strip().split()))
 
             annotations = list(set(annotations)) # uniqify
 
@@ -32,5 +39,11 @@ if len(sys.argv) == 4:
 
             print line.strip() + '\t' + ','.join(annotations)
 
-else:
-    sys.exit("usage: %s <l1seq.py output> <tabix> <header name>" % sys.argv[0])
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='annotate tebreak table')
+    parser.add_argument('-t', '--table', required=True)
+    parser.add_argument('-x', '--tabix', required=True)
+    parser.add_argument('-n', '--name', required=True)
+    parser.add_argument('--nonref', default=False, action='store_true', help='annotation mode specific to non-reference insertions')
+    args = parser.parse_args()
+    main(args)

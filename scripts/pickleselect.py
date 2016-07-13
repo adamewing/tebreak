@@ -48,5 +48,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='filter pickle based on UUIDs')
     parser.add_argument('-p', '--pickle', required=True, help='input filename (tebreak.py pickle)')
     parser.add_argument('-u', '--uuids', required=True, help='list of UUIDs to keep (if >1 column, use the first column)')
+    parser.add_argument('-o', '--out', required=True, help='output pickle')
     args = parser.parse_args()
     main(args)

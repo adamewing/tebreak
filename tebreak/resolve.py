@@ -506,8 +506,8 @@ def consensus(seqs, minscore=0.92):
 
     for i, seq in enumerate(uniq_seqs[1:]):
 
-        #print 'cons :', cons
-        #print 'seq  :', seq
+        #print 'oldcons:', cons
+        #print 'seq    :', seq
 
         s1 = align.string_to_alignment(cons)
         s2 = align.string_to_alignment(seq)
@@ -518,21 +518,24 @@ def consensus(seqs, minscore=0.92):
 
         score = float(len(a1) - (len(a1)-s)) / float(len(a1))
 
-        #print 'score:', score
+        #print 'score  :', score
 
         scores.append(score)
 
         if re.search(a1, cons):
             cons_start, cons_end = locate_subseq(cons, a1)
 
-            if score >= minscore and cons_end > len(cons)-5:
+            if score >= minscore: #and cons_end > len(cons)-5:
                 align_end = locate_subseq(seq, a2)[1]
                 cons += seq[align_end:]
                 align_init = True
+                #print 'newcons:', cons
 
             elif not align_init: # haven't found a scaffold yet
                 start_index += 1
                 cons = uniq_seqs[start_index]
+
+        #print '****'
 
     return cons, np.mean(scores)
 

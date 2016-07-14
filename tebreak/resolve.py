@@ -405,7 +405,8 @@ def extend_consensus(ins, bam):
                 best_cons_seq = 'NA'
                 best_cons_score = 0.0
 
-                for sc_thresh in [0.95, 0.92, 0.9, 0.85]:
+                #for sc_thresh in [0.95, 0.92, 0.9, 0.85]:
+                for sc_thresh in [0.95, 0.92]:
                     te_cons_seq, te_cons_score = consensus(seqs, minscore=sc_thresh)
                     if len(te_cons_seq)*te_cons_score**2 > len(best_cons_seq)*best_cons_score**2:
                         best_cons_seq = te_cons_seq
@@ -530,7 +531,7 @@ def consensus(seqs, minscore=0.92):
         if re.search(a1, cons):
             cons_start, cons_end = locate_subseq(cons, a1)
 
-            if score >= minscore: #and cons_end > len(cons)-5:
+            if score >= minscore and cons_end > len(cons)-5:
                 align_end = locate_subseq(seq, a2)[1]
                 cons += seq[align_end:]
                 align_init = True

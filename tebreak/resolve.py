@@ -400,7 +400,7 @@ def extend_consensus(ins, bam):
                 seqs = [qualtrim(read, ctglen[seg['chrom']], minqual=mq) for read in bam.fetch(seg['chrom'], seg['start'], seg['end'])]
                 seqs = [s for s in seqs if len(s) > 50]
 
-                print '***debug, cons:', be, ins['INFO'][be+'_is_3prime']
+                #print '***debug, cons:', be, ins['INFO'][be+'_is_3prime']
 
                 best_cons_seq = 'NA'
                 best_cons_score = 0.0
@@ -511,8 +511,8 @@ def consensus(seqs, minscore=0.92):
 
     for i, seq in enumerate(uniq_seqs[1:]):
 
-        print 'oldcons:', cons
-        print 'seq    :', seq
+        #print 'oldcons:', cons
+        #print 'seq    :', seq
 
         s1 = align.string_to_alignment(cons)
         s2 = align.string_to_alignment(seq)
@@ -523,7 +523,7 @@ def consensus(seqs, minscore=0.92):
 
         score = float(len(a1) - (len(a1)-s)) / float(len(a1))
 
-        print 'score  :', score
+        #print 'score  :', score
 
         scores.append(score)
 
@@ -534,13 +534,13 @@ def consensus(seqs, minscore=0.92):
                 align_end = locate_subseq(seq, a2)[1]
                 cons += seq[align_end:]
                 align_init = True
-                print 'newcons:', cons
+                #print 'newcons:', cons
 
             elif not align_init: # haven't found a scaffold yet
                 start_index += 1
                 cons = uniq_seqs[start_index]
 
-        print '****'
+        #print '****'
 
     return cons, np.mean(scores)
 

@@ -405,13 +405,11 @@ def extend_consensus(ins, bam):
                 best_cons_seq = 'NA'
                 best_cons_score = 0.0
 
-                for sc_thresh in [0.95, 0.92, 0.9]:
+                for sc_thresh in [0.95, 0.92, 0.9, 0.85]:
                     te_cons_seq, te_cons_score = consensus(seqs, minscore=sc_thresh)
-                    if len(te_cons_seq)*te_cons_score > len(best_cons_seq)*best_cons_score:
+                    if len(te_cons_seq)*te_cons_score**2 > len(best_cons_seq)*best_cons_score**2:
                         best_cons_seq = te_cons_seq
                         best_cons_score = te_cons_score
-
-                #ge_cons_seq = ins['INFO'][be+'_cons_seq']
 
                 ins['INFO'][be+'_te_cons_score'] = best_cons_score
                 ins['INFO'][be+'_te_cons_seq'] = best_cons_seq

@@ -11,6 +11,9 @@ import logging
 import argparse
 import align
 import numpy as np
+import subprocess
+
+from uuid import uuid4
 
 verbose=False
 
@@ -105,8 +108,9 @@ def rc(dna):
 
 
 def realign_filter(rec, inslib):
-    S = -np.ones((256, 256)) + 2 * np.identity(256)
-    S = S.astype(np.int16)
+    # print "***align %s" % rec['UUID']
+    # S = -np.ones((256, 256)) + 2 * np.identity(256)
+    # S = S.astype(np.int16)
 
     seqn = rec['Superfamily'] + ':' + rec['Subfamily']
     if seqn not in inslib:
@@ -114,24 +118,71 @@ def realign_filter(rec, inslib):
 
     seq_headers = ['Genomic_Consensus_5p', 'Genomic_Consensus_3p', 'Insert_Consensus_5p', 'Insert_Consensus_3p']
 
+    matches = []
+
     for seqtype in seq_headers:
-        s1 = align.string_to_alignment(rec[seqtype])
-        s2 = align.string_to_alignment(inslib[seqn])
+        if rec[seqtype] == 'NA':
+            continue
 
-        (s, a1, a2) = align.align(s1, s2, -2, -2, S, local=True)
-        a1 = align.alignment_to_string(a1)
-        a2 = ''.join([b for b in list(align.alignment_to_string(a2)) if b != '-'])
+        #print seqtype, rec[seqtype]
 
-        score = 0.0
-        if len(a1) > 0:
-            score = float(len(a1) - (len(a1)-s)) / float(len(a1))
+        alignment = align(rec[seqtype], inslib[seqn])
 
-        #print seqtype, score, len(a1)
+        if alignment:
+            matches.append([seqtype] + alignment)
 
-        if score > 0.9 and len(a1) > 25:
-            return False
+        # s1 = align.string_to_alignment(rec[seqtype])
+        # s2 = align.string_to_alignment(inslib[seqn])
 
-        return True
+        # (s, a1, a2) = align.align(s1, s2, -2, -2, S, local=True)
+        # a1 = align.alignment_to_string(a1)
+        # a2 = ''.join([b for b in list(align.alignment_to_string(a2)) if b != '-'])
+
+        # score = 0.0
+        # if len(a1) > 0:
+        #     score = float(len(a1) - (len(a1)-s)) / float(len(a1))
+
+        # #print seqtype, score, len(a1)
+
+        # if score > 0.9 and len(a1) > 25:
+        #     return False
+
+        # return True
+
+    return matches
+
+
+def align(qryseq, refseq):
+    rnd = str(uuid4())
+    tgtfa = 'tmp.' + rnd + '.tgt.fa'
+    qryfa = 'tmp.' + rnd + '.qry.fa'
+
+    tgt = open(tgtfa, 'w')
+    qry = open(qryfa, 'w')
+
+    tgt.write('>ref' + '\n' + refseq + '\n')
+    qry.write('>qry' + '\n' + qryseq + '\n')
+
+    tgt.close()
+    qry.close()
+
+    cmd = ['exonerate', '--bestn', '1', '-m', 'ungapped', '--showalignment','0', '--ryo', 'SUMMARY\t%s\t%qab\t%qae\t%tab\t%tae\t%pi\n', qryfa, tgtfa]
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    best = []
+    topscore = 0
+
+    for pline in p.stdout.readlines():
+        if pline.startswith('SUMMARY'):
+            c = pline.strip().split()
+            if int(c[1]) > topscore:
+                topscore = int(c[1])
+                best = c
+
+    os.remove(tgtfa)
+    os.remove(qryfa)
+
+    return best
 
 
 def main(args):
@@ -207,12 +258,29 @@ def main(args):
                     logger.debug('Filtered %s: no insertion consensus mapped to insertion reference' % rec['UUID'])
                     out = False
 
-                #if out and len_filter(rec):
-                #    logger.debug('Filtered %s: TE length filter' % rec['UUID'])
-                #    out = False
+                if args.lenfilter and out and len_filter(rec):
+                    logger.debug('Filtered %s: TE length filter' % rec['UUID'])
+                    out = False
 
                 if args.insref:
-                    if realign_filter(rec, inslib): out = False
+                    align_info = realign_filter(rec, inslib)
+
+                    if len(align_info) == 0:
+                        out = False
+
+                    for alignment in align_info:
+                        seqtype, _, score, qstart, qend, tstart, tend, pi = alignment
+                        tstart = int(tstart)
+                        tend   = int(tend)
+                        pi     = float(pi)
+
+                        if rec['Superfamily'] == 'L1':
+                            if not (tend > 6010 and tstart < 5960 and pi > 95.0):
+                                out = False
+
+                        else:
+                            if pi < 95.0 or abs(tend-tstart) < 50:
+                                out = False
 
                 if out: print line.strip()
 
@@ -222,5 +290,6 @@ if __name__ == '__main__':
     parser.add_argument('--tabfile', required=True, help='tabular output from resolve.py, requires header to be present')
     parser.add_argument('--insref', default=None, help='req. alignment to insertion sequence reference')
     parser.add_argument('--ignore_ref_filter', default=False, action='store_true', help='turn of filtering vs. reference elements')
+    parser.add_argument('--lenfilter', default=False, action='store_true', help='turn on filter by insertion length')
     args = parser.parse_args()
     main(args)

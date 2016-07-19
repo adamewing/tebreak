@@ -268,6 +268,7 @@ def main(args):
                     if len(align_info) == 0:
                         out = False
 
+                    well_aligned = False
                     for alignment in align_info:
                         seqtype, _, score, qstart, qend, tstart, tend, pi = alignment
                         tstart = int(tstart)
@@ -275,12 +276,14 @@ def main(args):
                         pi     = float(pi)
 
                         if rec['Superfamily'] == 'L1':
-                            if not (tend > 6010 and tstart < 5960 and pi > 95.0):
-                                out = False
+                            if tend >= 6010 and tstart <= 5960 and pi >= 95.0:
+                                well_aligned = True
 
                         else:
-                            if pi < 95.0 or abs(tend-tstart) < 50:
-                                out = False
+                            if pi >= 95.0 and abs(tend-tstart) >= 50:
+                                well_aligned = True
+
+                    if not well_aligned: out = False
 
                 if out: print line.strip()
 

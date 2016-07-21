@@ -126,7 +126,7 @@ def realign_filter(rec, inslib):
 
         #print seqtype, rec[seqtype]
 
-        alignment = align(rec[seqtype], inslib[seqn])
+        alignment = align(rec[seqtype], inslib[seqn], rec['Subfamily'])
 
         if alignment:
             matches.append([seqtype] + alignment)
@@ -152,7 +152,7 @@ def realign_filter(rec, inslib):
     return matches
 
 
-def align(qryseq, refseq):
+def align(qryseq, refseq, elt):
     rnd = str(uuid4())
     tgtfa = 'tmp.' + rnd + '.tgt.fa'
     qryfa = 'tmp.' + rnd + '.qry.fa'
@@ -166,14 +166,14 @@ def align(qryseq, refseq):
     tgt.close()
     qry.close()
 
-    cmd = ['exonerate', '--bestn', '1', '-m', 'ungapped', '--showalignment','0', '--ryo', 'SUMMARY\t%s\t%qab\t%qae\t%tab\t%tae\t%pi\n', qryfa, tgtfa]
+    cmd = ['exonerate', '--bestn', '1', '-m', 'ungapped', '--showalignment','0', '--ryo', elt + '\t%s\t%qab\t%qae\t%tab\t%tae\t%pi\n', qryfa, tgtfa]
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     best = []
     topscore = 0
 
     for pline in p.stdout.readlines():
-        if pline.startswith('SUMMARY'):
+        if pline.startswith(elt):
             c = pline.strip().split()
             if int(c[1]) > topscore:
                 topscore = int(c[1])
@@ -245,13 +245,17 @@ def main(args):
                     logger.debug('Filtered %s: max(5p_Genome_Match, 3p_Genome_Match) < 0.98' % rec['UUID'])
                     out = False
 
-                mapscore = avgmap(map_tbx, rec['Chromosome'], rec['Left_Extreme'], rec['Right_Extreme']) * (max(int(rec['3p_Cons_Len']), int(rec['5p_Cons_Len']))/100.)
+                mapscore = avgmap(map_tbx, rec['Chromosome'], rec['Left_Extreme'], rec['Right_Extreme'])# * (max(int(rec['3p_Cons_Len']), int(rec['5p_Cons_Len']))/100.)
                 if mapscore < 0.1:
                     logger.debug('Filtered %s: mappability of %f < 0.1' % (rec['UUID'], mapscore))
                     out = False
 
-                if float(rec['Remapped_Discordant']) < 4 or float(rec['Remap_Disc_Fraction']) < 0.5:
-                    logger.debug('Filtered %s: low discordant evidence (< 4 reads or < 50pct supporting)' % rec['UUID'])
+                if float(rec['Remapped_Discordant']) < 4:
+                    logger.debug('Filtered %s: low discordant evidence (< 4 reads)' % rec['UUID'])
+                    out = False
+
+                if float(rec['Remap_Disc_Fraction']) < 0.5:
+                    logger.debug('Filtered %s: low discordant evidence (< 50pct supporting)' % rec['UUID'])
                     out = False
 
                 if rec['Insert_Consensus_5p'] == rec['Insert_Consensus_3p'] == 'NA':
@@ -262,7 +266,9 @@ def main(args):
                     logger.debug('Filtered %s: TE length filter' % rec['UUID'])
                     out = False
 
-                if args.insref:
+                align_info = 'NA'
+
+                if out and args.insref:
                     align_info = realign_filter(rec, inslib)
 
                     if len(align_info) == 0:
@@ -275,17 +281,20 @@ def main(args):
                         tend   = int(tend)
                         pi     = float(pi)
 
-                        if rec['Superfamily'] == 'L1':
-                            if tend >= 6010 and tstart <= 5960 and pi >= 95.0:
-                                well_aligned = True
-
-                        else:
-                            if pi >= 95.0 and abs(tend-tstart) >= 50:
-                                well_aligned = True
+                        if pi >= 95.0 and abs(tend-tstart) >= 100:
+                            well_aligned = True
 
                     if not well_aligned: out = False
 
-                if out: print line.strip()
+                if out:
+                    fields = line.strip().split()
+                    fields.append(str(mapscore))
+                    fields.append(','.join([';'.join(alignment) for alignment in align_info]))
+                    
+                    print '\t'.join(fields)
+
+                    #print line.strip() + '\t' + ','.join([';'.join(alignment) for alignment in align_info]) + '\t' + str(well_aligned)
+
 
 
 if __name__ == '__main__':

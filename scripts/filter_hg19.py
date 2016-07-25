@@ -50,19 +50,29 @@ def load_falib(infa):
     return seqdict
 
 
-def ref_filter(chrom, start, end, superfams, tbx):
+def ref_filter(chrom, start, end, superfams, tbx, extend=0):
+    start = int(start)
+    end   = int(end)
+
+    if extend > 0:
+        start -= extend
+        end   += extend
+
+        if start < 0: start = 0
+
+
     for sf in superfams.split(','):
         if sf == 'L1':
             if chrom not in tbx[sf].contigs: return True
-            for ins in tbx[sf].fetch(chrom, int(start), int(end)): return True
+            for ins in tbx[sf].fetch(chrom, start, end): return True
 
         if sf in ('ALU', 'SVA'):
             if chrom not in tbx[sf].contigs: return True
-            for ins in tbx[sf].fetch(chrom, int(start), int(end)): return True
+            for ins in tbx[sf].fetch(chrom, start, end): return True
 
         if sf == 'SVA':
             if chrom not in tbx[sf].contigs: return True
-            for ins in tbx[sf].fetch(chrom, int(start), int(end)): return True
+            for ins in tbx[sf].fetch(chrom, start, end): return True
 
     return False
 
@@ -108,10 +118,6 @@ def rc(dna):
 
 
 def realign_filter(rec, inslib):
-    # print "***align %s" % rec['UUID']
-    # S = -np.ones((256, 256)) + 2 * np.identity(256)
-    # S = S.astype(np.int16)
-
     seqn = rec['Superfamily'] + ':' + rec['Subfamily']
     if seqn not in inslib:
         return False
@@ -130,24 +136,6 @@ def realign_filter(rec, inslib):
 
         if alignment:
             matches.append([seqtype] + alignment)
-
-        # s1 = align.string_to_alignment(rec[seqtype])
-        # s2 = align.string_to_alignment(inslib[seqn])
-
-        # (s, a1, a2) = align.align(s1, s2, -2, -2, S, local=True)
-        # a1 = align.alignment_to_string(a1)
-        # a2 = ''.join([b for b in list(align.alignment_to_string(a2)) if b != '-'])
-
-        # score = 0.0
-        # if len(a1) > 0:
-        #     score = float(len(a1) - (len(a1)-s)) / float(len(a1))
-
-        # #print seqtype, score, len(a1)
-
-        # if score > 0.9 and len(a1) > 25:
-        #     return False
-
-        # return True
 
     return matches
 
@@ -185,6 +173,13 @@ def align(qryseq, refseq, elt):
     return best
 
 
+def overlap(iv1, iv2): 
+    if min(iv1[1], iv2[1]) - max(iv1[0], iv2[0]) > 0: # is there overlap?
+        return [max(iv1[0], iv2[0]), min(iv1[1], iv2[1])]
+ 
+    return None
+
+
 def main(args):
 
     l1_ref  = tebreak_dir + '/../lib/mask.L1.hg19.bed.gz'
@@ -215,7 +210,14 @@ def main(args):
 
             if i == 0: # header
                 header = line.strip().split('\t')
-                print line.strip()
+
+                if args.insref:
+                    header += ['Mappability', 'ExonerateRealign']
+
+                if args.chimera:
+                    header += ['ChimeraBaseCount', 'InsSiteHomology']
+
+                print '\t'.join(header)
 
             else:
                 rec = {}
@@ -233,7 +235,14 @@ def main(args):
                     logger.debug('Filtered %s: TE_Align_Start or TE_Align_End is "NA"' % rec['UUID'])
                     out = False
 
-                if ref_filter(rec['Chromosome'], rec['Left_Extreme'], rec['Right_Extreme'], rec['Superfamily'], tbx) and not args.ignore_ref_filter:
+                ref_present = False
+
+                if args.wideref:
+                    ref_present = ref_filter(rec['Chromosome'], rec['Left_Extreme'], rec['Right_Extreme'], rec['Superfamily'], tbx, extend=10000)
+                else:
+                    ref_present = ref_filter(rec['Chromosome'], rec['Left_Extreme'], rec['Right_Extreme'], rec['Superfamily'], tbx)
+
+                if ref_present and not args.ignore_ref_filter:
                     logger.debug('Filtered %s: proximity to reference TE of same superfamily' % rec['UUID']) 
                     out = False
 
@@ -268,7 +277,7 @@ def main(args):
 
                 align_info = 'NA'
 
-                if out and args.insref:
+                if out and args.insref and 'ExonerateRealign' not in header:
                     align_info = realign_filter(rec, inslib)
 
                     if len(align_info) == 0:
@@ -286,14 +295,73 @@ def main(args):
 
                     if not well_aligned: out = False
 
+
+                ins_site_homlen = 0 # insertion site homology length
+                ins_site_homseq = 'NA' # sequence of overlapped region
+
+                if out and args.chimera:
+                    if not args.refgenome:
+                        sys.exit('--refgenome required in conjunction with --chimera')
+
+                    ref = pysam.Fastafile(args.refgenome)
+
+                    left  = int(rec['Left_Extreme']) - 1000
+                    right = int(rec['Right_Extreme']) + 1000
+
+                    if left < 0: left = 0
+
+                    ref_seq = ref.fetch(rec['Chromosome'], left, right)
+
+                    seqn = rec['Superfamily'] + ':' + rec['Subfamily']
+
+                    ins_seq = inslib[seqn]
+
+                    alignside = ''
+
+                    ins_align = []
+                    gen_align = []
+
+                    if rec['Genomic_Consensus_3p'] != 'NA':
+                        ins_align = align(rec['Genomic_Consensus_3p'], ins_seq, rec['Subfamily'])
+                        gen_align = align(rec['Genomic_Consensus_3p'], ref_seq, 'Genomic')
+                        alignside = 'Genomic_Consensus_3p'
+
+                    else:
+                        ins_align = align(rec['Genomic_Consensus_5p'], ins_seq, rec['Subfamily'])
+                        gen_align = align(rec['Genomic_Consensus_5p'], ref_seq, 'Genomic')
+                        alignside = 'Genomic_Consensus_5p'
+
+                    ins_subcoords = None
+
+                    if ins_align:
+                        ins_subcoords = map(int, ins_align[2:4])
+
+                    gen_subcoords = None
+
+                    if gen_align:
+                        gen_subcoords = map(int, gen_align[2:4])
+                    else:
+                        out = False
+
+                    ol = None
+
+                    if gen_subcoords is not None and ins_subcoords is not None:
+                        ol = overlap(ins_subcoords, gen_subcoords)
+
+                    if ol is not None:
+                        ins_site_homlen = ol[1]-ol[0]
+                        ins_site_homseq = rec[alignside][ol[0]:ol[1]]
+
                 if out:
                     fields = line.strip().split()
                     fields.append(str(mapscore))
                     fields.append(','.join([';'.join(alignment) for alignment in align_info]))
+
+                    if args.chimera:
+                        fields.append(str(ins_site_homlen))
+                        fields.append(ins_site_homseq)
                     
                     print '\t'.join(fields)
-
-                    #print line.strip() + '\t' + ','.join([';'.join(alignment) for alignment in align_info]) + '\t' + str(well_aligned)
 
 
 
@@ -303,5 +371,8 @@ if __name__ == '__main__':
     parser.add_argument('--insref', default=None, help='req. alignment to insertion sequence reference')
     parser.add_argument('--ignore_ref_filter', default=False, action='store_true', help='turn of filtering vs. reference elements')
     parser.add_argument('--lenfilter', default=False, action='store_true', help='turn on filter by insertion length')
+    parser.add_argument('--refgenome', default=None)
+    parser.add_argument('--chimera', default=False, action='store_true')
+    parser.add_argument('--wideref', default=False, action='store_true')
     args = parser.parse_args()
     main(args)

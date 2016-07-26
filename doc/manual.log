@@ -1,16 +1,15 @@
-This is pdfTeX, Version 3.14159265-2.6-1.40.15 (TeX Live 2014/Debian) (preloaded format=latex 2015.7.19)  19 JUL 2015 17:40
+This is pdfTeX, Version 3.14159265-2.6-1.40.16 (TeX Live 2015/Debian) (preloaded format=latex 2016.7.26)  26 JUL 2016 12:52
 entering extended mode
  restricted \write18 enabled.
- Source specials enabled.
  %&-line parsing enabled.
 **manual.tex
 (./manual.tex
-LaTeX2e <2014/05/01>
-Babel <3.9k> and hyphenation patterns for 2 languages loaded.
+LaTeX2e <2016/02/01>
+Babel <3.9q> and hyphenation patterns for 3 language(s) loaded.
 (/usr/share/texlive/texmf-dist/tex/latex/base/article.cls
-Document Class: article 2007/10/19 v1.4h Standard LaTeX document class
+Document Class: article 2014/09/29 v1.4h Standard LaTeX document class
 (/usr/share/texlive/texmf-dist/tex/latex/base/size11.clo
-File: size11.clo 2007/10/19 v1.4h Standard LaTeX file (size option)
+File: size11.clo 2014/09/29 v1.4h Standard LaTeX file (size option)
 )
 \c@part=\count79
 \c@section=\count80
@@ -25,25 +24,25 @@ File: size11.clo 2007/10/19 v1.4h Standard LaTeX file (size option)
 \bibindent=\dimen102
 )
 (/usr/share/texlive/texmf-dist/tex/latex/graphics/graphicx.sty
-Package: graphicx 2014/04/25 v1.0g Enhanced LaTeX Graphics (DPC,SPQR)
+Package: graphicx 2014/10/28 v1.0g Enhanced LaTeX Graphics (DPC,SPQR)
 
 (/usr/share/texlive/texmf-dist/tex/latex/graphics/keyval.sty
-Package: keyval 2014/05/08 v1.15 key=value parser (DPC)
+Package: keyval 2014/10/28 v1.15 key=value parser (DPC)
 \KV@toks@=\toks14
 )
 (/usr/share/texlive/texmf-dist/tex/latex/graphics/graphics.sty
-Package: graphics 2009/02/05 v1.0o Standard LaTeX Graphics (DPC,SPQR)
+Package: graphics 2016/01/03 v1.0q Standard LaTeX Graphics (DPC,SPQR)
 
 (/usr/share/texlive/texmf-dist/tex/latex/graphics/trig.sty
-Package: trig 1999/03/16 v1.09 sin cos tan (DPC)
+Package: trig 2016/01/03 v1.10 sin cos tan (DPC)
 )
 (/usr/share/texlive/texmf-dist/tex/latex/latexconfig/graphics.cfg
 File: graphics.cfg 2010/04/23 v1.9 graphics configuration of TeX Live
 )
-Package graphics Info: Driver file: dvips.def on input line 91.
+Package graphics Info: Driver file: dvips.def on input line 95.
 
 (/usr/share/texlive/texmf-dist/tex/latex/graphics/dvips.def
-File: dvips.def 2014/04/23 v3.0j Driver-dependant file (DPC,SPQR)
+File: dvips.def 2015/12/30 v3.0k Driver-dependent file (DPC,SPQR)
 ))
 \Gin@req@height=\dimen103
 \Gin@req@width=\dimen104
@@ -262,6 +261,10 @@ LaTeX Info: Redefining \nameref on input line 14.
 \@outlinefile=\write3
 \openout3 = `manual.out'.
 
+
+
+Package hyperref Warning: Rerun to get /PageLabels entry.
+
 LaTeX Font Info:    External font `cmex10' loaded for size
 (Font)              <12> on input line 17.
 LaTeX Font Info:    External font `cmex10' loaded for size
@@ -272,16 +275,16 @@ LaTeX Font Info:    External font `cmex10' loaded for size
 (Font)              <10.95> on input line 23.
 
 Overfull \hbox (151.10326pt too wide) in paragraph at lines 43--43
-[][]\OT1/cmtt/m/n/10.95 wget ftp://ftp.ncbi.nlm.nih.gov/sra/reports/Assembly/GR
-Ch37-HG19_Broad_variant/Homo_sapiens_assembly19.fasta[] 
+[]\OT1/cmtt/m/n/10.95 wget ftp://ftp.ncbi.nlm.nih.gov/sra/reports/Assembly/GRCh
+37-HG19_Broad_variant/Homo_sapiens_assembly19.fasta[] 
  []
 
 
 Overfull \hbox (812.20235pt too wide) in paragraph at lines 76--76
-[][]\OT1/cmtt/m/n/10.95 2015-07-19 17:16:05,185 commandline: tebreak/tebreak.py
- -b test/data/example.ins.bam -r Homo_sapiens_assembly19.fasta -i test/data/exa
-mple.region.bed --pickle test/example.pickle --detail_out test/example.tebreak.
-detail.out[] 
+[]\OT1/cmtt/m/n/10.95 2015-07-19 17:16:05,185 commandline: tebreak/tebreak.py -
+b test/data/example.ins.bam -r Homo_sapiens_assembly19.fasta -i test/data/examp
+le.region.bed --pickle test/example.pickle --detail_out test/example.tebreak.de
+tail.out[] 
  []
 
 [1
@@ -319,9 +322,9 @@ ocessing 6 filtered insertions, trying to improve consensus breakend sequences
 
 
 Overfull \hbox (473.02977pt too wide) in paragraph at lines 112--112
-[][]\OT1/cmtt/m/n/10.95 2015-07-19 17:25:39,039 resolve.py called with args: te
-break/resolve.py -p test/example.pickle -i lib/teref.human.fa --detail_out test
-/example.resolve.detail.out -v[] 
+[]\OT1/cmtt/m/n/10.95 2015-07-19 17:25:39,039 resolve.py called with args: tebr
+eak/resolve.py -p test/example.pickle -i lib/teref.human.fa --detail_out test/e
+xample.resolve.detail.out -v[] 
  []
 
 
@@ -402,33 +405,46 @@ Overfull \hbox (174.098pt too wide) in paragraph at lines 112--112
 f.SVA:SVA_F.1d70cd96-ed12-40ed-ba2c-3495a4db7b20.fa ...[] 
  []
 
-[2] [3] [4]
-LaTeX Font Info:    Try loading font information for OMS+cmr on input line 241.
+[2]
+Overfull \hbox (18.88344pt too wide) in paragraph at lines 130--130
+[]\OT1/cmtt/m/n/10.95 scripts/filter_hg19.py --tabfile test/example.tab.txt > t
+est/example.filtered.tab.txt[] 
+ []
+
+[3] [4]
+LaTeX Font Info:    Try loading font information for OMS+cmr on input line 239.
 
  (/usr/share/texlive/texmf-dist/tex/latex/base/omscmr.fd
-File: omscmr.fd 1999/05/25 v2.5h Standard LaTeX font definitions
+File: omscmr.fd 2014/09/29 v2.5h Standard LaTeX font definitions
 )
 LaTeX Font Info:    Font shape `OMS/cmr/m/n' in size <10.95> not available
-(Font)              Font shape `OMS/cmsy/m/n' tried instead on input line 241.
- [5]
-[6] [7] [8] [9] [10]
-Package atveryend Info: Empty hook `BeforeClearDocument' on input line 417.
- [11]
-Package atveryend Info: Empty hook `AfterLastShipout' on input line 417.
+(Font)              Font shape `OMS/cmsy/m/n' tried instead on input line 239.
+ [5] [6]
+[7] [8] [9] [10] [11]
+Package atveryend Info: Empty hook `BeforeClearDocument' on input line 438.
+ [12]
+Package atveryend Info: Empty hook `AfterLastShipout' on input line 438.
  (./manual.aux)
-Package atveryend Info: Empty hook `AtVeryEndDocument' on input line 417.
-Package atveryend Info: Executing hook `AtEndAfterFileList' on input line 417.
-Package rerunfilecheck Info: File `manual.out' has not changed.
-(rerunfilecheck)             Checksum: 0D23AC58A166310F9F46F4CB092960FF;1193.
-Package atveryend Info: Empty hook `AtVeryVeryEnd' on input line 417.
+Package atveryend Info: Empty hook `AtVeryEndDocument' on input line 438.
+Package atveryend Info: Executing hook `AtEndAfterFileList' on input line 438.
+
+
+Package rerunfilecheck Warning: File `manual.out' has changed.
+(rerunfilecheck)                Rerun to get outlines right
+(rerunfilecheck)                or use package `bookmark'.
+
+Package rerunfilecheck Info: Checksums for `manual.out':
+(rerunfilecheck)             Before: D41D8CD98F00B204E9800998ECF8427E;0
+(rerunfilecheck)             After:  0D23AC58A166310F9F46F4CB092960FF;1193.
+Package atveryend Info: Empty hook `AtVeryVeryEnd' on input line 438.
  ) 
 Here is how much of TeX's memory you used:
- 5043 strings out of 495022
- 74985 string characters out of 6181370
- 168727 words of memory out of 5000000
- 8250 multiletter control sequences out of 15000+600000
+ 5033 strings out of 494954
+ 74786 string characters out of 6181003
+ 167778 words of memory out of 5000000
+ 8311 multiletter control sequences out of 15000+600000
  8979 words of font info for 32 fonts, out of 8000000 for 9000
  14 hyphenation exceptions out of 8191
  29i,6n,32p,499b,439s stack positions out of 5000i,500n,10000p,200000b,80000s
 
-Output written on manual.dvi (11 pages, 47860 bytes).
+Output written on manual.dvi (12 pages, 48788 bytes).

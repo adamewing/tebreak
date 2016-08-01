@@ -212,10 +212,10 @@ def main(args):
                 header = line.strip().split('\t')
 
                 if args.insref:
-                    header += ['Mappability', 'ExonerateRealign']
+                    header += ['ExonerateRealign']
 
                 if args.chimera:
-                    header += ['ChimeraBaseCount', 'InsSiteHomology']
+                    header += ['ChimeraBaseCount', 'InsSiteHomology', 'PossibleRefChimera']
 
                 print '\t'.join(header)
 
@@ -277,7 +277,7 @@ def main(args):
 
                 align_info = 'NA'
 
-                if out and args.insref and 'ExonerateRealign' not in header:
+                if out and args.insref: #and 'ExonerateRealign' not in header:
                     align_info = realign_filter(rec, inslib)
 
                     if len(align_info) == 0:
@@ -298,6 +298,7 @@ def main(args):
 
                 ins_site_homlen = 0 # insertion site homology length
                 ins_site_homseq = 'NA' # sequence of overlapped region
+                ch_ref_present = False
 
                 if out and args.chimera:
                     if not args.refgenome:
@@ -352,14 +353,19 @@ def main(args):
                         ins_site_homlen = ol[1]-ol[0]
                         ins_site_homseq = rec[alignside][ol[0]:ol[1]]
 
+                    # chimera with adjacent ref element check
+                    ch_ref_present = ref_filter(rec['Chromosome'], rec['Left_Extreme'], rec['Right_Extreme'], rec['Superfamily'], tbx, extend=10000)
+
                 if out:
                     fields = line.strip().split()
-                    fields.append(str(mapscore))
-                    fields.append(','.join([';'.join(alignment) for alignment in align_info]))
+
+                    if args.insref:
+                        fields.append(','.join([';'.join(alignment) for alignment in align_info]))
 
                     if args.chimera:
                         fields.append(str(ins_site_homlen))
                         fields.append(ins_site_homseq)
+                        fields.append(str(ch_ref_present))
                     
                     print '\t'.join(fields)
 

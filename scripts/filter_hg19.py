@@ -211,11 +211,11 @@ def main(args):
             if i == 0: # header
                 header = line.strip().split('\t')
 
-                if args.insref:
+                if args.realign and args.insref:
                     header += ['ExonerateRealign']
 
                 if args.chimera:
-                    header += ['ChimeraBaseCount', 'InsSiteHomology', 'PossibleRefChimera']
+                    header += ['ChimeraBaseCount', 'ChimeraMatchIns', 'ChimeraMatchRef', 'InsSiteHomology', 'PossibleRefEltChimera']
 
                 print '\t'.join(header)
 
@@ -277,7 +277,7 @@ def main(args):
 
                 align_info = 'NA'
 
-                if out and args.insref: #and 'ExonerateRealign' not in header:
+                if out and args.realign and args.insref:
                     align_info = realign_filter(rec, inslib)
 
                     if len(align_info) == 0:
@@ -299,10 +299,15 @@ def main(args):
                 ins_site_homlen = 0 # insertion site homology length
                 ins_site_homseq = 'NA' # sequence of overlapped region
                 ch_ref_present = False
+                ins_pct_match = 0.0
+                ref_pct_match = 0.0
 
                 if out and args.chimera:
                     if not args.refgenome:
                         sys.exit('--refgenome required in conjunction with --chimera')
+
+                    if not args.insref:
+                        sys.exit('--insref required in conjunction with --chimera')
 
                     ref = pysam.Fastafile(args.refgenome)
 
@@ -353,17 +358,27 @@ def main(args):
                         ins_site_homlen = ol[1]-ol[0]
                         ins_site_homseq = rec[alignside][ol[0]:ol[1]]
 
+                        ch_align_ins = align(ins_site_homseq, ins_seq, 'Ins')
+                        ch_align_ref = align(ins_site_homseq, ref_seq, 'Ref')
+
+                        if ch_align_ins:
+                            ins_pct_match = ch_align_ins[-1]
+                        if ch_align_ref:
+                            ref_pct_match = ch_align_ref[-1]
+
                     # chimera with adjacent ref element check
                     ch_ref_present = ref_filter(rec['Chromosome'], rec['Left_Extreme'], rec['Right_Extreme'], rec['Superfamily'], tbx, extend=10000)
 
                 if out:
                     fields = line.strip().split()
 
-                    if args.insref:
+                    if args.insref and args.realign:
                         fields.append(','.join([';'.join(alignment) for alignment in align_info]))
 
                     if args.chimera:
                         fields.append(str(ins_site_homlen))
+                        fields.append(str(ins_pct_match))
+                        fields.append(str(ref_pct_match))
                         fields.append(ins_site_homseq)
                         fields.append(str(ch_ref_present))
                     
@@ -378,6 +393,7 @@ if __name__ == '__main__':
     parser.add_argument('--ignore_ref_filter', default=False, action='store_true', help='turn of filtering vs. reference elements')
     parser.add_argument('--lenfilter', default=False, action='store_true', help='turn on filter by insertion length')
     parser.add_argument('--refgenome', default=None)
+    parser.add_argument('--realign', default=False, action='store_true')
     parser.add_argument('--chimera', default=False, action='store_true')
     parser.add_argument('--wideref', default=False, action='store_true')
     args = parser.parse_args()

@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 
+import os
 import sys
 import argparse
 import pysam
@@ -68,13 +69,14 @@ def getVAF(bamfn, chrom, poslist):
 
 
 def main(args):
+    bamname = '.'.join(os.path.basename(args.bam).split('.')[:-1])
+
     with open(args.tabfile, 'r') as tab:
         for i, line in enumerate(tab):
-
             if i == 0: # header
                 header = line.strip().split('\t')
-                header += ['GTRefCount', 'GTAltCount', 'VAF']
-                print line.strip()
+                header += [bamname+'_RefCount', bamname+'_Alt', bamname+'_VAF']
+                print '\t'.join(header)
                 continue
 
             rec = {}

@@ -24,7 +24,7 @@ def count_alen(samrec):
 def count_mm(samrec):
     ''' parse NM flag for mismatches in SAM record, return -1 if no NM tag is present '''
     for field in samrec:
-        if field.startswith('NM'):
+        if field.startswith('NM:'):
             return float(field.split(':')[-1])
 
     return -1.
@@ -128,7 +128,9 @@ def main(args):
 
     logger.debug('kept %d records' % len(filtered))
 
-    with open(args.out, 'w') as pickout:
+    out_pickle = '.'.join(args.pickle.split('.')[:-1]) + '.screened.pickle'
+
+    with open(out_pickle, 'w') as pickout:
         pickle.dump(filtered, pickout)
 
 
@@ -141,7 +143,7 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--pickle', required=True, help='input filename (tebreak.py pickle)')
     parser.add_argument('-r', '--ref', required=True, help='reference to align consensus sequences against')
     parser.add_argument('-t', '--threads', default=4, help='alignment threads')
-    parser.add_argument('-o', '--out', default='filtered.pickle', help='output filename (tebreak.py pickle)')
+    parser.add_argument('-o', '--out', default=None, help='output filename (tebreak.py pickle)')
     parser.add_argument('-i', '--invert', default=False, action='store_true', help='retain insertions that do not match library')
     parser.add_argument('-s', '--minscore', default=20, help='minimum alignment score (-T option to bwa mem) default=20')
     parser.add_argument('-m', '--minmatch', default=0.95, help='minimum match pct/100 (default 0.95)')

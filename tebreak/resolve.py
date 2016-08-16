@@ -1204,17 +1204,21 @@ def finalise_ins(ins, args):
 
 
 def main(args):
-    if args.verbose: logger.setLevel(logging.DEBUG)
+    if args.verbose:
+        logger.setLevel(logging.DEBUG)
+    else:
+        logger.setLevel(logging.INFO)
+
     raw_insertions = []
 
-    logger.debug('resolve.py called with args: %s' % ' '.join(sys.argv))
-    logger.debug('loading pickle: %s' % args.pickle)
+    logger.info('resolve.py called with args: %s' % ' '.join(sys.argv))
+    logger.info('loading pickle: %s' % args.pickle)
 
     with open(args.pickle, 'r') as pickin:
         raw_insertions = pickle.load(pickin)
 
-    logger.debug('finished loading %s' % args.pickle)
-    logger.debug('raw candidate count: %d' % len(raw_insertions))
+    logger.info('finished loading %s' % args.pickle)
+    logger.info('raw candidate count: %d' % len(raw_insertions))
 
     uuids = None
 
@@ -1243,14 +1247,14 @@ def main(args):
     gc_c = gc.collect()
 
 
-    logger.debug('prefiltered candidate count: %d' % len(insertions))
+    logger.info('prefiltered candidate count: %d' % len(insertions))
 
     inslib_fa = prepare_ref(args.inslib_fasta, refoutdir=args.refoutdir, makeFAI=args.callmuts, makeBWA=False, usecached=args.usecachedLAST)
 
     forest = None
     # set up reference mask BED if available
     if args.filter_bed is not None:
-        logger.debug('using BED as genome reference filter: %s' % args.filter_bed)
+        logger.info('using BED as genome reference filter: %s' % args.filter_bed)
         forest = interval_forest(args.filter_bed)
 
     results = []
@@ -1261,12 +1265,14 @@ def main(args):
 
     gc_c = gc.collect()
 
+    onepct = int(len(insertions)*.01)+1
+
     for counter, ins in enumerate(insertions):
         res = pool.apply_async(resolve_insertion, [args, ins, inslib_fa])
         results.append(res)
 
-        if counter % 1000 == 0:
-            logger.debug('submitted %d candidates, last uuid: %s' % (counter, ins['INFO']['ins_uuid']))
+        if counter % onepct == 0:
+            logger.info('submitted %d candidates, last uuid: %s, pct complete: %f' % (counter, ins['INFO']['ins_uuid'], counter/float(len(insertions))))
 
             new_insertions = [res.get() for res in results if res is not None]
             if new_insertions:
@@ -1324,7 +1330,7 @@ if __name__ == '__main__':
     parser.add_argument('-t', '--processes', default=1, help="split work across multiple processes")
     parser.add_argument('-i', '--inslib_fasta', required=True, help="reference for insertions (not genome)")
     parser.add_argument('-m', '--filter_bed', default=None, help="BED file of regions to mask")
-    parser.add_argument('-v', '--verbose', action='store_true', default=False, help="output status information")
+    parser.add_argument('-v', '--verbose', action='store_true', default=False, help="output detailed status information")
     parser.add_argument('-o', '--out', default=None, help="output table")
     parser.add_argument('--max_bam_count', default=0, help="skip sites with more than this number of BAMs (default = no limit)")
     parser.add_argument('--min_ins_match', default=0.9, help="minumum match to insertion library")

@@ -1287,7 +1287,7 @@ def main(args):
     if args.detail_out is None:
         args.detail_out = '.'.join(args.pickle.split('.')[:-1]) + '.resolve.out'
 
-    tebreak.text_summary(processed_insertions, outfile=args.detail_out) # debug
+    tebreak.text_summary(processed_insertions, cmd=' '.join(sys.argv), outfile=args.detail_out) # debug
 
     results = []
 

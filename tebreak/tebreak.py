@@ -1711,8 +1711,10 @@ def prefer_insertion(ins1, ins2):
     return False
 
 
-def text_summary(insertions, outfile='tebreak.out'):
+def text_summary(insertions, cmd=None, outfile='tebreak.out'):
     with open(outfile, 'w') as out:
+        if cmd:
+            out.write('##CMD: %s\n' % cmd)
         for ins in insertions:
             if ins is not None:
                 out.write('#BEGIN\n')
@@ -1821,18 +1823,13 @@ def main(args):
         insertions += res.get()
     
     insertions = resolve_duplicates(insertions)
-    text_summary(insertions, outfile=args.detail_out)
+    text_summary(insertions, cmd=' '.join(sys.argv), outfile=args.detail_out)
 
     pickoutfn = re.sub('.bam$', '.tebreak.pickle', os.path.basename(args.bam))
     if args.pickle is not None: pickoutfn = args.pickle
 
     with open(pickoutfn, 'w') as pickout:
         pickle.dump(insertions, pickout)
-
-    #if not args.no_shared_mem:
-    #    sys.stderr.write("unloading bwa index %s from shared memory ...\n" % args.bwaref)
-    #    p = subprocess.Popen(['bwa', 'shm', '-d'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    #    for line in p.stdout: pass # wait for bwa to unload
 
     logger.debug('Pickled to %s' % pickoutfn)
 

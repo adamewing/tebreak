@@ -599,7 +599,7 @@ def prepare_ref(fasta, refoutdir='tebreak_refs', makeFAI=True, makeBWA=True, mak
         if usecached and os.path.exists(ref_fa + '.tis'): return ref_fa
         logger.debug('Create LAST db for %s ...' % ref_fa)
         subprocess.call(['lastdb', '-s', '4G', ref_fa, ref_fa])
-        assert os.path.exists(ref_fa + '.tis'), 'could not lastdb -4G %s %s' % (ref_fa, ref_fa)
+        assert os.path.exists(ref_fa + '.tis'), 'could not lastdb -s 4G %s %s' % (ref_fa, ref_fa)
 
     return ref_fa
 

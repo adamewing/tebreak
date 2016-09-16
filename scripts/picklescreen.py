@@ -55,7 +55,9 @@ def mapfilter(fq, ref, minscore=20, minmatch=0.95, threads=4):
     return keep
 
 
-def prepare_ref(fasta, refoutdir='tebreak_refs'):
+def prepare_ref(fasta, refoutdir='tebreak_refs_'):
+    refoutdir += str(uuid4())
+
     if not os.path.exists(refoutdir):
         os.mkdir(refoutdir)
         assert os.path.exists(refoutdir), 'could not create ref output directory: %s' % refoutdir

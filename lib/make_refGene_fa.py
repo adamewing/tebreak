@@ -6,10 +6,17 @@ import sys
 from gzip import open
 from pysam import Fastafile
 from collections import defaultdict as dd
+from string import maketrans
 
 
 def usage():
     return "usage: %s <reference genome fasta> <refGenes.txt.gz>" % sys.argv[0]
+
+
+def rc(dna):
+    ''' reverse complement '''
+    complements = maketrans('acgtrymkbdhvACGTRYMKBDHV', 'tgcayrkmvhdbTGCAYRKMVHDB')
+    return dna.translate(complements)[::-1]
 
 
 if len(sys.argv) == 3:
@@ -50,8 +57,12 @@ if len(sys.argv) == 3:
                 if chrom in fa.references:
                     seq += fa.fetch(chrom, start, end)
 
+            if strand == '-':
+                seq = rc(seq)
+
             if seq:
                 genes[name2].append(seq)
+
 
     for name in genes:
         for i, tx in enumerate(genes[name]):

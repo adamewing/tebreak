@@ -48,20 +48,21 @@ def genedict(fn):
     gdict = {}
     for line in infile:
         c = line.strip().split()
-        name  = c[12]
-        chrom = c[2]
-        start = int(c[4]) - 1000
-        end   = int(c[5]) + 1000
+        name   = c[12]
+        chrom  = c[2]
+        strand = c[3]
+        start  = int(c[4]) - 1000
+        end    = int(c[5]) + 1000
 
-        gdict[name] = '%s:%d-%d' % (chrom, start, end)
+        gdict[name] = ['%s:%d-%d' % (chrom, start, end), strand]
 
     infile.close()
 
     return gdict
 
 
-def callmuts(bam, ref, outbase, region):
-    samtools_cmd = ['samtools', 'mpileup', '-r', region, '-ugf', ref, bam]
+def callmuts(bam, ref, outbase, region, gene):
+    samtools_cmd = ['samtools', 'mpileup', '-r', region[0], '-ugf', ref, bam]
     bcftools_cmd = ['bcftools', 'call', '-vm']
 
     st = subprocess.Popen(samtools_cmd, stdout=subprocess.PIPE)
@@ -69,6 +70,19 @@ def callmuts(bam, ref, outbase, region):
 
     with open(outbase+'.vcf', 'w') as vcf:
         for line in bt.stdout:
+            if line.startswith('#CHROM'):
+                vcf.write('##GENE=%s\n' % gene)
+                vcf.write('##STRAND=%s\n' % region[1])
+            if not line.startswith('#'):
+                chrom, pos, id, ref, alt, qual, filter, info, format, sample = line.strip().split('\t')
+
+                if region[1] == '-':
+                    ref = rc(ref)
+                    alt = rc(alt)
+
+                if len(ref) == len(alt):
+                    print '\t'.join((chrom, pos, ref, alt, qual, filter, info, gene, region[1]))
+
             vcf.write(line)
 
     return outbase+'.vcf'
@@ -83,7 +97,6 @@ def main(args):
         for i, line in enumerate(tab):
             if i == 0: # header
                 header = line.strip().split('\t')
-                print '\t'.join(header)
                 continue
 
             rec = {}
@@ -114,19 +127,17 @@ def main(args):
 
                     gene_name = '.'.join(rec['Superfamily'].split('.')[:-1])
                     if gene_name in genes:
-                        outvcf = callmuts(outbam, args.ref, '%s/tebreak.%s.genomic' % (args.path, rec['UUID']), genes[gene_name])
-                        logger.info('generated callset %s on region %s' % (outvcf, genes[gene_name]))
+                        outvcf = callmuts(outbam, args.ref, '%s/tebreak.%s.genomic' % (args.path, rec['UUID']), genes[gene_name], gene_name)
+                        logger.info('generated callset %s on region %s' % (outvcf, genes[gene_name][0]))
 
                     else:
                         logger.info('no entry in %s for %s' % (args.genes, gene_name))
-
 
                 else:
                     logger.info('less than %d reads for UUID: %s' % (int(args.minmap), rec['UUID']))
 
             else:
                 logger.info('BAM not found: %s' % bamfn)
-
 
 
 if __name__ == '__main__':

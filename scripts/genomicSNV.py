@@ -76,9 +76,9 @@ def callmuts(bam, ref, outbase, region, gene):
             if not line.startswith('#'):
                 chrom, pos, id, ref, alt, qual, filter, info, format, sample = line.strip().split('\t')
 
-                if region[1] == '-':
-                    ref = rc(ref)
-                    alt = rc(alt)
+                #if region[1] == '-':
+                #    ref = rc(ref)
+                #    alt = rc(alt)
 
                 if len(ref) == len(alt):
                     print '\t'.join((chrom, pos, ref, alt, qual, filter, info, gene, region[1]))

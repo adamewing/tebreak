@@ -484,7 +484,7 @@ def qualtrim(read, ctglen, chopclip=False, minqual=35):
     return seq
 
 
-def consensus(seqs, minscore=0.92):
+def consensus(seqs, minscore=0.9):
     ''' build consensus from sorted aligned reads iteratively, expects seqs to be sorted in ref genome order '''
 
     S = -np.ones((256, 256)) + 2 * np.identity(256)

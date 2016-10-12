@@ -66,11 +66,11 @@ def ref_filter(chrom, start, end, superfams, tbx, extend=0):
             if chrom not in tbx[sf].contigs: return True
             for ins in tbx[sf].fetch(chrom, start, end): return True
 
-        if sf in ('ALU', 'SVA'):
+        if sf in ('LTR', 'SINE'):
             if chrom not in tbx[sf].contigs: return True
             for ins in tbx[sf].fetch(chrom, start, end): return True
 
-        if sf == 'SVA':
+        if sf == 'SINE':
             if chrom not in tbx[sf].contigs: return True
             for ins in tbx[sf].fetch(chrom, start, end): return True
 
@@ -79,9 +79,9 @@ def ref_filter(chrom, start, end, superfams, tbx, extend=0):
 
 def len_filter(rec):
     telen = int(rec['TE_Align_End']) - int(rec['TE_Align_Start'])
-    if 'ALU' in rec['Superfamily'] and telen < 250: return True
-    if 'SVA' in rec['Superfamily'] and telen < 1000: return True
-    if 'L1' in rec['Superfamily'] and int(rec['TE_Align_End']) < 5950: return True
+    if 'LTR' in rec['Superfamily'] and telen < 500: return True
+    if 'SINE' in rec['Superfamily'] and (telen < 100 or telen > 200): return True
+    if 'L1' in rec['Superfamily'] and int(rec['TE_Align_End']) < 6500: return True
 
     return False
 
@@ -183,8 +183,8 @@ def overlap(iv1, iv2):
 def main(args):
 
     l1_ref  = tebreak_dir + '/../lib/mask.L1.mm10.bed.gz'
-    alu_ref = tebreak_dir + '/../lib/mask.LTR.mm10.bed.gz'
-    sva_ref = tebreak_dir + '/../lib/mask.SINE.mm10.bed.gz'
+    ltr_ref = tebreak_dir + '/../lib/mask.LTR.mm10.bed.gz'
+    sine_ref = tebreak_dir + '/../lib/mask.SINE.mm10.bed.gz'
     map_ref = tebreak_dir + '/../lib/mm10.map50bp.bed.gz'
 
     inslib = None
@@ -193,14 +193,14 @@ def main(args):
         inslib = load_falib(args.insref)
 
 
-    for fn in (l1_ref, alu_ref, sva_ref):
+    for fn in (l1_ref, ltr_ref, sine_ref):
         if not os.path.exists(fn): sys.exit('reference %s not found' % fn)
         if not os.path.exists(fn + '.tbi'): sys.exit('index for reference %s not found' %fn)
 
     tbx = {}
     tbx['L1']  = pysam.Tabixfile(l1_ref)
-    tbx['ALU'] = pysam.Tabixfile(alu_ref)
-    tbx['SVA'] = pysam.Tabixfile(sva_ref)
+    tbx['LTR'] = pysam.Tabixfile(ltr_ref)
+    tbx['SINE'] = pysam.Tabixfile(sine_ref)
 
     map_tbx = pysam.Tabixfile(map_ref)
 

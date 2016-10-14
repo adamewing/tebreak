@@ -1823,10 +1823,10 @@ def main(args):
         insertions += res.get()
     
     insertions = resolve_duplicates(insertions)
-    detailfn = re.sub('.bam$', '.tebreak.detail.out', os.path.basename(args.bam))
+    detailfn = re.sub('.bam$', '.tebreak.detail.out', os.path.basename(args.bam).split(',')[0])
     text_summary(insertions, cmd=' '.join(sys.argv), outfile=detailfn)
 
-    pickoutfn = re.sub('.bam$', '.tebreak.pickle', os.path.basename(args.bam))
+    pickoutfn = re.sub('.bam$', '.tebreak.pickle', os.path.basename(args.bam).split(',')[0])
     if args.pickle is not None: pickoutfn = args.pickle
 
     with open(pickoutfn, 'w') as pickout:

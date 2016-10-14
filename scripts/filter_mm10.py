@@ -15,7 +15,7 @@ import subprocess
 
 from uuid import uuid4
 
-verbose=False
+verbose=True
 
 FORMAT = '%(asctime)s %(message)s'
 logging.basicConfig(format=FORMAT)
@@ -64,15 +64,21 @@ def ref_filter(chrom, start, end, superfams, tbx, extend=0):
     for sf in superfams.split(','):
         if sf == 'L1':
             if chrom not in tbx[sf].contigs: return True
-            for ins in tbx[sf].fetch(chrom, start, end): return True
+            for ins in tbx[sf].fetch(chrom, start, end):
+                if float(ins.strip().split()[-1]) < 10.0:
+                    return True
 
         if sf in ('LTR', 'SINE'):
             if chrom not in tbx[sf].contigs: return True
-            for ins in tbx[sf].fetch(chrom, start, end): return True
+            for ins in tbx[sf].fetch(chrom, start, end):
+                if float(ins.strip().split()[-1]) < 10.0:
+                    return True
 
         if sf == 'SINE':
             if chrom not in tbx[sf].contigs: return True
-            for ins in tbx[sf].fetch(chrom, start, end): return True
+            for ins in tbx[sf].fetch(chrom, start, end):
+                if float(ins.strip().split()[-1]) < 10.0:
+                    return True
 
     return False
 
@@ -246,8 +252,8 @@ def main(args):
                     logger.debug('Filtered %s: proximity to reference TE of same superfamily' % rec['UUID']) 
                     out = False
 
-                if max(float(rec['5p_Elt_Match']), float(rec['3p_Elt_Match'])) < 0.95:
-                    logger.debug('Filtered %s: max(5p_Elt_Match, 3p_Elt_Match) < 0.95' % rec['UUID'])
+                if max(float(rec['5p_Elt_Match']), float(rec['3p_Elt_Match'])) < 0.90:
+                    logger.debug('Filtered %s: max(5p_Elt_Match, 3p_Elt_Match) < 0.90' % rec['UUID'])
                     out = False
 
                 if max(float(rec['5p_Genome_Match']), float(rec['3p_Genome_Match'])) < 0.98:
@@ -263,8 +269,8 @@ def main(args):
                     logger.debug('Filtered %s: low discordant evidence (< 4 reads)' % rec['UUID'])
                     out = False
 
-                if float(rec['Remap_Disc_Fraction']) < 0.5:
-                    logger.debug('Filtered %s: low discordant evidence (< 50pct supporting)' % rec['UUID'])
+                if float(rec['Remap_Disc_Fraction']) < 0.25:
+                    logger.debug('Filtered %s: low discordant evidence (%s < 25pct supporting)' % (rec['UUID'], rec['Remap_Disc_Fraction']))
                     out = False
 
                 if rec['Insert_Consensus_5p'] == rec['Insert_Consensus_3p'] == 'NA':

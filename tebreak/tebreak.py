@@ -16,6 +16,7 @@ import cPickle as pickle
 import multiprocessing as mp
 
 import numpy as np
+#np.seterr(all='raise')
 import scipy.stats as ss
  
 from uuid import uuid4
@@ -378,7 +379,11 @@ class SplitCluster(ReadCluster):
                     cons += seq[align_end:]
                     #print self.start, self.end, cons
 
-        return cons, np.mean(scores)
+        if scores:
+            return cons, np.mean(scores)
+
+        else:
+            return cons, 0.0
 
     def all_breakpoints(self):
         ''' returns uniquified list of breakpoints '''

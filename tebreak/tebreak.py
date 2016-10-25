@@ -1559,13 +1559,13 @@ def postprocess_insertions(insertions, filters, bwaref, bams, tmpdir='/tmp'):
 
 
 
-def run_chunk(args, exp_rpkm, chrom, start, end):
+def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.DEBUG)
     chunkname = '%s:%d-%d' % (chrom, start, end)
 
     try:
-        bams = [pysam.AlignmentFile(bam, 'rb') for bam in args.bam.split(',')]
+        bams = [pysam.AlignmentFile(bam, 'rb') for bam in bamlist]
 
         # table of minimum quality scores
         minqual = {}
@@ -1782,6 +1782,22 @@ def main(args):
     chunks = []
     exp_rpkm = 0
 
+    bamlist = []
+
+    if args.bam.endswith('.bam'):
+        bamlist = args.bam.split(',')
+
+    elif args.bam.endswith('.txt'):
+        with open(args.bam, 'r') as bamtxt:
+            for line in bamtxt:
+                bamlist.append(line.strip())
+
+    else:
+        sys.exit('Unrecognised input to -b/--bam: %s, must be .bam or .txt' % args.bam)
+
+    if len(bamlist) == 0:
+        sys.exit('No entries in -b/--bam input .txt: %s' % args.bam)
+
     if args.interval_bed is None or args.wg_rpkm:
         if args.interval_bed is None:
             chunks = genome.chunk(chunk_count, sorted=True, pad=5000)
@@ -1790,14 +1806,14 @@ def main(args):
             if args.rpkm_bam:
                 exp_rpkm = expected_rpkm(args.rpkm_bam.split(','), genome)
             else:
-                exp_rpkm = expected_rpkm(args.bam.split(','), genome)
+                exp_rpkm = expected_rpkm(bamlist, genome)
 
     else:
         if not args.no_rpkm:
             if args.rpkm_bam:
                 exp_rpkm = expected_rpkm(args.rpkm_bam.split(','), genome, intervals=args.interval_bed)
             else:
-                exp_rpkm = expected_rpkm(args.bam.split(','), genome, intervals=args.interval_bed)
+                exp_rpkm = expected_rpkm(bamlist, genome, intervals=args.interval_bed)
 
 
     if args.interval_bed is not None:
@@ -1815,19 +1831,28 @@ def main(args):
 
     for chunk in chunks:
         # run_chunk(args, exp_rpkm, chunk[0], chunk[1], chunk[2]) # uncomment for mp debug
-        res = pool.apply_async(run_chunk, [args, exp_rpkm, chunk[0], chunk[1], chunk[2]])
+        res = pool.apply_async(run_chunk, [args, bamlist, exp_rpkm, chunk[0], chunk[1], chunk[2]])
         reslist.append(res)
 
     insertions = []
     for res in reslist:
         insertions += res.get()
-    
+
     insertions = resolve_duplicates(insertions)
-    detailfn = re.sub('.bam$', '.tebreak.detail.out', os.path.basename(args.bam).split(',')[0])
+
+    detailfn = re.sub('.bam$', '.tebreak.detail.out', os.path.basename(bamlist[0]))
+
+    if args.detail_out is not None:
+        detailfn = args.detail_out
+
     text_summary(insertions, cmd=' '.join(sys.argv), outfile=detailfn)
 
-    pickoutfn = re.sub('.bam$', '.tebreak.pickle', os.path.basename(args.bam).split(',')[0])
-    if args.pickle is not None: pickoutfn = args.pickle
+    logger.debug('Wrote detail output to %s' % detailfn)
+
+    pickoutfn = re.sub('.bam$', '.tebreak.pickle', os.path.basename(bamlist[0]))
+
+    if args.pickle is not None:
+        pickoutfn = args.pickle
 
     with open(pickoutfn, 'w') as pickout:
         pickle.dump(insertions, pickout)
@@ -1841,7 +1866,7 @@ if __name__ == '__main__':
     logging.basicConfig(format=FORMAT)
  
     parser = argparse.ArgumentParser(description='Find inserted sequences vs. reference')
-    parser.add_argument('-b', '--bam', required=True, help='target BAM(s): can be comma-delimited list')
+    parser.add_argument('-b', '--bam', required=True, help='target BAM(s): can be comma-delimited list or .txt file with bam locations')
     parser.add_argument('-r', '--bwaref', required=True, help='bwa/samtools indexed reference genome')
     parser.add_argument('-p', '--processes', default=1, help='split work across multiple processes')
     parser.add_argument('-c', '--chunks', default=1, help='split genome into chunks (default = # processes), helps control memory usage')
@@ -1868,7 +1893,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--tmpdir', default='/tmp', help='temporary directory (default = /tmp)')
     parser.add_argument('--pickle', default=None, help='pickle output name')
-    parser.add_argument('--detail_out', default='tebreak.out', help='file to write detailed output')
+    parser.add_argument('--detail_out', default=None, help='file to write detailed output')
  
     parser.add_argument('--wg_rpkm', default=False, action='store_true', help='force calculate rpkm over whole genome')
     parser.add_argument('--no_rpkm', default=False, action='store_true', help='do not filter sites by rpkm')

@@ -1232,12 +1232,15 @@ def map_breakends(breakends, db, tmpdir='/tmp'):
 def build_last_db(fa):
     ''' make db for LAST alignments '''
     subprocess.call(['lastdb', '-s', '4G', fa, fa])
-    assert os.path.exists(fa + '.tis'), 'could not lastdb -4G %s %s' % (fa, fa)
+    if not os.path.exists(fa + '.tis'):
+        sys.stderr.write('Warning: could not lastdb -4G %s %s\n' % (fa, fa))
 
 
 def align_last(fa, db, e=20):
     ''' returns list of LASTResult objects '''
-    assert os.path.exists(db + '.tis'), 'not a lastdb: %s' % db
+    if not os.path.exists(db + '.tis'):
+        sys.stderr.write('Warning: no lastdb index for %s\n' % db)
+        return []
 
     last_cmd = ['lastal', '-e', str(e), db, fa]
 

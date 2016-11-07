@@ -242,7 +242,8 @@ def main(args):
     'Insert_Consensus_5p',
     'Insert_Consensus_3p',
     'Variants',
-    'Old_UUIDs']
+    'Old_UUIDs',
+    'CombineWarnings']
 
     print '\t'.join(header)
 

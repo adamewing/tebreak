@@ -45,7 +45,6 @@ def mapfilter(fq, ref, minscore=20, minmatch=0.90, threads=4):
 
     for rec in p.stdout:
         if not rec.startswith('@'):
-            print rec # debug
             rec = rec.split('\t')
             name = '-'.join(rec[0].split('-')[:-1])
             flag = int(rec[1])

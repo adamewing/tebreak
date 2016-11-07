@@ -34,7 +34,7 @@ def matchpct(samrec):
     return 1.0-(count_mm(samrec)/count_alen(samrec))
 
 
-def mapfilter(fq, ref, minscore=20, minmatch=0.95, threads=4):
+def mapfilter(fq, ref, minscore=20, minmatch=0.90, threads=4):
     logger.debug('map %s to %s ...' % (fq, ref))
 
     bwa = ['bwa', 'mem', '-t', str(threads), '-M', '-Y', '-k', '10', '-P', '-S', '-T', str(minscore), ref, fq]
@@ -148,7 +148,7 @@ if __name__ == '__main__':
     parser.add_argument('-o', '--out', default=None, help='output filename (tebreak.py pickle)')
     parser.add_argument('-i', '--invert', default=False, action='store_true', help='retain insertions that do not match library')
     parser.add_argument('-s', '--minscore', default=20, help='minimum alignment score (-T option to bwa mem) default=20')
-    parser.add_argument('-m', '--minmatch', default=0.95, help='minimum match pct/100 (default 0.95)')
+    parser.add_argument('-m', '--minmatch', default=0.90, help='minimum match pct/100 (default 0.90)')
     parser.add_argument('-d', '--use_distal', default=False, action='store_true', help='use only distal part of consensus for alignment')
     args = parser.parse_args()
     main(args)

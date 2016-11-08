@@ -186,6 +186,10 @@ def main(args):
                     else:
                         rec['Inversion'] = 'N'
 
+                else:
+                    rec['Inversion'] = 'N'
+
+
                 if flip:
                     rec = flip_ends(rec)
 

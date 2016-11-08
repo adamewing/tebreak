@@ -2,15 +2,16 @@
 
 import argparse
 import logging
+import re
 
 import networkx as nx
 import numpy as np
+import align
 
 from uuid import uuid4
 from collections import Counter
 from collections import defaultdict as dd
 from bx.intervals.intersection import Intersecter, Interval # pip install bx-python
-
 
 
 verbose=False
@@ -84,6 +85,83 @@ def make_rec_table(tables):
     return master
 
 
+def locate_subseq(longseq, shortseq, end='L'):
+    ''' return (start, end) of shortseq in longseq '''
+    assert len(longseq) >= len(shortseq), 'orient_subseq: %s < %s' % (longseq, shortseq)
+ 
+    matches = [[match.start(0), match.end(0)] for match in re.finditer(shortseq, longseq) if match]
+
+    if len(matches) > 0:
+        if end == 'L':
+            return sorted(matches[0])
+        else:
+            return sorted(matches[-1])
+ 
+    return None
+
+
+def consensus(seqs, minscore=0.95):
+    ''' build consensus from sorted aligned reads iteratively, expects seqs to be sorted in ref genome order '''
+
+    S = -np.ones((256, 256)) + 2 * np.identity(256)
+    S = S.astype(np.int16)
+
+    if len(seqs) == 0:
+        return '', 0.0
+
+    if len(seqs) == 1: # no consensus necessary
+        return seqs[0], 1.0
+
+    uniq_seqs = [seqs[0]]
+    for i, seq in enumerate(seqs[1:], start=1):
+        if seq != seqs[i-1]:
+            uniq_seqs.append(seq)
+
+    if len(uniq_seqs) == 1: # all seqs were the same!
+        return uniq_seqs[0], 1.0
+
+    start_index = 0
+    cons = uniq_seqs[start_index]
+    scores = []
+
+    align_init = False
+
+    for i, seq in enumerate(uniq_seqs[1:]):
+
+        #print 'oldcons:', cons
+        #print 'seq    :', seq
+
+        s1 = align.string_to_alignment(cons)
+        s2 = align.string_to_alignment(seq)
+
+        (s, a1, a2) = align.align(s1, s2, -2, -2, S, local=True)
+        a1 = align.alignment_to_string(a1)
+        a2 = ''.join([b for b in list(align.alignment_to_string(a2)) if b != '-'])
+
+        score = float(len(a1) - (len(a1)-s)) / float(len(a1))
+
+        #print 'score  :', score
+
+        scores.append(score)
+
+        if re.search(a1, cons):
+            cons_start, cons_end = locate_subseq(cons, a1)
+
+            if score >= minscore and cons_end > len(cons)-5:
+                align_end = locate_subseq(seq, a2)[1]
+                cons += seq[align_end:]
+                align_init = True
+                #print 'newcons:', cons
+
+            elif not align_init: # haven't found a scaffold yet
+                start_index += 1
+                cons = uniq_seqs[start_index]
+
+        #print '****'
+
+    return cons, np.mean(scores)
+
+
 def combine(uuids, recs):
 
     combo = {}
@@ -91,7 +169,7 @@ def combine(uuids, recs):
     uncertainty_warning = []
 
     use_any = ['Chromosome']
-    use_max = ['Right_Extreme', '5p_Cons_Len', '3p_Cons_Len']
+    use_max = ['Right_Extreme']
     use_min = ['Left_Extreme']
 
     use_maj = ['5_Prime_End',
@@ -152,8 +230,14 @@ def combine(uuids, recs):
 
     for col in use_len:
         seqs = [recs[uuid][col] for uuid in uuids]
+        cons_seq, cons_score = consensus(seqs)
         seqs.sort(key=len)
+
         combo[col] = seqs[-1]
+
+        if len(cons_seq) > len(combo[col]) and cons_score >= 0.95:
+            combo[col] = cons_seq
+            uncertainty_warning.append('New_Consensus')
 
     for col in use_YN:
         yn = [recs[uuid][col] for uuid in uuids]
@@ -167,7 +251,7 @@ def combine(uuids, recs):
         for uuid in uuids:
             union += recs[uuid][col].split(',')
 
-        combo[col] = ','.join(union)
+        combo[col] = ','.join(list(set(union)))
 
     for col in use_maj:
         maj = Counter([recs[uuid][col] for uuid in uuids]).most_common(1)[0]
@@ -175,6 +259,16 @@ def combine(uuids, recs):
 
         if maj[1] < len(uuids):
             uncertainty_warning.append(col)
+
+    combo['5p_Cons_Len'] = 0
+
+    if combo['Genomic_Consensus_5p'] != 'NA':
+        combo['5p_Cons_Len'] = len(combo['Genomic_Consensus_5p'])
+
+    combo['3p_Cons_Len'] = 0
+
+    if combo['Genomic_Consensus_3p'] != 'NA':
+        combo['3p_Cons_Len'] = len(combo['Genomic_Consensus_3p'])
 
     combo['Old_UUIDs'] = ','.join(uuids)
 
@@ -242,8 +336,7 @@ def main(args):
     'Insert_Consensus_5p',
     'Insert_Consensus_3p',
     'Variants',
-    'Old_UUIDs',
-    'CombineWarnings']
+    'Old_UUIDs']
 
     print '\t'.join(header)
 

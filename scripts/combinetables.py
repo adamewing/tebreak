@@ -8,6 +8,8 @@ import networkx as nx
 import numpy as np
 import align
 
+np.seterr(all='raise')
+
 from uuid import uuid4
 from collections import Counter
 from collections import defaultdict as dd
@@ -138,7 +140,11 @@ def consensus(seqs, minscore=0.95):
         a1 = align.alignment_to_string(a1)
         a2 = ''.join([b for b in list(align.alignment_to_string(a2)) if b != '-'])
 
-        score = float(len(a1) - (len(a1)-s)) / float(len(a1))
+
+        score = 0.0
+
+        if len(a1) > 0:
+            score = float(len(a1) - (len(a1)-s)) / float(len(a1))
 
         #print 'score  :', score
 
@@ -223,7 +229,18 @@ def combine(uuids, recs):
         combo[col] = sum([int(recs[uuid][col]) for uuid in uuids])
 
     for col in use_med_int:
-        combo[col] = int(np.median([int(recs[uuid][col]) for uuid in uuids]))
+        recvals = []
+
+        for uuid in uuids:
+            if recs[uuid][col] != 'NA':
+                recvals.append(int(recs[uuid][col]))
+
+        if recvals:
+            combo[col] = int(np.median(recvals))
+
+        else:
+            logger.warn('No value for %s for uuid(s): %s' % (col, ','.join(uuids)))
+            combo[col] = 'NA'
 
     for col in use_med_flt:
         combo[col] = np.median([float(recs[uuid][col]) for uuid in uuids])

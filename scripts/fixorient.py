@@ -95,6 +95,16 @@ def load_falib(infa):
     return seqdict
 
 
+def fix_ins_id(ins_id, inslib):
+    superfam, subfam = ins_id.split(':')
+
+    for i in inslib.keys():
+        if i.split(':')[-1] == subfam:
+            superfam = i.split(':')[0]
+
+    return '%s:%s' % (superfam, subfam)
+
+
 def main(args):
 
     inslib = None
@@ -119,6 +129,14 @@ def main(args):
                     rec[header[n]] = field
 
                 ins_id = '%s:%s' % (rec['Superfamily'], rec['Subfamily'])
+
+                if ins_id not in inslib:
+                    ins_id = fix_ins_id(ins_id, inslib)
+
+                    if ins_id not in inslib:
+                        logger.warn('No insertion identification for %s' % rec['UUID'])
+                        continue
+
                 refseq = ref.fetch(rec['Chromosome'], int(rec['Left_Extreme']), int(rec['Right_Extreme']))
 
                 #print rec['Genomic_Consensus_5p'], inslib[ins_id]

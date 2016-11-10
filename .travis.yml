@@ -21,11 +21,10 @@ before_install:
     - python setup.py build
     - python setup.py install
     - cd ..
-    - sudo apt-get update
-    - sudo apt-get install bwa
-    #- git clone https://github.com/lh3/bwa.git
-    #- sudo make -C bwa
-    #- sudo cp bwa/bwa $WORKDIR/bin
+    #- sudo apt-get install $(grep -vE "^\s*#" prerequisites.txt  | tr "\n" " ")
+    - git clone https://github.com/lh3/bwa.git
+    - sudo make -C bwa
+    - sudo cp bwa/bwa $WORKDIR/bin
     - git clone https://github.com/samtools/htslib.git
     - sudo make -C htslib
     - git clone https://github.com/samtools/samtools.git

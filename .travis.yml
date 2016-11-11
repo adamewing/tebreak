@@ -6,47 +6,59 @@ sudo: required
 before_install: 
     - bash prerequisites.sh
     - WORKDIR=`pwd`
+    ##Last DB
     - wget http://last.cbrc.jp/last-716.zip
     - unzip last-716.zip
     - make CXXFLAGS=-O3 -C last-716 && sudo make install -C last-716
-    - wget https://github.com/pysam-developers/pysam/archive/9c4c00a22fbf0f836347283cb008dbc9183e5e56.zip
-    - unzip 9c4c00a22fbf0f836347283cb008dbc9183e5e56.zip
-    - mv pysam-9c4c00a22fbf0f836347283cb008dbc9183e5e56 pysam 
+    ##Cython 
     - wget https://github.com/cython/cython/archive/137c064f3b28d4bb59d05a9751f60623f2fc9387.zip
     - unzip 137c064f3b28d4bb59d05a9751f60623f2fc9387.zip
+    - rm 137c064f3b28d4bb59d05a9751f60623f2fc9387.zip
     - mv cython-137c064f3b28d4bb59d05a9751f60623f2fc9387 cython
     - cd cython
     - python setup.py install
+    ##Pysam 
+    - wget https://github.com/pysam-developers/pysam/archive/9c4c00a22fbf0f836347283cb008dbc9183e5e56.zip
+    - unzip 9c4c00a22fbf0f836347283cb008dbc9183e5e56.zip
+    - rm 9c4c00a22fbf0f836347283cb008dbc9183e5e56.zip
+    - mv pysam-9c4c00a22fbf0f836347283cb008dbc9183e5e56 ../pysam
     - cd ../pysam
     - python setup.py build
     - python setup.py install
     - cd ..
-    #- sudo apt-get install $(grep -vE "^\s*#" prerequisites.txt  | tr "\n" " ")
+    ##BWA (newest version)
     - git clone https://github.com/lh3/bwa.git
     - sudo make -C bwa
-    - sudo cp bwa/bwa $WORKDIR/bin
+    - sudo mv bwa/bwa $WORKDIR/bin
+    ##HTSLIB
     - git clone https://github.com/samtools/htslib.git
     - sudo make -C htslib
+    ##Samtools
     - git clone https://github.com/samtools/samtools.git
     - sudo make -C samtools
-    - sudo cp samtools/samtools $WORKDIR/bin/
-    - sudo cp samtools/misc/wgsim $WORKDIR/bin/
+    - sudo mv samtools/samtools $WORKDIR/bin/
+    - sudo mv samtools/misc/wgsim $WORKDIR/bin/
+    ##Bcftools
     - git clone https://github.com/samtools/bcftools.git
     - sudo make -C bcftools
-    - sudo cp bcftools/bcftools $WORKDIR/bin/
+    - sudo mv bcftools/bcftools $WORKDIR/bin/
+    ##Scipy
     - wget https://pypi.python.org/packages/source/s/scipy/scipy-0.17.0.tar.gz#md5=5ff2971e1ce90e762c59d2cd84837224
     - tar -xvf scipy-0.17.0.tar.gz
     - cd scipy-0.17.0
     - python setup.py install
     - cd ..
+    ##BX-Python
     - wget https://pypi.python.org/packages/source/b/bx-python/bx-python-0.7.3.tar.gz#md5=d8c50c01c9e421bae0bbdbfa00fef6e4
     - tar -xvf bx-python-0.7.3.tar.gz
     - cd bx-python-0.7.3
     - python setup.py install
     - cd ..
+    ##Minia
     - wget http://gatb-tools.gforge.inria.fr/versions/bin/minia-2.0.3-Linux.tar.gz
     - tar -xvf minia-2.0.3-Linux.tar.gz
-    - sudo cp minia-2.0.3-Linux/bin/{dbgh5,dbginfo,h5dump,minia}  $WORKDIR/bin/
+    - sudo mv minia-2.0.3-Linux/bin/{dbgh5,dbginfo,h5dump,minia}  $WORKDIR/bin/
+    ##Align
     - git clone https://github.com/adamewing/align.git
     - cd align
     - python setup.py install
@@ -54,6 +66,7 @@ before_install:
     - export PATH=$WORKDIR/bin/:$PATH
 install: true
 script:
+    ##Installing TEBreak, indexing the reference and running the test
     - python setup.py build
     - python setup.py install
     - unzip test/data/Homo_sapiens_chr4_assembly19.fasta.zip

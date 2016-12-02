@@ -68,14 +68,16 @@ def getVAF(bamfn, chrom, poslist):
     return alt, ref, vaf
 
 
-def main(args):
-    bamname = '.'.join(os.path.basename(args.bam).split('.')[:-1])
+def genotype(runlist):
 
     with open(args.tabfile, 'r') as tab:
         for i, line in enumerate(tab):
             if i == 0: # header
                 header = line.strip().split('\t')
-                header += [bamname+'_RefCount', bamname+'_Alt', bamname+'_VAF']
+
+                for name, _ in runlist:
+                    header += [name+'_RefCount', name+'_Alt', name+'_VAF']
+
                 print '\t'.join(header)
                 continue
 
@@ -84,19 +86,34 @@ def main(args):
             for n, field in enumerate(line.strip().split('\t')):
                 rec[header[n]] = field
 
-            alt, ref, vaf = getVAF(args.bam, rec['Chromosome'], (rec['5_Prime_End'], rec['3_Prime_End']))
-
             c = line.strip().split()
-            c.append(str(ref))
-            c.append(str(alt))
-            c.append(str(vaf))
+
+            for _, bamfn in runlist:
+                alt, ref, vaf = getVAF(bamfn, rec['Chromosome'], (rec['5_Prime_End'], rec['3_Prime_End']))
+
+                c.append(str(ref))
+                c.append(str(alt))
+                c.append(str(vaf))
 
             print '\t'.join(c)
 
 
+def main(args):
+
+    runlist = []
+
+    with open(args.bamlist, 'r') as bamlist:
+        for line in bamlist:
+            name, bamfn = line.strip().split()
+
+            runlist.append((name, bamfn))
+
+    genotype(runlist)
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='genotyper')
-    parser.add_argument('-b', '--bam', required='True')
+    parser.add_argument('-b', '--bamlist', required='True')
     parser.add_argument('-t', '--tabfile', required='True')
     args = parser.parse_args()
     main(args)

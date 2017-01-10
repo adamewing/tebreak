@@ -130,11 +130,17 @@ def main(args):
 
                 ins_id = '%s:%s' % (rec['Superfamily'], rec['Subfamily'])
 
+                if rec['Superfamily'] == 'NA':
+                    ins_id = rec['Subfamily']
+
+                if rec['Subfamily'] == 'NA':
+                    ins_id = rec['Superfamily']
+
                 if ins_id not in inslib:
                     ins_id = fix_ins_id(ins_id, inslib)
 
                     if ins_id not in inslib:
-                        logger.warn('No insertion identification for %s' % rec['UUID'])
+                        logger.warn('No insertion identification for %s (ins_id %s)' % (rec['UUID'], ins_id))
                         continue
 
                 refseq = ref.fetch(rec['Chromosome'], int(rec['Left_Extreme']), int(rec['Right_Extreme']))
@@ -194,6 +200,12 @@ def main(args):
                     flip = True
 
                 #print flip
+
+                if rec['Orient_5p'] != new_5p_orient:
+                    logger.info('Changed 5p orientation for %s' % rec['UUID'])
+
+                if rec['Orient_3p'] != new_3p_orient:
+                    logger.info('Changed 3p orientation for %s' % rec['UUID'])
 
                 rec['Orient_5p'] = new_5p_orient
                 rec['Orient_3p'] = new_3p_orient

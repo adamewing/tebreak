@@ -14,6 +14,7 @@ Contact: adam.ewing@mater.uq.edu.au
 |samtools | http://samtools.sourceforge.net/ | BAM manipulation |
 |LAST     | http://last.cbrc.jp/ | fine-scale realignment |
 |minia    | http://minia.genouest.org/ | sequence assembly |
+|exonerate| https://github.com/adamewing/exonerate.git | realignments during post-filter |
 
 
 (latest versions unless otherwise specified)

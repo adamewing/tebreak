@@ -119,6 +119,8 @@ def main(args):
 
     count_5p_diff = 0
     count_3p_diff = 0
+    count_5p_switchcons = 0
+    count_3p_switchcons = 0
 
     with open(args.table, 'r') as table:
         for i, line in enumerate(table):
@@ -251,6 +253,28 @@ def main(args):
                         gen_5p_align = align_store['gen_5p']
                         gen_3p_align = align_store['gen_3p']
 
+                    # try using the insertion-based consensus if no luck with the genomic one
+
+                    if not elt_5p_align or not gen_5p_align:
+                        retry_elt_5p_align = align(rec['Insert_Consensus_5p'], inslib[ins_id])
+                        retry_gen_5p_align = align(rec['Insert_Consensus_5p'], refseq)
+
+                        if retry_gen_5p_align and retry_elt_5p_align:
+                            elt_5p_align = retry_elt_5p_align
+                            gen_5p_align = retry_gen_5p_align
+                            count_5p_switchcons += 1
+
+
+                    if not elt_3p_align or not gen_3p_align:
+                        retry_elt_3p_align = align(rec['Insert_Consensus_3p'], inslib[ins_id])
+                        retry_gen_3p_align = align(rec['Insert_Consensus_3p'], refseq)
+
+                        if retry_gen_3p_align and retry_elt_3p_align:
+                            elt_3p_align = retry_elt_3p_align
+                            gen_3p_align = retry_gen_3p_align
+                            count_3p_switchcons += 1
+
+
                     elt_5p_orient = 'NA'
                     elt_3p_orient = 'NA'
                     gen_5p_orient = 'NA'
@@ -292,14 +316,9 @@ def main(args):
                     if elt_3p_align:
                         coords_3p = sorted(map(int, (elt_3p_align[4], elt_3p_align[5])))
 
-                    #print elt_5p_align, coords_5p
-                    #print elt_3p_align, coords_3p
-
                     flip = False
                     if coords_5p and coords_3p and coords_5p[1] > coords_3p[1]:
                         flip = True
-
-                    #print flip
 
                     if rec['Orient_5p'] != new_5p_orient:
                         logger.info('Changed 5p orientation for %s' % rec['UUID'])
@@ -331,8 +350,11 @@ def main(args):
                     if out:
                         print '\t'.join([rec[h] for h in header])
 
+
     logger.info('Changed orientation on %d 5p ends' % count_5p_diff)
     logger.info('Changed orientation on %d 3p ends' % count_3p_diff)
+    logger.info('Used insertion consensus for %d 5p ends' % count_5p_switchcons)
+    logger.info('Used insertion consensus for %d 3p ends' % count_3p_switchcons)
 
 
 if __name__ == '__main__':

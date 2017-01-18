@@ -511,14 +511,14 @@ class Insertion:
                 self.be1, self.be2 = self.be2, self.be1 # keep breakends in position order
 
         self.info = od() # set with self.compile_info()
-        self.discoreads = []
-        #self.dr_clusters = []
+        self.discreads = []
         self.fastqrecs = []
+        self.genotypes = []
         self.mappability = None
 
     def __len__(self):
         ''' return total number of reads (sr+dr) associated with insertion '''
-        return self.num_sr() + len(self.discoreads)
+        return self.num_sr() + len(self.discreads)
 
     def num_sr(self):
         ''' return number of split reads supporting insertion '''
@@ -600,6 +600,14 @@ class Insertion:
 
             return tsdseq1, tsdseq2
 
+
+    def genotype(self, bams):
+        ''' add supporting read count, VAF for each BAM '''
+        if self.tsd():
+            for bam in bams:
+                self.genotypes.append([bam.filename] + list(getVAF(bam, self.be1.chrom, (self.be1.breakpos, self.be2.breakpos))))
+
+
     def fetch_discordant_reads(self, bams, isize=10000, debug=True, logger=None, max_fetch=50):
         ''' Return list of DiscoRead objects '''
         chrom = self.be1.chrom
@@ -670,7 +678,7 @@ class Insertion:
             all_mapped.update(bam_mapped)
             all_unmapped.update(bam_unmapped)
 
-        self.discoreads = all_mapped.values() + all_unmapped.values()
+        self.discreads = all_mapped.values() + all_unmapped.values()
 
 
     def improve_consensus(self, ctg_fa, bwaref, tmpdir='/tmp'):
@@ -727,7 +735,7 @@ class Insertion:
 
         out_fastq = outdir + '/' + '.'.join(('supportreads', self.be1.chrom, str(self.be1.breakpos), str(uuid4()), 'fq'))
         with open(out_fastq, 'w') as out:
-            for readstore in (self.be1, self.be2, self.discoreads):
+            for readstore in (self.be1, self.be2, self.discreads):
                 if readstore:
                     try:
                         rtype = 'SR'
@@ -803,7 +811,7 @@ class Insertion:
 
         return out_fasta
 
-    def compile_info(self, bams):
+    def compile_info(self, bams, genotype=True):
         ''' fill self.info with summary info, needs original bam for chromosome lookup '''
         if self.be1 == None and self.be2 == None:
             return None
@@ -914,8 +922,12 @@ class Insertion:
         if 'be2_sr_count' not in self.info:
             self.info['be2_sr_count'] = 0
 
-        self.info['dr_count'] = len(self.discoreads)
-        self.info['dr_unmapped_mates'] = len([dr for dr in self.discoreads if dr.mate_read is not None and dr.mate_read.is_unmapped])
+        self.info['dr_count'] = len(self.discreads)
+        self.info['dr_unmapped_mates'] = len([dr for dr in self.discreads if dr.mate_read is not None and dr.mate_read.is_unmapped])
+        if not self.genotypes:
+            self.genotype(bams)
+
+        self.info['genotypes'] = ','.join(['|'.join(map(str, fields)) for fields in self.genotypes])
 
  
 #######################################
@@ -1417,6 +1429,67 @@ def avgmap(maptabix, chrom, start, end):
         return 0.0
 
 
+def getVAF(bam, chrom, poslist):
+    ''' return number of reads supporting alt (insertion), ref (reference) and vaf (variant allele fraction) '''
+    poslist = map(int, poslist)
+    alt, ref = break_count(bam, chrom, poslist)
+    vaf = 0.0 
+
+    if float(ref+alt) > 0:
+        vaf = float(alt)/float(alt+ref)
+
+    return alt, ref, vaf
+
+
+def break_count(bam, chrom, poslist, minpad=5, flex=1, minmapq=10):
+    ''' ref = number of reads spanning TSD, alt = number of reads clipped at breakpoint in poslist '''
+    altcount = 0
+    refcount = 0
+    discards = 0
+
+    tsd_start = min(poslist)
+    tsd_end   = max(poslist)
+
+    tsd_len = tsd_end - tsd_start
+
+    for read in bam.fetch(chrom, tsd_start-minpad, tsd_end+minpad):
+        if read.is_unmapped or read.is_duplicate:
+            continue
+
+        if read.mapq < minmapq:
+            continue
+
+        rclip = len(read.seq) - read.query_alignment_end 
+        lclip = read.query_alignment_start
+
+        rbreak = 0
+        lbreak = 0
+
+        if rclip > max(tsd_len, minpad):
+            rbreak = read.reference_end
+
+        if lclip > max(tsd_len, minpad):
+            lbreak = read.reference_start
+
+        support_alt = False
+
+        for pos in poslist: # does this read support a breakpoint in the list?
+            if (rbreak >= pos-flex and rbreak <= pos+flex) or (lbreak >= pos-flex and lbreak <= pos+flex):
+                support_alt = True
+
+        if support_alt:
+            altcount += 1
+
+        else:
+            #for pos in poslist: # does this read span a breakpoint in the list?
+            if read.alen == len(read.seq):
+                if read.reference_start < tsd_start and read.reference_end > tsd_end: # span TSD
+                    refcount += 1
+
+
+    return altcount, refcount
+
+
 def guess_minqual(bam):
     minscore = None
     n = 0
@@ -1506,7 +1579,7 @@ def filter_insertions(insertions, filters, tmpdir='/tmp', debug=True, logger=Non
     return filtered
 
 
-def postprocess_insertions(insertions, filters, bwaref, bams, tmpdir='/tmp'):
+def postprocess_insertions(insertions, filters, bwaref, bams, tmpdir='/tmp', genotype=True):
     for ins in insertions:
         support_fq  = ins.supportreads_fastq(tmpdir, limit=filters['max_ins_reads'])
         if support_fq is None: return insertions
@@ -1561,7 +1634,7 @@ def postprocess_insertions(insertions, filters, bwaref, bams, tmpdir='/tmp'):
                     ins.be2_improved_cons = False
 
         if ins.be1_improved_cons or ins.be2_improved_cons:
-            ins.compile_info(bams)
+            ins.compile_info(bams, genotype=genotype)
 
     return insertions
 
@@ -1655,7 +1728,7 @@ def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
                 ins_debug_name = '%s:%d-%d' % (ins.be1.chrom, ins.min_supporting_base(), ins.max_supporting_base())
                 logger.debug('Chunk: %s, fetch discordant mates for insertion %s ...' % (chunkname, ins_debug_name))
                 ins.fetch_discordant_reads(bams, logger=logger, max_fetch=int(args.max_disc_fetch))
-                ins.compile_info(bams)
+                ins.compile_info(bams, genotype=True)
 
             logger.debug('Chunk %s: Postprocessing %d filtered insertions, trying to improve consensus breakend sequences ...' % (chunkname, len(insertions)))
             processed_insertions  = postprocess_insertions(insertions, filters, args.bwaref, bams, tmpdir=args.tmpdir)

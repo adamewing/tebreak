@@ -25,6 +25,28 @@ def rc(dna):
     return dna.translate(complements)[::-1]
 
 
+def hompol_scan(seq, base):
+    ''' return start and end coords of longest homopolymer run'''
+    max_hompol = []
+    cur_hompol = []
+
+    for i, b in enumerate(seq.upper()):
+        if b == base:
+            cur_hompol.append(i)
+        else:
+            if len(cur_hompol) > len(max_hompol):
+                max_hompol = cur_hompol
+            cur_hompol = []
+
+    if len(cur_hompol) > len(max_hompol):
+        max_hompol = cur_hompol
+
+    if len(max_hompol) > 0:
+        return min(max_hompol), max(max_hompol)-min(max_hompol)
+    else:
+        return 0,0
+
+
 def align(qryseq, refseq, elt='PAIR', minmatch=90.0):
     rnd = str(uuid4())
     tgtfa = 'tmp.' + rnd + '.tgt.fa'
@@ -274,7 +296,6 @@ def main(args):
                             gen_3p_align = retry_gen_3p_align
                             count_3p_switchcons += 1
 
-
                     elt_5p_orient = 'NA'
                     elt_3p_orient = 'NA'
                     gen_5p_orient = 'NA'
@@ -334,6 +355,10 @@ def main(args):
                     if new_3p_orient == new_5p_orient == 'NA':
                         out = False
 
+                    if args.require_realign:
+                        if 'NA' in (rec['Orient_5p'], rec['Orient_3p']):
+                            out = False
+
                     if 'NA' not in (new_5p_orient, new_3p_orient) and 'None' not in (rec['Orient_5p'], rec['Orient_3p']):
                         if rec['Orient_5p'] != rec['Orient_3p']:
                             rec['Inversion'] = 'Y'
@@ -375,5 +400,6 @@ if __name__ == '__main__':
     parser.add_argument('--refgene', default=None, help='filter out insertions with superfamily overlapping matching refgene (important for GRIP searches)')
 
     parser.add_argument('--realign_all_isoforms', action='store_true', help='enable for potentially better realignment when working on GRIPs')
+    parser.add_argument('--require_realign', action='store_true', help='require that all breakends are realignable')
     args = parser.parse_args()
     main(args)

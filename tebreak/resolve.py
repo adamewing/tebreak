@@ -330,21 +330,29 @@ class Ins:
 def filter(ins, forest, args):
     passed = True
 
-    if ins.end3 == ins.end5 == 'NA': passed = False
+    if ins.end3 == ins.end5 == 'NA':
+        passed = False
+
+    if ins.out['Insert_Consensus_5p'] == ins.out['Insert_Consensus_3p'] == 'NA':
+        passed = False
 
     prox_len = [len(ins.ins['be1_prox_seq'])]
-    if 'be2_prox_seq' in ins.ins: prox_len.append(len(ins.ins['be2_prox_seq']))
+    if 'be2_prox_seq' in ins.ins:
+        prox_len.append(len(ins.ins['be2_prox_seq']))
 
-    if max(prox_len) < 20: passed = False
+    if int(ins.out['3p_Cons_Len']) + int(ins.out['5p_Cons_Len']) < int(args.min_cons_len):
+        passed=False
+
+    if max(prox_len) < 20:
+        passed = False
 
     if forest is not None:
-        if ins.genome_location_filter(forest): passed = False
+        if ins.genome_location_filter(forest):
+            passed = False
 
-    if not ins.end_align_flush(): passed = False
+    if not ins.end_align_flush():
+        passed = False
 
-
-    if passed:
-        pass
 
     ins.ins['passedfilter'] = passed
 
@@ -1046,7 +1054,7 @@ def resolve_insertion(args, ins, inslib_fa):
 
                 extend_consensus(ins, bam)
 
-                if args.callmuts and ins['INFO']['mapped_target'] > int(args.mindiscord):
+                if args.callmuts and ins['INFO']['mapped_target'] > int(args.min_discord):
                     tmp_bam_base = os.path.basename(tmp_bam)
                     ins_obj = Ins(ins, None, False)
 
@@ -1135,8 +1143,11 @@ def prefilter(args, ins, uuids):
     if minmatch < float(args.min_ref_match):
         return 'minmatch'
 
-    if ins['INFO']['dr_count'] < int(args.mindiscord):
+    if ins['INFO']['dr_count'] < int(args.min_discord):
         return 'mindisc'
+
+    if ins['INFO']['be1_sr_count'] + ins['INFO']['be2_sr_count'] < int(args.min_split):
+        return 'minsplit'
 
     if not args.unmapped:
         unmap = True
@@ -1294,10 +1305,14 @@ if __name__ == '__main__':
     parser.add_argument('-m', '--filter_bed', default=None, help="BED file of regions to mask")
     parser.add_argument('-v', '--verbose', action='store_true', default=False, help="output detailed status information")
     parser.add_argument('-o', '--out', default=None, help="output table")
+
     parser.add_argument('--max_bam_count', default=0, help="skip sites with more than this number of BAMs (default = no limit)")
     parser.add_argument('--min_ins_match', default=0.95, help="minumum match to insertion library (default 95%)")
-    parser.add_argument('--min_ref_match', default=0.95, help="minimum match to reference genome (default 95%)")
-    parser.add_argument('--mindiscord', default=4, help="minimum mapped discordant read count (default = 4)")
+    parser.add_argument('--min_ref_match', default=0.98, help="minimum match to reference genome (default 95%)")
+    parser.add_argument('--min_cons_len', default=300, help='min total consensus length (default=300)')
+    parser.add_argument('--min_discord', default=8, help="minimum mapped discordant read count (default = 8)")
+    parser.add_argument('--min_split', default=8, help="minimum split read count (default = 8)")
+
     parser.add_argument('-a', '--annotation_tabix', default=None, help="can be comma-delimited list")
     parser.add_argument('--refoutdir', default='tebreak_refs', help="output directory for generating tebreak references (default=tebreak_refs)")
     parser.add_argument('--use_rg', action='store_true', default=False, help="use RG instead of BAM filename for samples")

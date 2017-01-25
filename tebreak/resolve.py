@@ -330,11 +330,16 @@ class Ins:
 def filter(ins, forest, args):
     passed = True
 
+    if 'filter' not in ins.ins:
+        ins.ins['filter'] = []
+
     if ins.end3 == ins.end5 == 'NA':
         passed = False
+        ins.ins['filter'].append('no_ends')
 
     if ins.out['Insert_Consensus_5p'] == ins.out['Insert_Consensus_3p'] == 'NA':
         passed = False
+        ins.ins['filter'].append('insert_consensus')
 
     prox_len = [len(ins.ins['be1_prox_seq'])]
     if 'be2_prox_seq' in ins.ins:
@@ -342,17 +347,20 @@ def filter(ins, forest, args):
 
     if int(ins.out['3p_Cons_Len']) + int(ins.out['5p_Cons_Len']) < int(args.min_cons_len):
         passed=False
+        ins.ins['filter'].append('min_cons_len')
 
     if max(prox_len) < 20:
         passed = False
+        ins.ins['filter'].append('prox_len')
 
     if forest is not None:
         if ins.genome_location_filter(forest):
             passed = False
+            ins.ins['filter'].append('genome_location')
 
     if not ins.end_align_flush():
         passed = False
-
+        ins.ins['filter'].append('end_align_flush')
 
     ins.ins['passedfilter'] = passed
 
@@ -1206,6 +1214,9 @@ def main(args):
 
         else:
             prefilter_reasons.append(prefiltered)
+            if args.ignore_filters:
+                ins['filter'] = [prefiltered]
+                insertions.append(ins)
 
 
     logger.debug('prefiltering stats:')
@@ -1282,7 +1293,16 @@ def main(args):
 
         for ins in sorted(final_insertions):
             ins = filter(ins, forest, args)
-            if ins.ins['passedfilter']:
+
+            if args.ignore_filters:
+                ins.out['Filters'] = 'NA'
+                if not ins.ins['passedfilter']:
+                    if ins.ins['filter']:
+                        ins.out['Filters'] = ','.join(ins.ins['filter'])
+
+                out_table.write('%s\n' % ins)
+
+            elif ins.ins['passedfilter']:
                 out_table.write('%s\n' % ins)
 
 
@@ -1305,6 +1325,8 @@ if __name__ == '__main__':
     parser.add_argument('--min_cons_len', default=300, help='min total consensus length (default=300)')
     parser.add_argument('--min_discord', default=8, help="minimum mapped discordant read count (default = 8)")
     parser.add_argument('--min_split', default=8, help="minimum split read count (default = 8)")
+
+    parser.add_argument('--ignore_filters', action='store_true', default=False)
 
     parser.add_argument('-a', '--annotation_tabix', default=None, help="can be comma-delimited list")
     parser.add_argument('--refoutdir', default='tebreak_refs', help="output directory for generating tebreak references (default=tebreak_refs)")

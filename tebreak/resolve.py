@@ -1322,7 +1322,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_bam_count', default=0, help="skip sites with more than this number of BAMs (default = no limit)")
     parser.add_argument('--min_ins_match', default=0.95, help="minumum match to insertion library (default 0.95)")
     parser.add_argument('--min_ref_match', default=0.98, help="minimum match to reference genome (default 0.98)")
-    parser.add_argument('--min_cons_len', default=300, help='min total consensus length (default=300)')
+    parser.add_argument('--min_cons_len', default=250, help='min total consensus length (default=250)')
     parser.add_argument('--min_discord', default=8, help="minimum mapped discordant read count (default = 8)")
     parser.add_argument('--min_split', default=8, help="minimum split read count (default = 8)")
 

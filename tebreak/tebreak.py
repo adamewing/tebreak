@@ -1669,7 +1669,7 @@ def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
             'min_split_reads':       int(args.min_split_reads),
             'min_prox_mapq':         int(args.min_prox_mapq),
             'max_N_consensus':       int(args.max_N_consensus),
-            'max_rpkm':              int(args.max_fold_rpkm)*exp_rpkm,
+            'max_rpkm':              0,
             'exclude_bam':           [],
             'exclude_readgroup':     [],
             'max_bam_count':         int(args.max_bam_count),
@@ -1678,6 +1678,7 @@ def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
             'min_mappability':       float(args.min_mappability)
         }
 
+        if args.max_fold_rpkm is not None: filters['max_rpkm'] = int(args.max_fold_rpkm)*exp_rpkm
         if args.exclude_bam is not None: filters['exclude_bam'] = map(os.path.basename, args.exclude_bam.split(','))
         if args.exclude_readgroup is not None: filters['exclude_readgroup'] = args.exclude_readgroup.split(',')
 
@@ -1879,22 +1880,20 @@ def main(args):
     if len(bamlist) == 0:
         sys.exit('No entries in -b/--bam input .txt: %s' % args.bam)
 
-    if args.interval_bed is None or args.wg_rpkm:
+    if args.interval_bed is None: #or args.wg_rpkm:
         if args.interval_bed is None:
             chunks = genome.chunk(chunk_count, sorted=True, pad=5000)
 
-        if not args.no_rpkm:
-            if args.rpkm_bam:
-                exp_rpkm = expected_rpkm(args.rpkm_bam.split(','), genome)
-            else:
-                exp_rpkm = expected_rpkm(bamlist, genome)
+            with open('debug.chunks.bed', 'w') as chunkout:
+                for chunk in chunks:
+                    chunkout.write('\t'.join(map(str, chunk)) + '\n')
+
+        if args.max_fold_rpkm is not None:
+            exp_rpkm = expected_rpkm(bamlist, genome)
 
     else:
-        if not args.no_rpkm:
-            if args.rpkm_bam:
-                exp_rpkm = expected_rpkm(args.rpkm_bam.split(','), genome, intervals=args.interval_bed)
-            else:
-                exp_rpkm = expected_rpkm(bamlist, genome, intervals=args.interval_bed)
+        if args.max_fold_rpkm is not None:
+            exp_rpkm = expected_rpkm(bamlist, genome, intervals=args.interval_bed)
 
 
     if args.interval_bed is not None:
@@ -1904,7 +1903,7 @@ def main(args):
     logger.debug("chunk count: %d" % len(chunks))
 
 
-    if not args.no_rpkm and exp_rpkm < 10:
+    if args.max_fold_rpkm is not None and exp_rpkm < 10:
         sys.stderr.write("expected RPKM is less than 10, ignoring high RPKM cutoffs...\n")
         exp_rpkm = 0
 
@@ -1960,7 +1959,7 @@ if __name__ == '__main__':
     parser.add_argument('-m', '--mask', default=None, help='BED file of masked regions')
 
     parser.add_argument('--rpkm_bam', default=None, help='use alternate BAM(s) for RPKM calculation: use original BAMs if using reduced BAM(s) for -b/--bam')
-    parser.add_argument('--max_fold_rpkm', default=10, help='ignore insertions supported by rpkm*max_fold_rpkm reads (default = 10)')
+    parser.add_argument('--max_fold_rpkm', default=None, help='ignore insertions supported by rpkm*max_fold_rpkm reads (default = None (no filter))')
     parser.add_argument('--max_ins_reads', default=100000, help='maximum number of reads to use per insertion call (default = 100000)')
     parser.add_argument('--min_split_reads', default=4, help='minimum total split reads per insertion call (default = 4)')
     parser.add_argument('--min_prox_mapq', default=10, help='minimum map quality for proximal subread (default = 10)')
@@ -1976,8 +1975,6 @@ if __name__ == '__main__':
     parser.add_argument('--pickle', default=None, help='pickle output name')
     parser.add_argument('--detail_out', default=None, help='file to write detailed output')
  
-    parser.add_argument('--wg_rpkm', default=False, action='store_true', help='force calculate rpkm over whole genome')
-    parser.add_argument('--no_rpkm', default=False, action='store_true', help='do not filter sites by rpkm')
     parser.add_argument('--no_shared_mem', default=False, action='store_true')
  
     args = parser.parse_args()

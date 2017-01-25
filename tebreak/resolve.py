@@ -1058,16 +1058,9 @@ def resolve_insertion(args, ins, inslib_fa):
                     tmp_bam_base = os.path.basename(tmp_bam)
                     ins_obj = Ins(ins, None, False)
 
-                    if args.te:
-                        if not ins_obj.pass_te_filter(None):
-                            if not args.keep_all_tmp_bams:
-                                if os.path.exists(tmp_bam): os.remove(tmp_bam)
-                                if os.path.exists(tmp_bam + '.bai'): os.remove(tmp_bam + '.bai')
-                    else:
-                        if not ins_obj.pass_general_filter(None):
-                            if not args.keep_all_tmp_bams:
-                                if os.path.exists(tmp_bam): os.remove(tmp_bam)
-                                if os.path.exists(tmp_bam + '.bai'): os.remove(tmp_bam + '.bai')
+                    if not args.keep_all_tmp_bams:
+                        if os.path.exists(tmp_bam): os.remove(tmp_bam)
+                        if os.path.exists(tmp_bam + '.bai'): os.remove(tmp_bam + '.bai')
 
             ins = identify_transductions(ins)
 

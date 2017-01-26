@@ -1691,6 +1691,7 @@ def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
         logger.debug('Processing chunk: %s ...' % chunkname)
         logger.debug('Chunk %s: Parsing split reads from bam(s): %s ...' % (chunkname, args.bam))
         sr = fetch_clipped_reads(bams, chrom, start, end, filters, logger=logger)
+
         sr.sort()
 
 

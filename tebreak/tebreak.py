@@ -1337,9 +1337,9 @@ def build_insertions(breakends, maxdist=100):
     for be1_uuid, be2_uuid, score in pair_scores:
         if be1_uuid not in used and be2_uuid not in used:
             insertions.append(Insertion(be_dict[be1_uuid], be_dict[be2_uuid]))
-            #print "debug:, insertion: %s and %s" % (be_dict[be1_uuid], be_dict[be2_uuid])
-        used[be1_uuid] = True
-        used[be2_uuid] = True
+
+            used[be1_uuid] = True
+            used[be2_uuid] = True
 
     # single-end detections
     for be in breakends:
@@ -1694,10 +1694,9 @@ def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
 
         sr.sort()
 
-
         logger.debug('Chunk %s: Building clusters from %d split reads ...' % (chunkname, len(sr)))
         clusters = build_sr_clusters(sr)
-     
+    
         logger.debug('Chunk %s: Building breakends...' % chunkname)
 
         breakends = []
@@ -1716,14 +1715,15 @@ def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
 
             else:
                 logger.debug('Chunk %s, cluster %d-%d over max RPKM with %f' % (chunkname, cl_min, cl_max, rpkm))
-     
+
         logger.debug('Chunk %s: Mapping %d breakends ...' % (chunkname, len(breakends)))
         if len(breakends) > 0:
             breakends = map_breakends(breakends, args.bwaref, tmpdir=args.tmpdir)
-         
+
             logger.debug('Chunk %s: Building insertions...' % chunkname)
 
             insertions = build_insertions(breakends)
+
             insertions = [ins for ins in insertions if len(ins.be1.proximal_subread()) > 0] # remove bogus insertions
 
             logger.debug('Chunk %s: Processing and filtering %d potential insertions ...' % (chunkname, len(insertions)))

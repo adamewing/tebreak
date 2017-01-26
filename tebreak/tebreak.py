@@ -64,7 +64,7 @@ class Genome:
         return (chrom, start, end)
 
 
-    def chunk(self, n, seed=None, sorted=False, pad=0):
+    def chunk(self, n, seed=None, sorted=False, pad=0, flatten=True):
         ''' break genome into n evenly-sized chunks, return n lists of (chrom, start, end) '''
         chunklen = int(self.bp/n)
         
@@ -109,8 +109,11 @@ class Genome:
                         intervals.append( self.addpad((chrom, length-lenleft, length), pad) )
                         chunkleft -= lenleft
                         lenleft -= lenleft
- 
-        return list(itertools.chain.from_iterable(chunks)) # flatten list
+
+        if flatten: 
+            return list(itertools.chain.from_iterable(chunks)) # flatten list
+
+        return chunks
 
 
 class LASTResult:
@@ -1998,31 +2001,31 @@ def disco_subcluster_by_label(cluster):
     return subclusters.values()
 
 
-def disco_eval_strands(s):
-    left = 0
-    for i in range(1,len(s)):
-        if s[i] != s[0]:
-            left = i
-            break
+#def disco_eval_strands(s):
+#    left = 0
+#    for i in range(1,len(s)):
+#        if s[i] != s[0]:
+#            left = i
+#            break
 
-    right = 0
-    for i in range(len(s)-1, 0, -1):
-        if s[i] != s[-1]:
-            right = i+1
-            break
+#    right = 0
+#    for i in range(len(s)-1, 0, -1):
+#        if s[i] != s[-1]:
+#            right = i+1
+#            break
 
-    if left == right: return left
+#    if left == right: return left
     
-    return 0
+#    return 0
 
 
-def disco_filter_cluster(cluster):
-    s1 = disco_eval_strands([c.strand for c in cluster])
-    s2 = disco_eval_strands([c.mstrand for c in cluster])
+#def disco_filter_cluster(cluster):
+#    s1 = disco_eval_strands([c.strand for c in cluster])
+#    s2 = disco_eval_strands([c.mstrand for c in cluster])
 
-    if s1 == s2 and s1 > 0: return False
+#    if s1 == s2 and s1 > 0: return False
 
-    return True 
+#    return True 
 
 
 def disco_infer_strand(cluster):
@@ -2050,7 +2053,8 @@ def disco_output_cluster(cluster, forest, mapping, min_size=4, min_map=0.5):
             if mapping is not None:
                 map_score = avgmap(mapping, cluster_chrom, cluster_start, cluster_end)
 
-            if not disco_filter_cluster(cluster) and (map_score >= float(min_map) or mapping is None):
+            #if not disco_filter_cluster(cluster) and (map_score >= float(min_map) or mapping is None):
+            if map_score >= float(min_map) or mapping is None:
                 return DiscoInsCall(cluster, cluster_chrom, cluster_start, cluster_end, disco_infer_strand(cluster), bamlist, map_score)
 
 
@@ -2096,13 +2100,14 @@ def disco_run_chunk(args, chunk):
 
         coords = []
 
-        chrom, start, end = chunk
+        for interval in chunk:
+            chrom, start, end = interval 
 
-        logger.debug('%s:%d-%d: fetching coordinates from %s' % (chrom, start, end, args.bam))
+            logger.debug('%s:%d-%d: fetching coordinates from %s' % (chrom, start, end, args.bam))
 
-        coords += disco_get_coords(forest, bams, logger, chrom=chrom, start=start, end=end)
+            coords += disco_get_coords(forest, bams, logger, chrom=chrom, start=start, end=end)
 
-        logger.debug('%s:%d-%d: found %d anchored reads' % (chrom, start, end, len(coords)))
+            logger.debug('%s:%d-%d: found %d anchored reads' % (chrom, start, end, len(coords)))
 
         return disco_cluster(forest, coords, mapping, min_size=int(args.min_disc_size), min_map=float(args.min_mappability))
 
@@ -2188,12 +2193,8 @@ def main(args):
         if args.interval_bed is None:
             chunks = genome.chunk(chunk_count, sorted=True, pad=5000)
 
-            #with open('debug.chunks.bed', 'w') as chunkout:
-            #    for chunk in chunks:
-            #        chunkout.write('\t'.join(map(str, chunk)) + '\n')
-
-
             if args.disco_target is not None:
+                chunks = genome.chunk(procs, pad=5000, flatten=False)
 
                 reslist = []
                 for chunk in chunks:

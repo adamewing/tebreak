@@ -1389,7 +1389,7 @@ def minia(fq, tmpdir='/tmp'):
     return concat_fa(ctg_fa_list, tmpdir=tmpdir)
 
 
-def build_mask(bedfile):
+def build_mask(bedfile, logger):
     ''' return a dictionary of interval trees '''
     forest = dd(Intersecter)
 
@@ -1399,7 +1399,11 @@ def build_mask(bedfile):
             start = int(start)
             end   = int(end)
 
-            forest[chrom].add_interval(Interval(start, end))
+            try:
+                forest[chrom].add_interval(Interval(start, end))
+            except Exception, e:
+                logger.exception('bx interval tree crashed on interval %s:%d-%d' % (chrom, start, end))
+                
 
     return forest
 
@@ -1652,7 +1656,7 @@ def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
         minqual = {}
 
         # would do this outside but can't pass a non-pickleable object
-        if args.mask is not None: args.mask = build_mask(args.mask)
+        if args.mask is not None: args.mask = build_mask(args.mask, logger)
 
         if args.map_tabix is not None: args.map_tabix = pysam.Tabixfile(args.map_tabix)
 

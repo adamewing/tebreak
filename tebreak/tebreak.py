@@ -1721,7 +1721,11 @@ def postprocess_insertions(insertions, filters, bwaref, bams, tmpdir='/tmp', gen
 
 def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
     logger = logging.getLogger(__name__)
-    logger.setLevel(logging.DEBUG)
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
+    else:
+        logger.setLevel(logging.INFO)
+
     chunkname = '%s:%d-%d' % (chrom, start, end)
 
     try:
@@ -2001,33 +2005,6 @@ def disco_subcluster_by_label(cluster):
     return subclusters.values()
 
 
-#def disco_eval_strands(s):
-#    left = 0
-#    for i in range(1,len(s)):
-#        if s[i] != s[0]:
-#            left = i
-#            break
-
-#    right = 0
-#    for i in range(len(s)-1, 0, -1):
-#        if s[i] != s[-1]:
-#            right = i+1
-#            break
-
-#    if left == right: return left
-    
-#    return 0
-
-
-#def disco_filter_cluster(cluster):
-#    s1 = disco_eval_strands([c.strand for c in cluster])
-#    s2 = disco_eval_strands([c.mstrand for c in cluster])
-
-#    if s1 == s2 and s1 > 0: return False
-
-#    return True 
-
-
 def disco_infer_strand(cluster):
     c1 = [c.strand for c in cluster]
     c2 = [c.mstrand for c in cluster]
@@ -2086,7 +2063,10 @@ def disco_cluster(forest, coords, mapping, min_size=4, min_map=0.5, max_spacing=
 def disco_run_chunk(args, chunk):
     ''' chunk is a list of (chrom, start, end) tuples '''
     logger = logging.getLogger(__name__)
-    logger.setLevel(logging.DEBUG)
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
+    else:
+        logger.setLevel(logging.INFO)
 
     try:
         bams = [pysam.AlignmentFile(bam, 'rb') for bam in args.bam.split(',')]
@@ -2147,17 +2127,19 @@ def disco_resolve_dups(ins_list):
 def main(args):
     ''' housekeeping '''
     logger = logging.getLogger(__name__)
-    logger.setLevel(logging.DEBUG)
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
+    else:
+        logger.setLevel(logging.INFO)
 
-    logger.debug("commandline: %s" % ' '.join(sys.argv))
+    logger.info("commandline: %s" % ' '.join(sys.argv))
 
     checkref(args.bwaref)
 
-    if not args.no_shared_mem:
-        logger.debug("loading bwa index %s into shared memory ..." % args.bwaref)
-        p = subprocess.Popen(['bwa', 'shm', args.bwaref], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        for line in p.stdout: pass # wait for bwa to load
-        logger.debug("loaded.")
+    logger.info("loading bwa index %s into shared memory ..." % args.bwaref)
+    p = subprocess.Popen(['bwa', 'shm', args.bwaref], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    for line in p.stdout: pass # wait for bwa to load
+    logger.debug("loaded.")
 
     ''' Chunk genome or use input BED '''
     
@@ -2197,9 +2179,10 @@ def main(args):
                 chunks = genome.chunk(procs, pad=5000, flatten=False)
 
                 reslist = []
-                for chunk in chunks:
+                for i, chunk in enumerate(chunks, 1):
                     res = res = pool.apply_async(disco_run_chunk, [args, chunk])
                     reslist.append(res)
+                    logger.info('submitted %d of %d genome chunks for discordant scan' % (i, len(chunks)))
 
                 ins_list = []
                 for res in reslist:
@@ -2230,19 +2213,24 @@ def main(args):
         with open(args.interval_bed, 'r') as bed:
             chunks = [(line.strip().split()[0], int(line.strip().split()[1]), int(line.strip().split()[2])) for line in bed]
 
-    logger.debug("chunk count: %d" % len(chunks))
+    logger.info("genome chunk count: %d" % len(chunks))
 
 
     if args.max_fold_rpkm is not None and exp_rpkm < 10:
-        sys.stderr.write("expected RPKM is less than 10, ignoring high RPKM cutoffs...\n")
+        logger.warning("expected RPKM is less than 10, ignoring high RPKM cutoffs...\n")
         exp_rpkm = 0
 
     reslist = []
 
-    for chunk in chunks:
+    pct = len(chunks)/100
+
+    for i, chunk in enumerate(chunks, 1):
         # run_chunk(args, exp_rpkm, chunk[0], chunk[1], chunk[2]) # uncomment for mp debug
         res = pool.apply_async(run_chunk, [args, bamlist, exp_rpkm, chunk[0], chunk[1], chunk[2]])
         reslist.append(res)
+
+        if i % pct == 0:
+            logger.info('submitted %d of %d chunks (%f)...' % (i, len(chunks), 100.0*float(i)/len(chunks)))
 
     insertions = []
     for res in reslist:
@@ -2257,7 +2245,7 @@ def main(args):
 
     text_summary(insertions, cmd=' '.join(sys.argv), outfile=detailfn)
 
-    logger.debug('Wrote detail output to %s' % detailfn)
+    logger.info('Wrote detail output to %s' % detailfn)
 
     pickoutfn = re.sub('.bam$', '.tebreak.pickle', os.path.basename(bamlist[0]))
 
@@ -2267,7 +2255,7 @@ def main(args):
     with open(pickoutfn, 'w') as pickout:
         pickle.dump(insertions, pickout)
 
-    logger.debug('Pickled to %s' % pickoutfn)
+    logger.info('Pickled to %s' % pickoutfn)
 
  
 if __name__ == '__main__':
@@ -2307,7 +2295,7 @@ if __name__ == '__main__':
     parser.add_argument('--pickle', default=None, help='pickle output name')
     parser.add_argument('--detail_out', default=None, help='file to write detailed output')
  
-    parser.add_argument('--no_shared_mem', default=False, action='store_true')
+    parser.add_argument('--debug', action='store_true', default=False)
  
     args = parser.parse_args()
     main(args)

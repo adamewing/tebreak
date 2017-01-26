@@ -2212,7 +2212,7 @@ def main(args):
                 with open('disc.debug.txt', 'w') as disc_out:
                     for i in ins_list:
                         disc_out.write(i.out() + '\n')
-                        chunks.append((i.chrom, i.start, i.end))
+                        chunks.append((i.chrom, i.start-500, i.end+500))
 
 
         if args.max_fold_rpkm is not None:

@@ -1289,6 +1289,9 @@ def main(args):
 
     with open(out_table_fn, 'w') as out_table:
         if len(final_insertions) > 0:
+            if args.ignore_filters:
+                final_insertions[0].out['Filters'] = 'NA'
+
             out_table.write('%s\n' % final_insertions[0].header())
 
         for ins in sorted(final_insertions):

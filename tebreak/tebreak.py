@@ -2013,7 +2013,7 @@ def disco_infer_strand(cluster):
     return 'NA'
 
 
-def disco_output_cluster(cluster, forest, mapping, min_size=4, min_map=0.5):
+def disco_output_cluster(cluster, forest, mapping, min_size=4):
     if len(cluster) >= min_size:
         cluster_chrom = cluster[0].chrom
         cluster_start = cluster[0].start
@@ -2026,7 +2026,7 @@ def disco_output_cluster(cluster, forest, mapping, min_size=4, min_map=0.5):
         return DiscoInsCall(cluster, cluster_chrom, cluster_start, cluster_end, disco_infer_strand(cluster), bamlist)
 
 
-def disco_cluster(forest, coords, mapping, min_size=4, min_map=0.5, max_spacing=250):
+def disco_cluster(forest, coords, mapping, min_size=4, max_spacing=250):
     coords.sort()
 
     cluster = []
@@ -2045,7 +2045,7 @@ def disco_cluster(forest, coords, mapping, min_size=4, min_map=0.5, max_spacing=
                 cluster = [c]
 
     for cluster in disco_subcluster_by_label(cluster):
-        i = disco_output_cluster(cluster, forest, mapping, min_size=min_size, min_map=min_map)
+        i = disco_output_cluster(cluster, forest, mapping, min_size=min_size)
         if i is not None: insertion_list.append(i)
 
     return insertion_list
@@ -2081,7 +2081,7 @@ def disco_run_chunk(args, chunk):
 
         logger.debug('%s:%d-%d: found %d anchored reads' % (chrom, start, end, len(coords)))
 
-        return disco_cluster(forest, coords, mapping, min_size=int(args.min_disc_size), min_map=float(args.min_mappability))
+        return disco_cluster(forest, coords, mapping, min_size=int(args.min_disc_size))
 
     except Exception, e:
         sys.stderr.write('*'*60 + '\nencountered error in chunk: %s\n' % map(str, chunk))

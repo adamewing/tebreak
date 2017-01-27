@@ -968,7 +968,7 @@ class DiscoCoord:
 
 
 class DiscoInsCall:
-    def __init__(self, coord_list, chrom, start, end, strand, bamlist, mapscore):
+    def __init__(self, coord_list, chrom, start, end, strand, bamlist):
         self.coord_list = coord_list
         self.chrom      = chrom
         self.start      = int(start)
@@ -976,12 +976,11 @@ class DiscoInsCall:
         self.strand     = strand
         self.bamlist    = bamlist
         self.length     = len(coord_list)
-        self.mapscore   = mapscore
 
 
     def out(self, verbose=True):
         output = ['#BEGIN']
-        output.append('%s\t%d\t%d\t%s\t%s\t%d\t%0.3f' % (self.chrom, self.start, self.end, self.strand, self.bamlist, self.length, self.mapscore))
+        output.append('%s\t%d\t%d\t%s\t%s\t%d' % (self.chrom, self.start, self.end, self.strand, self.bamlist, self.length))
         if verbose:
             for c in self.coord_list: output.append(str(c))
         output.append('#END')
@@ -1961,7 +1960,6 @@ def disco_get_coords(forest, bams, logger, chrom=None, start=None, end=None, min
         except ValueError as e:
             logger.debug('no index found, outputting status every %d reads' % tick)
 
-        #for i, read in enumerate(bam.fetch()):
         for i, read in enumerate(read_gen(bam, chrom=chrom, start=start, end=end)):
             if not read.is_unmapped and not read.mate_is_unmapped and not read.is_duplicate:
 
@@ -2025,14 +2023,7 @@ def disco_output_cluster(cluster, forest, mapping, min_size=4, min_map=0.5):
 
         bamlist = ','.join(list(set([c.bam for c in cluster])))
 
-        if cluster_chrom not in forest or len(list(forest[cluster_chrom].find(cluster_start, cluster_end))) == 0:
-            map_score = 0.0
-            if mapping is not None:
-                map_score = avgmap(mapping, cluster_chrom, cluster_start, cluster_end)
-
-            #if not disco_filter_cluster(cluster) and (map_score >= float(min_map) or mapping is None):
-            if map_score >= float(min_map) or mapping is None:
-                return DiscoInsCall(cluster, cluster_chrom, cluster_start, cluster_end, disco_infer_strand(cluster), bamlist, map_score)
+        return DiscoInsCall(cluster, cluster_chrom, cluster_start, cluster_end, disco_infer_strand(cluster), bamlist)
 
 
 def disco_cluster(forest, coords, mapping, min_size=4, min_map=0.5, max_spacing=250):
@@ -2080,14 +2071,15 @@ def disco_run_chunk(args, chunk):
 
         coords = []
 
-        for interval in chunk:
-            chrom, start, end = interval 
+        #for interval in chunk:
+        #    chrom, start, end = interval 
+        chrom, start, end = chunk
 
-            logger.debug('%s:%d-%d: fetching coordinates from %s' % (chrom, start, end, args.bam))
+        logger.debug('%s:%d-%d: fetching coordinates from %s' % (chrom, start, end, args.bam))
 
-            coords += disco_get_coords(forest, bams, logger, chrom=chrom, start=start, end=end)
+        coords += disco_get_coords(forest, bams, logger, chrom=chrom, start=start, end=end)
 
-            logger.debug('%s:%d-%d: found %d anchored reads' % (chrom, start, end, len(coords)))
+        logger.debug('%s:%d-%d: found %d anchored reads' % (chrom, start, end, len(coords)))
 
         return disco_cluster(forest, coords, mapping, min_size=int(args.min_disc_size), min_map=float(args.min_mappability))
 
@@ -2171,16 +2163,20 @@ def main(args):
     if len(bamlist) == 0:
         sys.exit('No entries in -b/--bam input .txt: %s' % args.bam)
 
-    if args.interval_bed is None: #or args.wg_rpkm:
+    if args.interval_bed is None:
         if args.interval_bed is None:
             chunks = genome.chunk(chunk_count, sorted=True, pad=5000)
 
             if args.disco_target is not None:
-                chunks = genome.chunk(procs, pad=5000, flatten=False)
+                chunks = genome.chunk(procs, pad=5000)
+
+                with open('bugout.txt', 'w') as bugout:
+                    for c in chunks:
+                        bugout.write('\t'.join(map(str, c)) + '\n')
 
                 reslist = []
                 for i, chunk in enumerate(chunks, 1):
-                    res = res = pool.apply_async(disco_run_chunk, [args, chunk])
+                    res = pool.apply_async(disco_run_chunk, [args, chunk])
                     reslist.append(res)
                     logger.info('submitted %d of %d genome chunks for discordant scan' % (i, len(chunks)))
 
@@ -2202,9 +2198,6 @@ def main(args):
             exp_rpkm = expected_rpkm(bamlist, genome)
 
     else:
-        if args.disco_target is not None:
-            sys.exit('cannot specify -d/--disco_target with -i/--interval_bed')
-
         if args.max_fold_rpkm is not None:
             exp_rpkm = expected_rpkm(bamlist, genome, intervals=args.interval_bed)
 
@@ -2212,6 +2205,26 @@ def main(args):
     if args.interval_bed is not None:
         with open(args.interval_bed, 'r') as bed:
             chunks = [(line.strip().split()[0], int(line.strip().split()[1]), int(line.strip().split()[2])) for line in bed]
+
+        if args.disco_target is not None:
+            reslist = []
+            for i, chunk in enumerate(chunks, 1):
+                res = pool.apply_async(disco_run_chunk, [args, chunk])
+                reslist.append(res)
+                logger.info('submitted %d of %d genome chunks for discordant scan' % (i, len(chunks)))
+
+            ins_list = []
+            for res in reslist:
+                ins_list += res.get()
+
+            ins_list = disco_resolve_dups(ins_list)
+
+            chunks = []
+
+            with open('disc.debug.txt', 'w') as disc_out:
+                for i in ins_list:
+                    disc_out.write(i.out() + '\n')
+                    chunks.append((i.chrom, i.start-500, i.end+500))
 
     logger.info("genome chunk count: %d" % len(chunks))
 
@@ -2229,8 +2242,7 @@ def main(args):
         res = pool.apply_async(run_chunk, [args, bamlist, exp_rpkm, chunk[0], chunk[1], chunk[2]])
         reslist.append(res)
 
-        if i % pct == 0:
-            logger.info('submitted %d of %d chunks (%f)...' % (i, len(chunks), 100.0*float(i)/len(chunks)))
+        logger.info('submitted %d of %d chunks (%f)...' % (i, len(chunks), 100.0*float(i)/len(chunks)))
 
     insertions = []
     for res in reslist:

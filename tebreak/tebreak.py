@@ -2235,7 +2235,7 @@ def main(args):
 
     reslist = []
 
-    pct = len(chunks)/100
+    pct = int(len(chunks)*.01)+1
 
     for i, chunk in enumerate(chunks, 1):
         # run_chunk(args, exp_rpkm, chunk[0], chunk[1], chunk[2]) # uncomment for mp debug

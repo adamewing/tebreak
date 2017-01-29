@@ -371,7 +371,9 @@ class SplitCluster(ReadCluster):
             a1 = align.alignment_to_string(a1)
             a2 = ''.join([b for b in list(align.alignment_to_string(a2)) if b != '-'])
 
-            score = float(len(a1) - (len(a1)-s)) / float(len(a1))
+            score = 0.0
+            if len(a1) > 0:
+                score = float(len(a1) - (len(a1)-s)) / float(len(a1))
 
             if re.search(a1, cons):
                 cons_start, cons_end = locate_subseq(cons, a1)
@@ -1118,6 +1120,8 @@ def fetch_clipped_reads(bams, chrom, start, end, filters, logger=None):
     end   = int(end)
  
     assert start < end
+
+    if start < 0: start = 0
 
     masked_read_count = 0
  

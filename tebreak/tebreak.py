@@ -1534,6 +1534,8 @@ def break_count(bam, chrom, poslist, minpad=5, flex=1, minmapq=10):
 
     tsd_len = tsd_end - tsd_start
 
+    if tsd_start < minpad: tsd_start = minpad
+
     for read in bam.fetch(chrom, tsd_start-minpad, tsd_end+minpad):
         if read.is_unmapped or read.is_duplicate:
             continue

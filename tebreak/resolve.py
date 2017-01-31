@@ -260,19 +260,6 @@ class Ins:
         if self.end5 + '_te_cons_seq' in self.ins: self.out['Insert_Consensus_5p'] = self.ins[self.end5 + '_te_cons_seq']
         if self.end3 + '_te_cons_seq' in self.ins: self.out['Insert_Consensus_3p'] = self.ins[self.end3 + '_te_cons_seq']
 
-
-    def polyA_filter(self):
-        ''' return true if only supported by poly-A matches '''
-        found_non_pA = False
-
-        if 'be1_bestmatch' in self.ins:
-            if poly_A_frac(self.ins['be1_bestmatch'].target_align) < 0.85: found_non_pA = True
-
-        if 'be2_bestmatch' in self.ins:
-            if poly_A_frac(self.ins['be2_bestmatch'].target_align) < 0.85: found_non_pA = True
-
-        return not found_non_pA
-
     def genome_location_filter(self, forest):
         if self.ins['chrom'] in forest:
             hits = forest[self.ins['chrom']].find(self.out['Left_Junction'], self.out['Right_Junction']+1)
@@ -280,37 +267,6 @@ class Ins:
                     return True
 
         return False
-
-    def pass_te_filter(self, forest):
-        passed = self.pass_general_filter(forest)
-
-        if 'best_ins_matchpct' in self.ins:
-            if self.ins['best_ins_matchpct'] < 0.9: passed = False
-            if self.polyA_filter(): passed = False
-        else: passed = False
-
-        if 'transducer' in self.ins: passed = False
-
-        return passed
-
-
-    def pass_general_filter(self, forest):
-        passed = True
-
-        if 'NA' in (self.end5, self.end3): passed = False
-
-        prox_len = [len(self.ins['be1_prox_seq'])]
-        if 'be2_prox_seq' in self.ins: prox_len.append(len(self.ins['be2_prox_seq']))
-
-        if max(prox_len) < 20: passed = False
-
-        if forest is not None:
-            if self.genome_location_filter(forest): passed = False
-
-        if not self.end_align_flush(): passed = False
-
-        return passed
-
 
     def end_align_flush(self, tolerance=2):
         flush = False
@@ -370,6 +326,45 @@ class Ins:
 #######################################
 ## Functions                         ##
 #######################################
+
+def filter(ins, forest, args):
+    passed = True
+
+    if 'filter' not in ins.ins:
+        ins.ins['filter'] = []
+
+    if ins.end3 == ins.end5 == 'NA':
+        passed = False
+        ins.ins['filter'].append('no_ends')
+
+    if ins.out['Insert_Consensus_5p'] == ins.out['Insert_Consensus_3p'] == 'NA':
+        passed = False
+        ins.ins['filter'].append('insert_consensus')
+
+    prox_len = [len(ins.ins['be1_prox_seq'])]
+    if 'be2_prox_seq' in ins.ins:
+        prox_len.append(len(ins.ins['be2_prox_seq']))
+
+    if int(ins.out['3p_Cons_Len']) + int(ins.out['5p_Cons_Len']) < int(args.min_cons_len):
+        passed=False
+        ins.ins['filter'].append('min_cons_len')
+
+    if max(prox_len) < 20:
+        passed = False
+        ins.ins['filter'].append('prox_len')
+
+    if forest is not None:
+        if ins.genome_location_filter(forest):
+            passed = False
+            ins.ins['filter'].append('genome_location')
+
+    if not ins.end_align_flush():
+        passed = False
+        ins.ins['filter'].append('end_align_flush')
+
+    ins.ins['passedfilter'] = passed
+
+    return ins
 
 
 def extend_consensus(ins, bam):
@@ -512,9 +507,6 @@ def consensus(seqs, minscore=0.9):
 
     for i, seq in enumerate(uniq_seqs[1:]):
 
-        #print 'oldcons:', cons
-        #print 'seq    :', seq
-
         s1 = align.string_to_alignment(cons)
         s2 = align.string_to_alignment(seq)
 
@@ -523,8 +515,6 @@ def consensus(seqs, minscore=0.9):
         a2 = ''.join([b for b in list(align.alignment_to_string(a2)) if b != '-'])
 
         score = float(len(a1) - (len(a1)-s)) / float(len(a1))
-
-        #print 'score  :', score
 
         scores.append(score)
 
@@ -535,13 +525,10 @@ def consensus(seqs, minscore=0.9):
                 align_end = locate_subseq(seq, a2)[1]
                 cons += seq[align_end:]
                 align_init = True
-                #print 'newcons:', cons
 
             elif not align_init: # haven't found a scaffold yet
                 start_index += 1
                 cons = uniq_seqs[start_index]
-
-        #print '****'
 
     return cons, np.mean(scores)
 
@@ -1062,36 +1049,28 @@ def resolve_insertion(args, ins, inslib_fa):
         ins = add_insdata(ins, last_res)
         ins['INFO']['inslib_fa'] = inslib_fa
 
-        if not args.skip_align:
-            if 'best_ins_matchpct' in ins['INFO'] and ins['INFO']['best_ins_matchpct'] >= float(args.min_ins_match):
-                tmp_bam = remap_discordant(ins, inslib_fa=inslib_fa, tmpdir=args.refoutdir)
+        if 'best_ins_matchpct' in ins['INFO'] and ins['INFO']['best_ins_matchpct'] >= float(args.min_ins_match):
+            tmp_bam = remap_discordant(ins, inslib_fa=inslib_fa, tmpdir=args.refoutdir)
 
-                if tmp_bam is not None:
-                    bam = pysam.AlignmentFile(tmp_bam, 'rb')
-                    ins['INFO']['support_bam_file'] = tmp_bam
-                    ins['INFO']['mapped_target'] = bam.mapped
-                    ins = get_bam_info(bam, ins)
+            if tmp_bam is not None:
+                bam = pysam.AlignmentFile(tmp_bam, 'rb')
+                ins['INFO']['support_bam_file'] = tmp_bam
+                ins['INFO']['mapped_target'] = bam.mapped
+                ins = get_bam_info(bam, ins)
 
-                    # work in progress: extend consensus
+                # work in progress: extend consensus
 
-                    extend_consensus(ins, bam)
+                extend_consensus(ins, bam)
 
-                    if args.callmuts and ins['INFO']['mapped_target'] > int(args.mindiscord):
-                        tmp_bam_base = os.path.basename(tmp_bam)
-                        ins_obj = Ins(ins, None, False)
+                if args.callmuts and ins['INFO']['mapped_target'] > int(args.min_discord):
+                    tmp_bam_base = os.path.basename(tmp_bam)
+                    ins_obj = Ins(ins, None, False)
 
-                        if args.te:
-                            if not ins_obj.pass_te_filter(None):
-                                if not args.keep_all_tmp_bams:
-                                    if os.path.exists(tmp_bam): os.remove(tmp_bam)
-                                    if os.path.exists(tmp_bam + '.bai'): os.remove(tmp_bam + '.bai')
-                        else:
-                            if not ins_obj.pass_general_filter(None):
-                                if not args.keep_all_tmp_bams:
-                                    if os.path.exists(tmp_bam): os.remove(tmp_bam)
-                                    if os.path.exists(tmp_bam + '.bai'): os.remove(tmp_bam + '.bai')
+                    if not args.keep_all_tmp_bams:
+                        if os.path.exists(tmp_bam): os.remove(tmp_bam)
+                        if os.path.exists(tmp_bam + '.bai'): os.remove(tmp_bam + '.bai')
 
-                ins = identify_transductions(ins)
+            ins = identify_transductions(ins)
 
         return ins
 
@@ -1108,7 +1087,7 @@ def resolve_insertion(args, ins, inslib_fa):
 
 
 def resolve_transductions(insertions):
-    ''' some insertions are actually transductions; try to work this out '''
+    ''' some insertion calls may actually correspond to transductions; try to work this out '''
     tr_coord_dict = dd(dict) # chrom --> pos --> [ins]
 
     for ins in insertions:
@@ -1162,13 +1141,14 @@ def prefilter(args, ins, uuids):
     if 'be1_avgmatch' in ins['INFO'] and ins['INFO']['be1_avgmatch'] > minmatch: minmatch = ins['INFO']['be1_avgmatch']
     if 'be2_avgmatch' in ins['INFO'] and ins['INFO']['be2_avgmatch'] > minmatch: minmatch = ins['INFO']['be2_avgmatch']
 
-    if minmatch < float(args.minmatch):
-        #logger.debug('filtered %s due to minmatch < %f' % (ins['INFO']['ins_uuid'], float(args.minmatch)))
+    if minmatch < float(args.min_ref_match):
         return 'minmatch'
 
-    if ins['INFO']['dr_count'] < int(args.mindiscord):
-        #logger.debug('filtered %s due to discordant reads < %d' % (ins['INFO']['ins_uuid'], int(args.mindiscord)))
+    if ins['INFO']['dr_count'] < int(args.min_discord):
         return 'mindisc'
+
+    if ins['INFO']['be1_sr_count'] + ins['INFO']['be2_sr_count'] < int(args.min_split):
+        return 'minsplit'
 
     if not args.unmapped:
         unmap = True
@@ -1176,11 +1156,9 @@ def prefilter(args, ins, uuids):
         if 'be2_dist_seq' in ins['INFO'] and ins['INFO']['be2_dist_seq'] is not None: unmap = False
 
         if unmap:
-            #logger.debug('filtered %s due to no mapped distal breakends' % ins['INFO']['ins_uuid'])
             return 'mapends'
 
     if uuids is not None and ins['INFO']['ins_uuid'] not in uuids:
-        #logger.debug('filtered %s for not being in uuid list' % ins['INFO']['ins_uuid'])
         return 'uuidlist'
 
     return False
@@ -1236,6 +1214,9 @@ def main(args):
 
         else:
             prefilter_reasons.append(prefiltered)
+            if args.ignore_filters:
+                ins['filter'] = [prefiltered]
+                insertions.append(ins)
 
 
     logger.debug('prefiltering stats:')
@@ -1308,16 +1289,24 @@ def main(args):
 
     with open(out_table_fn, 'w') as out_table:
         if len(final_insertions) > 0:
+            if args.ignore_filters:
+                final_insertions[0].out['Filters'] = 'NA'
+
             out_table.write('%s\n' % final_insertions[0].header())
 
-        if args.te:
-            for te_ins in sorted(final_insertions):
-                if te_ins.pass_te_filter(forest):
-                    out_table.write('%s\n' % te_ins)
-        else:
-            for out_ins in sorted(final_insertions):
-                if out_ins.pass_general_filter(forest):
-                    out_table.write('%s\n' % out_ins)
+        for ins in sorted(final_insertions):
+            ins = filter(ins, forest, args)
+
+            if args.ignore_filters:
+                ins.out['Filters'] = 'NA'
+                if not ins.ins['passedfilter']:
+                    if ins.ins['filter']:
+                        ins.out['Filters'] = ','.join(ins.ins['filter'])
+
+                out_table.write('%s\n' % ins)
+
+            elif ins.ins['passedfilter']:
+                out_table.write('%s\n' % ins)
 
 
 if __name__ == '__main__':
@@ -1332,18 +1321,22 @@ if __name__ == '__main__':
     parser.add_argument('-m', '--filter_bed', default=None, help="BED file of regions to mask")
     parser.add_argument('-v', '--verbose', action='store_true', default=False, help="output detailed status information")
     parser.add_argument('-o', '--out', default=None, help="output table")
+
     parser.add_argument('--max_bam_count', default=0, help="skip sites with more than this number of BAMs (default = no limit)")
-    parser.add_argument('--min_ins_match', default=0.9, help="minumum match to insertion library")
-    parser.add_argument('--minmatch', default=0.95, help="minimum match to reference genome")
-    parser.add_argument('--mindiscord', default=0, help="minimum mapped discordant read count")
+    parser.add_argument('--min_ins_match', default=0.95, help="minumum match to insertion library (default 0.95)")
+    parser.add_argument('--min_ref_match', default=0.98, help="minimum match to reference genome (default 0.98)")
+    parser.add_argument('--min_cons_len', default=250, help='min total consensus length (default=250)')
+    parser.add_argument('--min_discord', default=8, help="minimum mapped discordant read count (default = 8)")
+    parser.add_argument('--min_split', default=8, help="minimum split read count (default = 8)")
+
+    parser.add_argument('--ignore_filters', action='store_true', default=False)
+
     parser.add_argument('-a', '--annotation_tabix', default=None, help="can be comma-delimited list")
     parser.add_argument('--refoutdir', default='tebreak_refs', help="output directory for generating tebreak references (default=tebreak_refs)")
-    parser.add_argument('--skip_align', action='store_true', default=False, help="skip re-alignment of discordant ends to ref insertion")
     parser.add_argument('--use_rg', action='store_true', default=False, help="use RG instead of BAM filename for samples")
     parser.add_argument('--keep_all_tmp_bams', action='store_true', default=False, help="leave ALL temporary BAMs (warning: lots of files!)")
     parser.add_argument('--detail_out', default=None, help="file to write detailed output")
     parser.add_argument('--unmapped', default=False, action='store_true', help="report insertions that do not match insertion library")
-    parser.add_argument('--te', default=False, action='store_true', help="set if insertion library is transposons")
     parser.add_argument('--usecachedLAST', default=False, action='store_true', help="try to used cached LAST db, if found")
     parser.add_argument('--uuid_list', default=None, help='limit resolution to UUIDs in first column of input list (can be tabular output from previous resolve.py run)')
     parser.add_argument('--callmuts', default=False, action='store_true', help='detect changes in inserted seq. vs ref. (requires bcftools)')

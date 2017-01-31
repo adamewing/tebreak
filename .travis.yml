@@ -64,6 +64,13 @@ before_install:
     - python setup.py install
     - cd ..
     - export PATH=$WORKDIR/bin/:$PATH
+    ##Exonerate
+    - git clone https://github.com/adamewing/exonerate.git
+    - cd exonerate
+    - git checkout v2.4.0
+    - autoreconf -i
+    - ./configure --prefix=$WORKDIR && make && make check && make install
+    - cd ..
 install: true
 script:
     ##Installing TEBreak, indexing the reference and running the test

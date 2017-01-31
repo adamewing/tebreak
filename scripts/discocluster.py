@@ -87,7 +87,7 @@ class Genome:
         return chunks
 
 
-class Coord:
+class DiscoCoord:
     def __init__(self, chrom, start, end, strand, mchrom, mstart, mend, mstrand, label, bam_name):
         self.chrom   = chrom
         self.start   = int(start)
@@ -118,7 +118,7 @@ class Coord:
         return '\t'.join(map(str, (self.bam, self.label, self.chrom, self.start, self.end, self.strand, self.mchrom, self.mstart, self.mend, self.mstrand)))
 
 
-class InsCall:
+class DiscoInsCall:
     def __init__(self, coord_list, chrom, start, end, strand, bamlist, mapscore, nonref):
         self.coord_list = coord_list
         self.chrom      = chrom
@@ -157,11 +157,6 @@ class InsCall:
         return self.out(verbose=False)
 
 
-def flip(strand):
-    if strand == '+': return '-'
-    if strand == '-': return '+'
-
-
 def avgmap(maptabix, chrom, start, end):
     ''' return average mappability across chrom:start-end region; maptabix = pysam.Tabixfile '''
     scores = []
@@ -187,6 +182,11 @@ def avgmap(maptabix, chrom, start, end):
         return 0.0
 
 
+def flip(strand):
+    if strand == '+': return '-'
+    if strand == '-': return '+'
+
+
 def interval_forest(bed_file):
     ''' build dictionary of interval trees '''
     forest = dd(Intersecter)
@@ -210,8 +210,7 @@ def read_gen(bam, chrom=None, start=None, end=None):
             yield read
 
 
-
-def get_coords(forest, bams, chrom=None, start=None, end=None, min_mapq=1, min_dist=10000):
+def disco_get_coords(forest, bams, chrom=None, start=None, end=None, min_mapq=1, min_dist=10000):
     coords = []
 
     for bam in bams:
@@ -248,7 +247,7 @@ def get_coords(forest, bams, chrom=None, start=None, end=None, min_mapq=1, min_d
 
                     if mchrom in forest:
                         for rec in forest[mchrom].find(mstart, mend):
-                            coords.append(Coord(rchrom, rstart, rend, rstr, mchrom, mstart, mend, mstr, rec.value, os.path.basename(bam.filename)))
+                            coords.append(DiscoCoord(rchrom, rstart, rend, rstr, mchrom, mstart, mend, mstr, rec.value, os.path.basename(bam.filename)))
                             break
 
             if i % tick == 0:
@@ -260,7 +259,7 @@ def get_coords(forest, bams, chrom=None, start=None, end=None, min_mapq=1, min_d
     return coords
 
 
-def subcluster_by_label(cluster):
+def disco_subcluster_by_label(cluster):
     subclusters = dd(list)
     for c in cluster:
         subclusters[c.label.split('|')[3]].append(c)
@@ -268,7 +267,7 @@ def subcluster_by_label(cluster):
     return subclusters.values()
 
 
-def eval_strands(s):
+def disco_eval_strands(s):
     left = 0
     for i in range(1,len(s)):
         if s[i] != s[0]:
@@ -286,16 +285,16 @@ def eval_strands(s):
     return 0
 
 
-def filter_cluster(cluster):
-    s1 = eval_strands([c.strand for c in cluster])
-    s2 = eval_strands([c.mstrand for c in cluster])
+def disco_filter_cluster(cluster):
+    s1 = disco_eval_strands([c.strand for c in cluster])
+    s2 = disco_eval_strands([c.mstrand for c in cluster])
 
     if s1 == s2 and s1 > 0: return False
 
     return True 
 
 
-def infer_strand(cluster):
+def disco_infer_strand(cluster):
     c1 = [c.strand for c in cluster]
     c2 = [c.mstrand for c in cluster]
 
@@ -305,7 +304,7 @@ def infer_strand(cluster):
     return 'NA'
 
 
-def output_cluster(cluster, forest, mapping, nonref, min_size=4, min_map=0.5):
+def disco_output_cluster(cluster, forest, mapping, nonref, min_size=4, min_map=0.5):
     if len(cluster) >= min_size:
         cluster_chrom = cluster[0].chrom
         cluster_start = cluster[0].start
@@ -320,7 +319,7 @@ def output_cluster(cluster, forest, mapping, nonref, min_size=4, min_map=0.5):
             if mapping is not None:
                 map_score = avgmap(mapping, cluster_chrom, cluster_start, cluster_end)
 
-            if not filter_cluster(cluster) and (map_score >= float(min_map) or mapping is None):
+            if not disco_filter_cluster(cluster) and (map_score >= float(min_map) or mapping is None):
                 nr = ['NA']
 
                 if nonref is not None:
@@ -333,10 +332,10 @@ def output_cluster(cluster, forest, mapping, nonref, min_size=4, min_map=0.5):
 
                 nr = ','.join(nr)
 
-                return InsCall(cluster, cluster_chrom, cluster_start, cluster_end, infer_strand(cluster), bamlist, map_score, nr)
+                return DiscoInsCall(cluster, cluster_chrom, cluster_start, cluster_end, disco_infer_strand(cluster), bamlist, map_score, nr)
 
 
-def cluster(forest, coords, mapping, nonref, min_size=4, min_map=0.5, max_spacing=250):
+def disco_cluster(forest, coords, mapping, nonref, min_size=4, min_map=0.5, max_spacing=250):
     logger.debug('sorting coordinates')
     coords.sort()
 
@@ -350,19 +349,19 @@ def cluster(forest, coords, mapping, nonref, min_size=4, min_map=0.5, max_spacin
             if c.chrom == cluster[-1].chrom and c.start - cluster[-1].end <= max_spacing:
                 cluster.append(c)
             else:
-                for cluster in subcluster_by_label(cluster):
-                    i = output_cluster(cluster, forest, mapping, nonref, min_size=min_size)
+                for cluster in disco_subcluster_by_label(cluster):
+                    i = disco_output_cluster(cluster, forest, mapping, nonref, min_size=min_size)
                     if i is not None: insertion_list.append(i)
                 cluster = [c]
 
-    for cluster in subcluster_by_label(cluster):
-        i = output_cluster(cluster, forest, mapping, nonref, min_size=min_size, min_map=min_map)
+    for cluster in disco_subcluster_by_label(cluster):
+        i = disco_output_cluster(cluster, forest, mapping, nonref, min_size=min_size, min_map=min_map)
         if i is not None: insertion_list.append(i)
 
     return insertion_list
 
 
-def run_chunk(args, chunk):
+def disco_run_chunk(args, chunk):
     ''' chunk is a list of (chrom, start, end) tuples '''
 
     bams = [pysam.AlignmentFile(bam, 'rb') for bam in args.bam.split(',')]
@@ -386,14 +385,14 @@ def run_chunk(args, chunk):
 
         logger.debug('%s:%d-%d: fetching coordinates from %s' % (chrom, start, end, args.bam))
 
-        coords += get_coords(forest, bams, chrom=chrom, start=start, end=end)
+        coords += disco_get_coords(forest, bams, chrom=chrom, start=start, end=end)
 
         logger.debug('%s:%d-%d: found %d anchored reads' % (chrom, start, end, len(coords)))
 
-    return cluster(forest, coords, mapping, nonref, min_size=int(args.minsize), min_map=float(args.minmap), max_spacing=int(args.maxspacing))
+    return disco_cluster(forest, coords, mapping, nonref, min_size=int(args.minsize), min_map=float(args.minmap), max_spacing=int(args.maxspacing))
 
 
-def resolve_dups(ins_list):
+def disco_resolve_dups(ins_list):
     ''' resolve cases where the same insertion has been called in multiple chunks '''
     ins_list.sort()
     new_list = []
@@ -429,14 +428,14 @@ def main(args):
 
     reslist = []
     for chunk in chunks:
-        res = res = pool.apply_async(run_chunk, [args, chunk])
+        res = res = pool.apply_async(disco_run_chunk, [args, chunk])
         reslist.append(res)
 
     ins_list = []
     for res in reslist:
         ins_list += res.get()
 
-    ins_list = resolve_dups(ins_list)
+    ins_list = disco_resolve_dups(ins_list)
     for i in ins_list: print i.out()
 
 

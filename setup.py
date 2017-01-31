@@ -45,12 +45,25 @@ def check_LAST():
 def check_python():
     return sys.hexversion >= 0x20702f0    
 
+
+def check_exonerate():
+    p = subprocess.Popen(['exonerate'], stdout=subprocess.PIPE)
+    for line in p.stdout:
+        if line.startswith('exonerate from exonerate'):
+            major, minor = line.strip().split()[-1].split('.')[:2]
+            minor = minor.split('-')[0]
+            if int(major) >= 2 and int(minor) >= 2:
+                return True
+    return False
+
+
 if __name__ == '__main__':
     if not check_python(): sys.exit('Dependency problem: python >= 2.7.2 is required')
     if not check_bwa(): sys.exit('Dependency problem: bwa >= 0.7.12 not found')
     if not check_samtools(): sys.exit('Dependency problem: samtools >= 1.0 not found')
     if not check_minia(): sys.exit('Dependency problem: minia not found')
     if not check_LAST(): sys.exit('Dependency problem: LAST >= 548 not found')
+    if not check_exonerate(): sys.exit('Dependency problem: exonerate >= 2.2 not found (required for post-filter)')
 
 setup(
     name='TEBreak',

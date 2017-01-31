@@ -64,7 +64,7 @@ class Genome:
         return (chrom, start, end)
 
 
-    def chunk(self, n, seed=None, sorted=False, pad=0):
+    def chunk(self, n, seed=None, sorted=False, pad=0, flatten=True):
         ''' break genome into n evenly-sized chunks, return n lists of (chrom, start, end) '''
         chunklen = int(self.bp/n)
         
@@ -109,8 +109,11 @@ class Genome:
                         intervals.append( self.addpad((chrom, length-lenleft, length), pad) )
                         chunkleft -= lenleft
                         lenleft -= lenleft
- 
-        return list(itertools.chain.from_iterable(chunks)) # flatten list
+
+        if flatten: 
+            return list(itertools.chain.from_iterable(chunks)) # flatten list
+
+        return chunks
 
 
 class LASTResult:
@@ -368,7 +371,9 @@ class SplitCluster(ReadCluster):
             a1 = align.alignment_to_string(a1)
             a2 = ''.join([b for b in list(align.alignment_to_string(a2)) if b != '-'])
 
-            score = float(len(a1) - (len(a1)-s)) / float(len(a1))
+            score = 0.0
+            if len(a1) > 0:
+                score = float(len(a1) - (len(a1)-s)) / float(len(a1))
 
             if re.search(a1, cons):
                 cons_start, cons_end = locate_subseq(cons, a1)
@@ -511,14 +516,14 @@ class Insertion:
                 self.be1, self.be2 = self.be2, self.be1 # keep breakends in position order
 
         self.info = od() # set with self.compile_info()
-        self.discoreads = []
-        #self.dr_clusters = []
+        self.discreads = []
         self.fastqrecs = []
+        self.genotypes = []
         self.mappability = None
 
     def __len__(self):
         ''' return total number of reads (sr+dr) associated with insertion '''
-        return self.num_sr() + len(self.discoreads)
+        return self.num_sr() + len(self.discreads)
 
     def num_sr(self):
         ''' return number of split reads supporting insertion '''
@@ -600,6 +605,14 @@ class Insertion:
 
             return tsdseq1, tsdseq2
 
+
+    def genotype(self, bams):
+        ''' add supporting read count, VAF for each BAM '''
+        if self.tsd():
+            for bam in bams:
+                self.genotypes.append([bam.filename] + list(getVAF(bam, self.be1.chrom, (self.be1.breakpos, self.be2.breakpos))))
+
+
     def fetch_discordant_reads(self, bams, isize=10000, debug=True, logger=None, max_fetch=50):
         ''' Return list of DiscoRead objects '''
         chrom = self.be1.chrom
@@ -670,7 +683,7 @@ class Insertion:
             all_mapped.update(bam_mapped)
             all_unmapped.update(bam_unmapped)
 
-        self.discoreads = all_mapped.values() + all_unmapped.values()
+        self.discreads = all_mapped.values() + all_unmapped.values()
 
 
     def improve_consensus(self, ctg_fa, bwaref, tmpdir='/tmp'):
@@ -727,7 +740,7 @@ class Insertion:
 
         out_fastq = outdir + '/' + '.'.join(('supportreads', self.be1.chrom, str(self.be1.breakpos), str(uuid4()), 'fq'))
         with open(out_fastq, 'w') as out:
-            for readstore in (self.be1, self.be2, self.discoreads):
+            for readstore in (self.be1, self.be2, self.discreads):
                 if readstore:
                     try:
                         rtype = 'SR'
@@ -803,7 +816,7 @@ class Insertion:
 
         return out_fasta
 
-    def compile_info(self, bams):
+    def compile_info(self, bams, genotype=True):
         ''' fill self.info with summary info, needs original bam for chromosome lookup '''
         if self.be1 == None and self.be2 == None:
             return None
@@ -914,10 +927,85 @@ class Insertion:
         if 'be2_sr_count' not in self.info:
             self.info['be2_sr_count'] = 0
 
-        self.info['dr_count'] = len(self.discoreads)
-        self.info['dr_unmapped_mates'] = len([dr for dr in self.discoreads if dr.mate_read is not None and dr.mate_read.is_unmapped])
+        self.info['dr_count'] = len(self.discreads)
+        self.info['dr_unmapped_mates'] = len([dr for dr in self.discreads if dr.mate_read is not None and dr.mate_read.is_unmapped])
+        if not self.genotypes:
+            self.genotype(bams)
 
- 
+        self.info['genotypes'] = ','.join(['|'.join(map(str, fields)) for fields in self.genotypes])
+
+
+# imported from discocluster.py
+
+
+class DiscoCoord:
+    def __init__(self, chrom, start, end, strand, mchrom, mstart, mend, mstrand, label, bam_name):
+        self.chrom   = chrom
+        self.start   = int(start)
+        self.end     = int(end)
+        self.strand  = strand
+        self.mchrom  = mchrom
+        self.mstart  = int(mstart)
+        self.mend    = int(mend)
+        self.mstrand = mstrand
+        self.label   = label
+        self.bam     = bam_name
+
+        # if strand of genome element is '-', flip apparent mate strand
+        elt_str = self.label.split('|')[-1]
+        assert elt_str in ('+', '-'), 'malformed input BED: last three cols need to be class, family, orientation (+/-)'
+
+        if elt_str == '-': self.mstrand = flip(self.mstrand)
+
+
+    def __gt__(self, other):
+        if self.chrom == other.chrom:
+            return self.start > other.start
+        else:
+            return self.chrom > other.chrom
+
+
+    def __str__(self):
+        return '\t'.join(map(str, (self.bam, self.label, self.chrom, self.start, self.end, self.strand, self.mchrom, self.mstart, self.mend, self.mstrand)))
+
+
+class DiscoInsCall:
+    def __init__(self, coord_list, chrom, start, end, strand, bamlist):
+        self.coord_list = coord_list
+        self.chrom      = chrom
+        self.start      = int(start)
+        self.end        = int(end)
+        self.strand     = strand
+        self.bamlist    = bamlist
+        self.length     = len(coord_list)
+
+
+    def out(self, verbose=True):
+        output = ['#BEGIN']
+        output.append('%s\t%d\t%d\t%s\t%s\t%d' % (self.chrom, self.start, self.end, self.strand, self.bamlist, self.length))
+        if verbose:
+            for c in self.coord_list: output.append(str(c))
+        output.append('#END')
+
+        return '\n'.join(output)
+
+
+    def overlaps(self, other):
+        ''' return true if overlap > 0 '''
+        return min(self.end, other.end) - max(self.start, other.start) > 0
+
+
+    def __gt__(self, other):
+        if self.chrom == other.chrom:
+            return self.start > other.start
+        else:
+            return self.chrom > other.chrom
+
+
+    def __str__(self):
+        return self.out(verbose=False)
+
+
 #######################################
 ## Functions                         ##
 #######################################
@@ -1032,6 +1120,8 @@ def fetch_clipped_reads(bams, chrom, start, end, filters, logger=None):
     end   = int(end)
  
     assert start < end
+
+    if start < 0: start = 0
 
     masked_read_count = 0
  
@@ -1325,9 +1415,9 @@ def build_insertions(breakends, maxdist=100):
     for be1_uuid, be2_uuid, score in pair_scores:
         if be1_uuid not in used and be2_uuid not in used:
             insertions.append(Insertion(be_dict[be1_uuid], be_dict[be2_uuid]))
-            #print "debug:, insertion: %s and %s" % (be_dict[be1_uuid], be_dict[be2_uuid])
-        used[be1_uuid] = True
-        used[be2_uuid] = True
+
+            used[be1_uuid] = True
+            used[be2_uuid] = True
 
     # single-end detections
     for be in breakends:
@@ -1377,7 +1467,7 @@ def minia(fq, tmpdir='/tmp'):
     return concat_fa(ctg_fa_list, tmpdir=tmpdir)
 
 
-def build_mask(bedfile):
+def build_mask(bedfile, logger):
     ''' return a dictionary of interval trees '''
     forest = dd(Intersecter)
 
@@ -1387,7 +1477,11 @@ def build_mask(bedfile):
             start = int(start)
             end   = int(end)
 
-            forest[chrom].add_interval(Interval(start, end))
+            try:
+                forest[chrom].add_interval(Interval(start, end))
+            except Exception, e:
+                logger.exception('bx interval tree crashed on interval %s:%d-%d' % (chrom, start, end))
+                
 
     return forest
 
@@ -1415,6 +1509,69 @@ def avgmap(maptabix, chrom, start, end):
             return 0.0
     else:
         return 0.0
+
+
+def getVAF(bam, chrom, poslist):
+    ''' return number of reads supporting alt (insertion), ref (reference) and vaf (variant allele fraction) '''
+    poslist = map(int, poslist)
+    alt, ref = break_count(bam, chrom, poslist)
+    vaf = 0.0 
+
+    if float(ref+alt) > 0:
+        vaf = float(alt)/float(alt+ref)
+
+    return alt, ref, vaf
+
+
+def break_count(bam, chrom, poslist, minpad=5, flex=1, minmapq=10):
+    ''' ref = number of reads spanning TSD, alt = number of reads clipped at breakpoint in poslist '''
+    altcount = 0
+    refcount = 0
+    discards = 0
+
+    tsd_start = min(poslist)
+    tsd_end   = max(poslist)
+
+    tsd_len = tsd_end - tsd_start
+
+    if tsd_start < minpad: tsd_start = minpad
+
+    for read in bam.fetch(chrom, tsd_start-minpad, tsd_end+minpad):
+        if read.is_unmapped or read.is_duplicate:
+            continue
+
+        if read.mapq < minmapq:
+            continue
+
+        rclip = len(read.seq) - read.query_alignment_end 
+        lclip = read.query_alignment_start
+
+        rbreak = 0
+        lbreak = 0
+
+        if rclip > max(tsd_len, minpad):
+            rbreak = read.reference_end
+
+        if lclip > max(tsd_len, minpad):
+            lbreak = read.reference_start
+
+        support_alt = False
+
+        for pos in poslist: # does this read support a breakpoint in the list?
+            if (rbreak >= pos-flex and rbreak <= pos+flex) or (lbreak >= pos-flex and lbreak <= pos+flex):
+                support_alt = True
+
+        if support_alt:
+            altcount += 1
+
+        else:
+            #for pos in poslist: # does this read span a breakpoint in the list?
+            if read.alen == len(read.seq):
+                if read.reference_start < tsd_start and read.reference_end > tsd_end: # span TSD
+                    refcount += 1
+
+
+    return altcount, refcount
 
 
 def guess_minqual(bam):
@@ -1506,7 +1663,7 @@ def filter_insertions(insertions, filters, tmpdir='/tmp', debug=True, logger=Non
     return filtered
 
 
-def postprocess_insertions(insertions, filters, bwaref, bams, tmpdir='/tmp'):
+def postprocess_insertions(insertions, filters, bwaref, bams, tmpdir='/tmp', genotype=True):
     for ins in insertions:
         support_fq  = ins.supportreads_fastq(tmpdir, limit=filters['max_ins_reads'])
         if support_fq is None: return insertions
@@ -1561,7 +1718,7 @@ def postprocess_insertions(insertions, filters, bwaref, bams, tmpdir='/tmp'):
                     ins.be2_improved_cons = False
 
         if ins.be1_improved_cons or ins.be2_improved_cons:
-            ins.compile_info(bams)
+            ins.compile_info(bams, genotype=genotype)
 
     return insertions
 
@@ -1569,7 +1726,11 @@ def postprocess_insertions(insertions, filters, bwaref, bams, tmpdir='/tmp'):
 
 def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
     logger = logging.getLogger(__name__)
-    logger.setLevel(logging.DEBUG)
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
+    else:
+        logger.setLevel(logging.INFO)
+
     chunkname = '%s:%d-%d' % (chrom, start, end)
 
     try:
@@ -1579,7 +1740,7 @@ def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
         minqual = {}
 
         # would do this outside but can't pass a non-pickleable object
-        if args.mask is not None: args.mask = build_mask(args.mask)
+        if args.mask is not None: args.mask = build_mask(args.mask, logger)
 
         if args.map_tabix is not None: args.map_tabix = pysam.Tabixfile(args.map_tabix)
 
@@ -1596,7 +1757,7 @@ def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
             'min_split_reads':       int(args.min_split_reads),
             'min_prox_mapq':         int(args.min_prox_mapq),
             'max_N_consensus':       int(args.max_N_consensus),
-            'max_rpkm':              int(args.max_fold_rpkm)*exp_rpkm,
+            'max_rpkm':              0,
             'exclude_bam':           [],
             'exclude_readgroup':     [],
             'max_bam_count':         int(args.max_bam_count),
@@ -1605,6 +1766,7 @@ def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
             'min_mappability':       float(args.min_mappability)
         }
 
+        if args.max_fold_rpkm is not None: filters['max_rpkm'] = int(args.max_fold_rpkm)*exp_rpkm
         if args.exclude_bam is not None: filters['exclude_bam'] = map(os.path.basename, args.exclude_bam.split(','))
         if args.exclude_readgroup is not None: filters['exclude_readgroup'] = args.exclude_readgroup.split(',')
 
@@ -1613,12 +1775,12 @@ def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
         logger.debug('Processing chunk: %s ...' % chunkname)
         logger.debug('Chunk %s: Parsing split reads from bam(s): %s ...' % (chunkname, args.bam))
         sr = fetch_clipped_reads(bams, chrom, start, end, filters, logger=logger)
-        sr.sort()
 
+        sr.sort()
 
         logger.debug('Chunk %s: Building clusters from %d split reads ...' % (chunkname, len(sr)))
         clusters = build_sr_clusters(sr)
-     
+    
         logger.debug('Chunk %s: Building breakends...' % chunkname)
 
         breakends = []
@@ -1637,14 +1799,15 @@ def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
 
             else:
                 logger.debug('Chunk %s, cluster %d-%d over max RPKM with %f' % (chunkname, cl_min, cl_max, rpkm))
-     
+
         logger.debug('Chunk %s: Mapping %d breakends ...' % (chunkname, len(breakends)))
         if len(breakends) > 0:
             breakends = map_breakends(breakends, args.bwaref, tmpdir=args.tmpdir)
-         
+
             logger.debug('Chunk %s: Building insertions...' % chunkname)
 
             insertions = build_insertions(breakends)
+
             insertions = [ins for ins in insertions if len(ins.be1.proximal_subread()) > 0] # remove bogus insertions
 
             logger.debug('Chunk %s: Processing and filtering %d potential insertions ...' % (chunkname, len(insertions)))
@@ -1655,7 +1818,7 @@ def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
                 ins_debug_name = '%s:%d-%d' % (ins.be1.chrom, ins.min_supporting_base(), ins.max_supporting_base())
                 logger.debug('Chunk: %s, fetch discordant mates for insertion %s ...' % (chunkname, ins_debug_name))
                 ins.fetch_discordant_reads(bams, logger=logger, max_fetch=int(args.max_disc_fetch))
-                ins.compile_info(bams)
+                ins.compile_info(bams, genotype=True)
 
             logger.debug('Chunk %s: Postprocessing %d filtered insertions, trying to improve consensus breakend sequences ...' % (chunkname, len(insertions)))
             processed_insertions  = postprocess_insertions(insertions, filters, args.bwaref, bams, tmpdir=args.tmpdir)
@@ -1761,20 +1924,220 @@ def expected_rpkm(bam_files, genome, intervals=None):
     return total_mapped_reads/km
 
 
+## imported from discocluster.py
+def flip(strand):
+    if strand == '+': return '-'
+    if strand == '-': return '+'
+
+
+def interval_forest(bed_file):
+    ''' build dictionary of interval trees '''
+    forest = dd(Intersecter)
+
+    with open(bed_file, 'r') as bed:
+        for line in bed:
+            chrom, start, end = line.strip().split()[:3]
+            label = '|'.join(line.strip().split())
+            forest[chrom].add_interval(Interval(int(start), int(end), value=label))
+
+    return forest
+
+
+def read_gen(bam, chrom=None, start=None, end=None):
+    if None in (chrom, start, end):
+        for read in bam.fetch():
+            yield read
+
+    else:
+        for read in bam.fetch(chrom, start, end):
+            yield read
+
+
+def disco_get_coords(forest, bams, logger, chrom=None, start=None, end=None, min_mapq=1, min_dist=10000):
+    coords = []
+
+    for bam in bams:
+        tick = 10000000
+        try:
+            tick = int((bam.mapped + bam.unmapped) * 0.01)
+            if tick == 0: tick = 1
+            logger.debug('outputting status every %d reads (1 pct)' % tick)
+
+        except ValueError as e:
+            logger.debug('no index found, outputting status every %d reads' % tick)
+
+        for i, read in enumerate(read_gen(bam, chrom=chrom, start=start, end=end)):
+            if not read.is_unmapped and not read.mate_is_unmapped and not read.is_duplicate:
+
+                rchrom = bam.getrname(read.reference_id)
+                rstart = read.reference_start
+                rend   = read.reference_end
+
+                rstr = '+'
+                if read.is_reverse: rstr = '-'
+
+                mdist = abs(read.reference_start-read.next_reference_start)
+                if read.reference_id != read.next_reference_id: mdist=3e9
+
+                if read.mapq >= min_mapq and mdist >= min_dist:
+                    mchrom = bam.getrname(read.next_reference_id)
+                    mstart = read.next_reference_start
+                    mend   = mstart + len(read.seq)
+
+                    mstr = '+'
+                    if read.mate_is_reverse: mstr = '-'
+
+                    if mchrom in forest:
+                        for rec in forest[mchrom].find(mstart, mend):
+                            coords.append(DiscoCoord(rchrom, rstart, rend, rstr, mchrom, mstart, mend, mstr, rec.value, os.path.basename(bam.filename)))
+                            break
+
+            if i % tick == 0:
+                if read.is_unmapped:
+                    logger.debug('parsed %d reads, last position unmapped' % i)
+                else:
+                    logger.debug('parsed %d reads, last position: %s:%d' % (i, bam.getrname(read.tid), read.pos))
+
+    return coords
+
+
+def disco_subcluster_by_label(cluster):
+    subclusters = dd(list)
+    for c in cluster:
+        subclusters[c.label.split('|')[3]].append(c)
+
+    return subclusters.values()
+
+
+def disco_infer_strand(cluster):
+    c1 = [c.strand for c in cluster]
+    c2 = [c.mstrand for c in cluster]
+
+    if c1[0] == c2[0] and c1[-1] == c2[-1]: return '-'
+    if c1[0] != c2[0] and c1[-1] != c2[-1]: return '+'
+
+    return 'NA'
+
+
+def disco_output_cluster(cluster, forest, mapping, min_size=4):
+    if len(cluster) >= min_size:
+        cluster_chrom = cluster[0].chrom
+        cluster_start = cluster[0].start
+        if cluster_start < 0: cluster_start = 0
+
+        cluster_end = cluster[-1].end
+
+        bamlist = ','.join(list(set([c.bam for c in cluster])))
+
+        return DiscoInsCall(cluster, cluster_chrom, cluster_start, cluster_end, disco_infer_strand(cluster), bamlist)
+
+
+def disco_cluster(forest, coords, mapping, min_size=4, max_spacing=250):
+    coords.sort()
+
+    cluster = []
+    insertion_list = []
+
+    for c in coords:
+        if len(cluster) == 0:
+            cluster = [c]
+        else:
+            if c.chrom == cluster[-1].chrom and c.start - cluster[-1].end <= max_spacing:
+                cluster.append(c)
+            else:
+                for cluster in disco_subcluster_by_label(cluster):
+                    i = disco_output_cluster(cluster, forest, mapping, min_size=min_size)
+                    if i is not None: insertion_list.append(i)
+                cluster = [c]
+
+    for cluster in disco_subcluster_by_label(cluster):
+        i = disco_output_cluster(cluster, forest, mapping, min_size=min_size)
+        if i is not None: insertion_list.append(i)
+
+    return insertion_list
+
+
+def disco_run_chunk(args, chunk):
+    ''' chunk is a list of (chrom, start, end) tuples '''
+    logger = logging.getLogger(__name__)
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
+    else:
+        logger.setLevel(logging.INFO)
+
+    try:
+        bams = [pysam.AlignmentFile(bam, 'rb') for bam in args.bam.split(',')]
+
+        mapping = None
+        if args.map_tabix is not None:
+            mapping = pysam.Tabixfile(args.map_tabix)
+
+        logger.debug('building interval trees for %s' % args.disco_target)
+        forest = interval_forest(args.disco_target)
+
+        coords = []
+
+        #for interval in chunk:
+        #    chrom, start, end = interval 
+        chrom, start, end = chunk
+
+        logger.debug('%s:%d-%d: fetching coordinates from %s' % (chrom, start, end, args.bam))
+
+        coords += disco_get_coords(forest, bams, logger, chrom=chrom, start=start, end=end)
+
+        logger.debug('%s:%d-%d: found %d anchored reads' % (chrom, start, end, len(coords)))
+
+        return disco_cluster(forest, coords, mapping, min_size=int(args.min_disc_size))
+
+    except Exception, e:
+        sys.stderr.write('*'*60 + '\nencountered error in chunk: %s\n' % map(str, chunk))
+        traceback.print_exc(file=sys.stderr)
+        sys.stderr.write("*"*60 + "\n")
+
+        return []
+
+
+def disco_resolve_dups(ins_list):
+    ''' resolve cases where the same insertion has been called in multiple chunks '''
+    ins_list.sort()
+    new_list = []
+
+    last = None
+
+    for ins in ins_list:
+        if last is None:
+            last = ins
+
+        elif last.overlaps(ins):
+            if ins.length > last.length:
+                last = ins
+
+        else:
+            new_list.append(last)
+            last = ins
+
+    if last is not None:
+        new_list.append(last)
+
+    return new_list
+
+
 def main(args):
     ''' housekeeping '''
     logger = logging.getLogger(__name__)
-    logger.setLevel(logging.DEBUG)
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
+    else:
+        logger.setLevel(logging.INFO)
 
-    logger.debug("commandline: %s" % ' '.join(sys.argv))
+    logger.info("commandline: %s" % ' '.join(sys.argv))
 
     checkref(args.bwaref)
 
-    if not args.no_shared_mem:
-        logger.debug("loading bwa index %s into shared memory ..." % args.bwaref)
-        p = subprocess.Popen(['bwa', 'shm', args.bwaref], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        for line in p.stdout: pass # wait for bwa to load
-        logger.debug("loaded.")
+    logger.info("loading bwa index %s into shared memory ..." % args.bwaref)
+    p = subprocess.Popen(['bwa', 'shm', args.bwaref], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    for line in p.stdout: pass # wait for bwa to load
+    logger.debug("loaded.")
 
     ''' Chunk genome or use input BED '''
     
@@ -1806,41 +2169,86 @@ def main(args):
     if len(bamlist) == 0:
         sys.exit('No entries in -b/--bam input .txt: %s' % args.bam)
 
-    if args.interval_bed is None or args.wg_rpkm:
+    if args.interval_bed is None:
         if args.interval_bed is None:
             chunks = genome.chunk(chunk_count, sorted=True, pad=5000)
 
-        if not args.no_rpkm:
-            if args.rpkm_bam:
-                exp_rpkm = expected_rpkm(args.rpkm_bam.split(','), genome)
-            else:
-                exp_rpkm = expected_rpkm(bamlist, genome)
+            if args.disco_target is not None:
+                chunks = genome.chunk(procs, pad=5000)
+
+                with open('bugout.txt', 'w') as bugout:
+                    for c in chunks:
+                        bugout.write('\t'.join(map(str, c)) + '\n')
+
+                reslist = []
+                for i, chunk in enumerate(chunks, 1):
+                    res = pool.apply_async(disco_run_chunk, [args, chunk])
+                    reslist.append(res)
+                    logger.info('submitted %d of %d genome chunks for discordant scan' % (i, len(chunks)))
+
+                ins_list = []
+                for res in reslist:
+                    ins_list += res.get()
+
+                ins_list = disco_resolve_dups(ins_list)
+
+                chunks = []
+
+                with open('disc.debug.txt', 'w') as disc_out:
+                    for i in ins_list:
+                        disc_out.write(i.out() + '\n')
+                        chunks.append((i.chrom, i.start-500, i.end+500))
+
+
+        if args.max_fold_rpkm is not None:
+            exp_rpkm = expected_rpkm(bamlist, genome)
 
     else:
-        if not args.no_rpkm:
-            if args.rpkm_bam:
-                exp_rpkm = expected_rpkm(args.rpkm_bam.split(','), genome, intervals=args.interval_bed)
-            else:
-                exp_rpkm = expected_rpkm(bamlist, genome, intervals=args.interval_bed)
+        if args.max_fold_rpkm is not None:
+            exp_rpkm = expected_rpkm(bamlist, genome, intervals=args.interval_bed)
 
 
     if args.interval_bed is not None:
         with open(args.interval_bed, 'r') as bed:
             chunks = [(line.strip().split()[0], int(line.strip().split()[1]), int(line.strip().split()[2])) for line in bed]
 
-    logger.debug("chunk count: %d" % len(chunks))
+        if args.disco_target is not None:
+            reslist = []
+            for i, chunk in enumerate(chunks, 1):
+                res = pool.apply_async(disco_run_chunk, [args, chunk])
+                reslist.append(res)
+                logger.info('submitted %d of %d genome chunks for discordant scan' % (i, len(chunks)))
+
+            ins_list = []
+            for res in reslist:
+                ins_list += res.get()
+
+            ins_list = disco_resolve_dups(ins_list)
+
+            chunks = []
+
+            with open('disc.debug.txt', 'w') as disc_out:
+                for i in ins_list:
+                    disc_out.write(i.out() + '\n')
+                    chunks.append((i.chrom, i.start-500, i.end+500))
+
+    logger.info("genome chunk count: %d" % len(chunks))
 
 
-    if not args.no_rpkm and exp_rpkm < 10:
-        sys.stderr.write("expected RPKM is less than 10, ignoring high RPKM cutoffs...\n")
+    if args.max_fold_rpkm is not None and exp_rpkm < 10:
+        logger.warning("expected RPKM is less than 10, ignoring high RPKM cutoffs...\n")
         exp_rpkm = 0
 
     reslist = []
 
-    for chunk in chunks:
+    pct = int(len(chunks)*.01)+1
+
+    for i, chunk in enumerate(chunks, 1):
         # run_chunk(args, exp_rpkm, chunk[0], chunk[1], chunk[2]) # uncomment for mp debug
         res = pool.apply_async(run_chunk, [args, bamlist, exp_rpkm, chunk[0], chunk[1], chunk[2]])
         reslist.append(res)
+
+        logger.info('submitted %d of %d chunks (%f)...' % (i, len(chunks), 100.0*float(i)/len(chunks)))
 
     insertions = []
     for res in reslist:
@@ -1855,7 +2263,7 @@ def main(args):
 
     text_summary(insertions, cmd=' '.join(sys.argv), outfile=detailfn)
 
-    logger.debug('Wrote detail output to %s' % detailfn)
+    logger.info('Wrote detail output to %s' % detailfn)
 
     pickoutfn = re.sub('.bam$', '.tebreak.pickle', os.path.basename(bamlist[0]))
 
@@ -1865,7 +2273,7 @@ def main(args):
     with open(pickoutfn, 'w') as pickout:
         pickle.dump(insertions, pickout)
 
-    logger.debug('Pickled to %s' % pickoutfn)
+    logger.info('Pickled to %s' % pickoutfn)
 
  
 if __name__ == '__main__':
@@ -1879,6 +2287,7 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--processes', default=1, help='split work across multiple processes')
     parser.add_argument('-c', '--chunks', default=1, help='split genome into chunks (default = # processes), helps control memory usage')
     parser.add_argument('-i', '--interval_bed', default=None, help='BED file with intervals to scan')
+    parser.add_argument('-d', '--disco_target', default=None, help='limit breakpoint search to discordant mate-linked targets (e.g. generated with /lib/make_discref_hg19.sh)')
     parser.add_argument('--minMWP', default=0.01, help='minimum Mann-Whitney P-value for split qualities (default = 0.01)')
     parser.add_argument('--min_minclip', default=3, help='min. shortest clipped bases per cluster (default = 3)')
     parser.add_argument('--min_maxclip', default=10, help='min. longest clipped bases per cluster (default = 10)')
@@ -1887,7 +2296,7 @@ if __name__ == '__main__':
     parser.add_argument('-m', '--mask', default=None, help='BED file of masked regions')
 
     parser.add_argument('--rpkm_bam', default=None, help='use alternate BAM(s) for RPKM calculation: use original BAMs if using reduced BAM(s) for -b/--bam')
-    parser.add_argument('--max_fold_rpkm', default=10, help='ignore insertions supported by rpkm*max_fold_rpkm reads (default = 10)')
+    parser.add_argument('--max_fold_rpkm', default=None, help='ignore insertions supported by rpkm*max_fold_rpkm reads (default = None (no filter))')
     parser.add_argument('--max_ins_reads', default=100000, help='maximum number of reads to use per insertion call (default = 100000)')
     parser.add_argument('--min_split_reads', default=4, help='minimum total split reads per insertion call (default = 4)')
     parser.add_argument('--min_prox_mapq', default=10, help='minimum map quality for proximal subread (default = 10)')
@@ -1898,14 +2307,13 @@ if __name__ == '__main__':
     parser.add_argument('--map_tabix', default=None, help='tabix-indexed BED of mappability scores')
     parser.add_argument('--min_mappability', default=0.1, help='minimum mappability (default = 0.1; only matters with --map_tabix)')
     parser.add_argument('--max_disc_fetch', default=50, help='maximum number of discordant reads to fetch per insertion site per BAM (default = 50)')
+    parser.add_argument('--min_disc_size', default=4, help='if using -d/--disco_target, minimum number of discordant reads to trigger a call')
 
     parser.add_argument('--tmpdir', default='/tmp', help='temporary directory (default = /tmp)')
     parser.add_argument('--pickle', default=None, help='pickle output name')
     parser.add_argument('--detail_out', default=None, help='file to write detailed output')
  
-    parser.add_argument('--wg_rpkm', default=False, action='store_true', help='force calculate rpkm over whole genome')
-    parser.add_argument('--no_rpkm', default=False, action='store_true', help='do not filter sites by rpkm')
-    parser.add_argument('--no_shared_mem', default=False, action='store_true')
+    parser.add_argument('--debug', action='store_true', default=False)
  
     args = parser.parse_args()
     main(args)

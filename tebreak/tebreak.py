@@ -1789,10 +1789,14 @@ def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
             cl_readcount = 0
             cl_min, cl_max = cluster.find_extrema()
 
-            for bam in bams:
-                cl_readcount += sum([not read.is_unmapped for read in bam.fetch(cluster.chrom, cl_min, cl_max)])
+            rpkm = 0
 
-            rpkm = cl_readcount/((cl_max-cl_min)/1000.)
+            if args.max_fold_rpkm is not None:
+
+                for bam in bams:
+                    cl_readcount += sum([not read.is_unmapped for read in bam.fetch(cluster.chrom, cl_min, cl_max)])
+
+                rpkm = cl_readcount/((cl_max-cl_min)/1000.)
 
             if filters['max_rpkm'] == 0 or rpkm < filters['max_rpkm']:
                 breakends += build_breakends(cluster, filters, tmpdir=args.tmpdir)

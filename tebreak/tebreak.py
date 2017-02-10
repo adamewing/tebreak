@@ -1816,8 +1816,9 @@ def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
 
             for ins in insertions:
                 ins_debug_name = '%s:%d-%d' % (ins.be1.chrom, ins.min_supporting_base(), ins.max_supporting_base())
-                logger.debug('Chunk: %s, fetch discordant mates for insertion %s ...' % (chunkname, ins_debug_name))
-                ins.fetch_discordant_reads(bams, logger=logger, max_fetch=int(args.max_disc_fetch))
+                if int(args.min_disc_reads) > 0:
+                    logger.debug('Chunk: %s, fetch discordant mates for insertion %s ...' % (chunkname, ins_debug_name))
+                    ins.fetch_discordant_reads(bams, logger=logger, max_fetch=int(args.max_disc_fetch))
                 ins.compile_info(bams, genotype=True)
 
             logger.debug('Chunk %s: Postprocessing %d filtered insertions, trying to improve consensus breakend sequences ...' % (chunkname, len(insertions)))
@@ -2087,7 +2088,7 @@ def disco_run_chunk(args, chunk):
 
         logger.debug('%s:%d-%d: found %d anchored reads' % (chrom, start, end, len(coords)))
 
-        return disco_cluster(forest, coords, mapping, min_size=int(args.min_disc_size))
+        return disco_cluster(forest, coords, mapping, min_size=int(args.min_disc_reads))
 
     except Exception, e:
         sys.stderr.write('*'*60 + '\nencountered error in chunk: %s\n' % map(str, chunk))
@@ -2307,7 +2308,7 @@ if __name__ == '__main__':
     parser.add_argument('--map_tabix', default=None, help='tabix-indexed BED of mappability scores')
     parser.add_argument('--min_mappability', default=0.1, help='minimum mappability (default = 0.1; only matters with --map_tabix)')
     parser.add_argument('--max_disc_fetch', default=50, help='maximum number of discordant reads to fetch per insertion site per BAM (default = 50)')
-    parser.add_argument('--min_disc_size', default=4, help='if using -d/--disco_target, minimum number of discordant reads to trigger a call')
+    parser.add_argument('--min_disc_reads', default=4, help='if using -d/--disco_target, minimum number of discordant reads to trigger a call')
 
     parser.add_argument('--tmpdir', default='/tmp', help='temporary directory (default = /tmp)')
     parser.add_argument('--pickle', default=None, help='pickle output name')

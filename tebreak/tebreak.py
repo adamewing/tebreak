@@ -1791,6 +1791,9 @@ def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
 
             rpkm = 0
 
+            if len(cluster.reads) > 1000:
+                logger.warning('Warning, big cluster: %d reads at %s:%d-%d' % (len(cluster.reads), cluster.chrom, cluster.start, cluster.end))
+
             if args.max_fold_rpkm is not None:
 
                 for bam in bams:
@@ -2189,7 +2192,7 @@ def main(args):
                 for i, chunk in enumerate(chunks, 1):
                     res = pool.apply_async(disco_run_chunk, [args, chunk])
                     reslist.append(res)
-                    logger.info('submitted %d of %d genome chunks for discordant scan' % (i, len(chunks)))
+                    #logger.info('submitted %d of %d genome chunks for discordant scan' % (i, len(chunks)))
 
                 ins_list = []
                 for res in reslist:
@@ -2222,7 +2225,7 @@ def main(args):
             for i, chunk in enumerate(chunks, 1):
                 res = pool.apply_async(disco_run_chunk, [args, chunk])
                 reslist.append(res)
-                logger.info('submitted %d of %d genome chunks for discordant scan' % (i, len(chunks)))
+                #logger.info('submitted %d of %d genome chunks for discordant scan' % (i, len(chunks)))
 
             ins_list = []
             for res in reslist:
@@ -2253,7 +2256,7 @@ def main(args):
         res = pool.apply_async(run_chunk, [args, bamlist, exp_rpkm, chunk[0], chunk[1], chunk[2]])
         reslist.append(res)
 
-        logger.info('submitted %d of %d chunks (%f)...' % (i, len(chunks), 100.0*float(i)/len(chunks)))
+        #logger.info('submitted %d of %d chunks (%f)...' % (i, len(chunks), 100.0*float(i)/len(chunks)))
 
     insertions = []
     for res in reslist:

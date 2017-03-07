@@ -94,6 +94,10 @@ class Ins:
 
         if callmuts: self.call_mutations()
 
+        self.out['Genotypes'] = 'NA'
+
+        if self.ins['genotypes']:
+            self.out['Genotypes'] = self.ins['genotypes']
 
     def assign35ends(self):
         self.out['5_Prime_End'] = 'NA'

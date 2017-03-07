@@ -161,7 +161,7 @@ def main(args):
         # maybe add a transduction
         tr_seq = ''
         if uniform(0,1) <= float(args.tr): 
-            tr_note, tr_seq = elt.transduction(ref)
+            tr_note, tr_seq = elt.transduction(ref, 1000)
             if tr_seq:
                 elt_seq += tr_seq
                 notes += ','+tr_note

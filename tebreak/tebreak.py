@@ -1791,8 +1791,11 @@ def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
 
             rpkm = 0
 
-            if len(cluster.reads) > 1000:
+            if len(cluster.reads) > int(args.bigcluster):
                 logger.warning('Warning, big cluster: %d reads at %s:%d-%d' % (len(cluster.reads), cluster.chrom, cluster.start, cluster.end))
+                if args.skipbig:
+                    logger.warning('Skipped cluster due to --skipbig: %s:%d-%d' % (cluster.chrom, cluster.start, cluster.end))
+                    continue
 
             if args.max_fold_rpkm is not None:
 
@@ -2316,6 +2319,8 @@ if __name__ == '__main__':
     parser.add_argument('--min_mappability', default=0.1, help='minimum mappability (default = 0.1; only matters with --map_tabix)')
     parser.add_argument('--max_disc_fetch', default=50, help='maximum number of discordant reads to fetch per insertion site per BAM (default = 50)')
     parser.add_argument('--min_disc_reads', default=4, help='if using -d/--disco_target, minimum number of discordant reads to trigger a call')
+    parser.add_argument('--bigcluster', default=1000, help='set big cluster warning threshold (default = 1000)')
+    parser.add_argument('--skipbig', action='store_true', default=False, help='drop clusters over size set by --bigcluster')
 
     parser.add_argument('--tmpdir', default='/tmp', help='temporary directory (default = /tmp)')
     parser.add_argument('--pickle', default=None, help='pickle output name')

@@ -150,13 +150,14 @@ def main(args):
         notes = elt.notes() # track insertion information
 
         # either invert+truncate or truncate
-        if uniform(0,1) <= float(args.inv):
-            inv_note, elt_seq = elt.inversion()
-            notes += ','+inv_note
+        if not args.notrunc:
+            if uniform(0,1) <= float(args.inv):
+                inv_note, elt_seq = elt.inversion()
+                notes += ','+inv_note
 
-        else:
-            trunc_note, elt_seq = elt.truncate()
-            notes += ','+trunc_note
+            else:
+                trunc_note, elt_seq = elt.truncate()
+                notes += ','+trunc_note
 
         # maybe add a transduction
         tr_seq = ''
@@ -169,8 +170,9 @@ def main(args):
         assert elt_seq, 'fail on elt: %s' % notes
 
         # polyadenylate
-        pa_note, elt_seq = pa(elt_seq)
-        notes += ','+pa_note
+        if not args.nopolya:
+            pa_note, elt_seq = pa(elt_seq)
+            notes += ','+pa_note
 
         # insertion is minus strand 50% of the time
         if uniform(0,1) < .5:
@@ -192,6 +194,8 @@ if __name__ == '__main__':
     parser.add_argument('-n', '--num', default=1000, help='number of elements to simulate')
     parser.add_argument('--tr', default=0.15, help='transduction chance, default=0.15')
     parser.add_argument('--inv', default=0.2, help='inversion chance, default=0.2')
+    parser.add_argument('--notrunc', action='store_true', default=False, help='do not truncate insertions')
+    parser.add_argument('--nopolya', action='store_true', default=False, help='do not polyadenylate')
 
 
     args = parser.parse_args()

@@ -2012,14 +2012,6 @@ def disco_get_coords(forest, bams, logger, chrom=None, start=None, end=None, min
     return coords
 
 
-def disco_subcluster_by_label(cluster):
-    subclusters = dd(list)
-    for c in cluster:
-        subclusters[c.label.split('|')[3]].append(c)
-
-    return subclusters.values()
-
-
 def disco_infer_strand(cluster):
     c1 = [c.strand for c in cluster]
     c2 = [c.mstrand for c in cluster]
@@ -2056,14 +2048,15 @@ def disco_cluster(forest, coords, mapping, min_size=4, max_spacing=250):
             if c.chrom == cluster[-1].chrom and c.start - cluster[-1].end <= max_spacing:
                 cluster.append(c)
             else:
-                for cluster in disco_subcluster_by_label(cluster):
-                    i = disco_output_cluster(cluster, forest, mapping, min_size=min_size)
-                    if i is not None: insertion_list.append(i)
+                i = disco_output_cluster(cluster, forest, mapping, min_size=min_size)
+                if i is not None:
+                    insertion_list.append(i)
+
                 cluster = [c]
 
-    for cluster in disco_subcluster_by_label(cluster):
-        i = disco_output_cluster(cluster, forest, mapping, min_size=min_size)
-        if i is not None: insertion_list.append(i)
+    i = disco_output_cluster(cluster, forest, mapping, min_size=min_size)
+    if i is not None:
+        insertion_list.append(i)
 
     return insertion_list
 
@@ -2318,7 +2311,7 @@ if __name__ == '__main__':
     parser.add_argument('--map_tabix', default=None, help='tabix-indexed BED of mappability scores')
     parser.add_argument('--min_mappability', default=0.1, help='minimum mappability (default = 0.1; only matters with --map_tabix)')
     parser.add_argument('--max_disc_fetch', default=50, help='maximum number of discordant reads to fetch per insertion site per BAM (default = 50)')
-    parser.add_argument('--min_disc_reads', default=4, help='if using -d/--disco_target, minimum number of discordant reads to trigger a call')
+    parser.add_argument('--min_disc_reads', default=4, help='if using -d/--disco_target, minimum number of discordant reads to trigger a call (default = 4)')
     parser.add_argument('--bigcluster', default=1000, help='set big cluster warning threshold (default = 1000)')
     parser.add_argument('--skipbig', action='store_true', default=False, help='drop clusters over size set by --bigcluster')
 

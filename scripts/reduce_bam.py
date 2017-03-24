@@ -90,8 +90,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='extract unmapped/partially mapped/discordant reads')
     parser.add_argument('-b', '--bam', required=True, help='input BAM')
     parser.add_argument('-o', '--out', default=None, help='output BAM (default = <input>.reduced.bam')
-    parser.add_argument('-d', '--dist', default=10000, help='threshold distance for discordant pairs')
-    parser.add_argument('-m', '--minclip', default=5, help='minimum amount of soft-clipping to output')
+    parser.add_argument('-d', '--dist', default=10000, help='threshold distance for discordant pairs (default=10000)')
+    parser.add_argument('-m', '--minclip', default=10, help='minimum amount of soft-clipping to output (default=10)')
 
     parser.add_argument('-v', '--verbose', action='store_true')
 

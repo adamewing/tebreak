@@ -142,6 +142,7 @@ def main(args):
             if full_length and diverge <= float(args.maxdiv) and elt_type in elts and chrom in ref.references:
                 ref_elts.append(RefElt(chrom, start, end, top_strand, diverge, elt_type, ref))
 
+    assert len(ref_elts) > 0, "no elements found!"
 
     for _ in range(int(args.num)):
         elt = choice(ref_elts)
@@ -158,6 +159,9 @@ def main(args):
             else:
                 trunc_note, elt_seq = elt.truncate()
                 notes += ','+trunc_note
+        else:
+            elt_seq = elt.dna
+
 
         # maybe add a transduction
         tr_seq = ''
@@ -181,6 +185,8 @@ def main(args):
 
         else:
             notes += ','+'ins_strand=plus'
+
+        notes += ','+'len=%d' % len(elt_seq)
 
         print '>%s\n%s' % (notes, elt_seq)
 

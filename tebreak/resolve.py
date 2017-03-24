@@ -690,6 +690,8 @@ def add_insdata(ins, last_res, max_bam_count=0):
 
     if None not in (be1_bestmatch, be2_bestmatch):
         if be1_bestmatch.target_id != be2_bestmatch.target_id:
+            logger.debug('UUID %s target mismatch: %s vs %s' % (ins['INFO']['ins_uuid'], be1_bestmatch.target_id, be2_bestmatch.target_id))
+
             if be1_bestmatch.score > be2_bestmatch.score:
                 # try to get be2 target to match be1 target
                 if max(poly_A_frac(ins['INFO']['be2_dist_seq']), poly_A_frac(ins['INFO']['be2_umap_seq'])) > 0.75:
@@ -715,6 +717,14 @@ def add_insdata(ins, last_res, max_bam_count=0):
 
                 if be2_bestmatch.only_polyA():
                     be2_bestmatch = None
+
+                # last-ditch attempt to make the ends match the same reference element
+            if None not in (be1_bestmatch, be2_bestmatch) and be1_bestmatch != be2_bestmatch:
+                if be1_bestmatch.score > be2_bestmatch.score:
+                    be2_bestmatch = best_match(last_res, ins['INFO']['be2_obj_uuid'], req_target=be1_bestmatch.target_id)
+                else:
+                    be1_bestmatch = best_match(last_res, ins['INFO']['be1_obj_uuid'], req_target=be2_bestmatch.target_id)
+
 
     if be1_bestmatch is not None: ins['INFO']['be1_bestmatch'] = be1_bestmatch
     if be2_bestmatch is not None: ins['INFO']['be2_bestmatch'] = be2_bestmatch

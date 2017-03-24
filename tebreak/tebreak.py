@@ -360,7 +360,8 @@ class SplitCluster(ReadCluster):
         cons = uniq_seqs[0]
         scores = []
 
-        if len(uniq_seqs) > 1000: uniq_seqs = np.random.choice(uniq_seqs, size=1000)
+        if len(uniq_seqs) > 1000:
+            uniq_seqs = [uniq_seqs[u] for u in sorted(np.random.choice(range(len(uniq_seqs)), size=1000))
 
         for seq in uniq_seqs[1:]:
 

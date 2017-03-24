@@ -361,7 +361,7 @@ class SplitCluster(ReadCluster):
         scores = []
 
         if len(uniq_seqs) > 1000:
-            uniq_seqs = [uniq_seqs[u] for u in sorted(np.random.choice(range(len(uniq_seqs)), size=1000))
+            uniq_seqs = [uniq_seqs[u] for u in sorted(np.random.choice(range(len(uniq_seqs)), size=1000))]
 
         for seq in uniq_seqs[1:]:
 

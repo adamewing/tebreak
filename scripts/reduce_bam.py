@@ -43,15 +43,16 @@ def parsereads(bamfn, outfn, maxdist=10000, minclip=5, maxN=4):
             output = True
 
         else:
-            if read.mate_is_unmapped:
+            if read.mate_is_unmapped and read.is_paired:
                 output = True
 
             else:
                 if read.rlen - read.alen >= minclip: output = True # soft-clipped
 
-                pair_dist = abs(read.reference_start - read.next_reference_start)
-                if read.tid != read.next_reference_id or pair_dist > maxdist:
-                    output = True # discordant
+                if read.is_paired:
+                    pair_dist = abs(read.reference_start - read.next_reference_start)
+                    if read.tid != read.next_reference_id or pair_dist > maxdist:
+                        output = True # discordant
 
         if read.is_duplicate: output = False
 

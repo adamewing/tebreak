@@ -1136,6 +1136,9 @@ def fetch_clipped_reads(bams, chrom, start, end, filters, logger=None):
                     masked = True
                     masked_read_count += 1
 
+                if read.is_duplicate:
+                    masked = True
+
             if not masked and not read.is_unmapped and not read.is_duplicate: #and read.mapq > 0:
                 if read.rlen - read.alen >= int(filters['min_minclip']): # 'soft' clipped?
      

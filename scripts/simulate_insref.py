@@ -35,7 +35,7 @@ class RefElt:
 
     def notes(self):
         orig_strand = ('-', '+')[int(self.top_strand)]
-        return 'chrom=%s,orig_start=%d,orig_end=%d,orig_strand=%s,orig_div=%f' % (self.chrom, self.start, self.end, orig_strand, self.diverge)
+        return 'type=%s,chrom=%s,orig_start=%d,orig_end=%d,orig_strand=%s,orig_div=%f' % (self.elt_type,self.chrom, self.start, self.end, orig_strand, self.diverge)
 
 
     def truncate(self, pct_fl=0.25):

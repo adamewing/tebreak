@@ -1072,9 +1072,7 @@ def resolve_insertion(args, ins, inslib_fa):
                 ins['INFO']['mapped_target'] = bam.mapped
                 ins = get_bam_info(bam, ins)
 
-                # work in progress: extend consensus
-
-                #extend_consensus(ins, bam)
+                extend_consensus(ins, bam)
 
                 if args.callmuts and ins['INFO']['mapped_target'] > int(args.min_discord):
                     tmp_bam_base = os.path.basename(tmp_bam)

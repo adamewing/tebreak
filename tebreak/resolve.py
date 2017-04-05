@@ -20,7 +20,7 @@ import multiprocessing as mp
 from uuid import uuid4
 from collections import OrderedDict as od
 from collections import defaultdict as dd
-from collections import Counter
+from collections import Counter, namedtuple
 from bx.intervals.intersection import Intersecter, Interval # pip install bx-python
 
 logger = logging.getLogger(__name__)
@@ -1074,7 +1074,7 @@ def resolve_insertion(args, ins, inslib_fa):
 
                 # work in progress: extend consensus
 
-                extend_consensus(ins, bam)
+                #extend_consensus(ins, bam)
 
                 if args.callmuts and ins['INFO']['mapped_target'] > int(args.min_discord):
                     tmp_bam_base = os.path.basename(tmp_bam)
@@ -1100,18 +1100,71 @@ def resolve_insertion(args, ins, inslib_fa):
         return None
 
 
-def resolve_transductions(insertions):
-    ''' some insertion calls may actually correspond to transductions; try to work this out '''
+def dr_propensity(ins, ref, tmpdir='/tmp'):
+    ''' bwa align --> screen ins site --> frequency analysis '''
+
+    tmp_fq  = '%s/tebreak.%s.discoremap.fq' % (tmpdir, ins['INFO']['ins_uuid'])
+
+    with open(tmp_fq, 'w') as fq:
+        for dr in ins['READSTORE']:
+            fq.write(dr)
+
+    sam_cmd = ['bwa', 'mem', '-v', '1', '-k', '10', '-M', '-S', '-P', ref, tmp_fq]
+
+    FNULL = open(os.devnull, 'w')
+    p = subprocess.Popen(sam_cmd, stdout=subprocess.PIPE, stderr=FNULL)
+
+    Mapping = namedtuple('Mapping', ['chrom', 'pos'])
+    mappings = []
+
+    for line in p.stdout:
+        if not line.startswith('@'):
+            if bin(int(line.split('\t')[1]) & 4) != bin(4): # not unmapped
+                c = line.strip().split('\t')
+                chrom = c[2]
+                pos = int(c[3])
+
+                if chrom != ins['INFO']['chrom'] and (ins['INFO']['min_supporting_base'] - 1000 > pos or ins['INFO']['max_supporting_base'] + 1000 < pos):
+                    mappings.append(Mapping(chrom, pos))
+
+    mappings.sort()
+
+    peaks = []
+    peak = []
+    for i, mapping in enumerate(mappings):
+        if i == 0:
+            peak.append(mapping)
+
+        if i > 0:
+            if mappings[i-1].chrom == mapping.chrom and mapping.pos - mappings[i-1].pos < 1000:
+                peak.append(mapping)
+            else:
+                peaks.append(peak)
+                peak = [mapping]
+
+    peaks = sorted(peaks, key=len)
+
+    #print peaks
+
+    os.remove(tmp_fq)
+
+
+def resolve_transductions(insertions, ref=None):
+    ''' some insertion calls may have transductions or correspond to transductions; try to work this out '''
     tr_coord_dict = dd(dict) # chrom --> pos --> [ins]
 
     for ins in insertions:
-            if ins is not None:
-                for be in ('be1','be2'):
-                    if be+'_trans_loc' in ins['INFO']:
-                        for (chrom, start, end, side) in ins['INFO'][be+'_trans_loc']:
-                            for pos in map(int, (start, end)):
-                                if pos not in tr_coord_dict[chrom]: tr_coord_dict[chrom][pos] = []
-                                tr_coord_dict[chrom][pos].append(ins)
+        if ins is not None:
+            for be in ('be1','be2'):
+                if be+'_trans_loc' in ins['INFO']:
+                    for (chrom, start, end, side) in ins['INFO'][be+'_trans_loc']:
+                        for pos in map(int, (start, end)):
+                            if pos not in tr_coord_dict[chrom]: tr_coord_dict[chrom][pos] = []
+                            tr_coord_dict[chrom][pos].append(ins)
+
+        if ref is not None:
+            # work in progress: identify over-represented discordant locations
+            dr_propensity(ins, ref)
 
     for parent_ins in insertions:
         if parent_ins is not None:
@@ -1271,7 +1324,7 @@ def main(args):
 
             new_insertions = [res.get() for res in results if res is not None]
             if new_insertions:
-                new_insertions = resolve_transductions(new_insertions)
+                new_insertions = resolve_transductions(new_insertions, ref=args.ref)
                 processed_insertions += new_insertions
                 results = []
 
@@ -1335,6 +1388,7 @@ if __name__ == '__main__':
     parser.add_argument('-m', '--filter_bed', default=None, help="BED file of regions to mask")
     parser.add_argument('-v', '--verbose', action='store_true', default=False, help="output detailed status information")
     parser.add_argument('-o', '--out', default=None, help="output table")
+    parser.add_argument('-r', '--ref', default=None, help="reference genome fasta, expect bwa index, triggers transduction calling")
 
     parser.add_argument('--max_bam_count', default=0, help="skip sites with more than this number of BAMs (default = no limit)")
     parser.add_argument('--min_ins_match', default=0.95, help="minumum match to insertion library (default 0.95)")

@@ -611,7 +611,7 @@ class Insertion:
         ''' add supporting read count, VAF for each BAM '''
         if self.tsd():
             for bam in bams:
-                self.genotypes.append([bam.filename] + list(getVAF(bam, self.be1.chrom, (self.be1.breakpos, self.be2.breakpos))))
+                self.genotypes.append([os.path.basename(bam.filename)] + list(getVAF(bam, self.be1.chrom, (self.be1.breakpos, self.be2.breakpos))))
 
 
     def fetch_discordant_reads(self, bams, isize=10000, debug=True, logger=None, max_fetch=50):

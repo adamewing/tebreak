@@ -127,6 +127,27 @@ def fix_ins_id(ins_id, inslib):
 
     return '%s:%s' % (superfam, subfam)
 
+def levenshtein(s1, s2):
+    ''' from https://en.wikibooks.org/wiki/Algorithm_Implementation/Strings/Levenshtein_distance#Python '''
+    if len(s1) < len(s2):
+        return levenshtein(s2, s1)
+
+    # len(s1) >= len(s2)
+    if len(s2) == 0:
+        return len(s1)
+
+    previous_row = range(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1 # j+1 instead of j since previous_row and current_row are one character longer
+            deletions = current_row[j] + 1       # than s2
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+    
+    return previous_row[-1]
+
 
 def main(args):
 
@@ -203,6 +224,14 @@ def main(args):
                     logger.info('Filtered %s: low split read evidence (< %d reads)' % (rec['UUID'], int(args.numsplit)))
                     out = False
 
+                if levenshtein(rec['TSD_3prime'], rec['TSD_5prime']) > 1:
+                    logger.info('Filtered %s: TSD mismatch: %s vs %s' % (rec['UUID'], rec['TSD_5prime'], rec['TSD_3prime']))
+                    out = False
+
+                elif (len(list(set(list(rec['TSD_3prime'])))) == 1 or len(list(set(list(rec['TSD_5prime'])))) == 1) and len(rec['TSD_3prime']) > 4:
+                    logger.info('Filtered %s: TSD is a long homopolymer: %s' % (rec['UUID'], rec['TSD_3prime']))
+                    out = False
+
                 if args.fracend is not None and rec['Genomic_Consensus_3p'] != 'NA' and rec['TE_Align_End'] != 'NA':
                     fracend = float(len(inslib[ins_id]) - int(rec['TE_Align_End'])) / float(len(inslib[ins_id]))
                     if fracend > float(args.fracend):
@@ -230,6 +259,20 @@ def main(args):
                             gene = '.'.join(rec['Superfamily'].split('.')[:-1])
                             if gene in gene_overlaps:
                                 out = False
+
+                
+
+                if out:
+                    refseq = ref.fetch(rec['Chromosome'], int(rec['Left_Extreme'])-100, int(rec['Right_Extreme'])+100)
+
+                    # check that the reference genome region doesn't have a good match to the reference element sequence
+                    # inslib[ins_id] vs refseq
+
+                    self_align = align(inslib[ins_id], refseq, minmatch=90)
+
+                    if self_align:
+                        logger.info('Filtered %s: self-match between genome and refelt: %s' % (rec['UUID'], str(self_align)))
+                        out = False
 
                 if out:
                     # realignment

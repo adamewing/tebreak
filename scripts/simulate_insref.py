@@ -188,7 +188,7 @@ def main(args):
 
         notes += ','+'len=%d' % len(elt_seq)
 
-        print '>%s\n%s' % (notes, elt_seq)
+        print '>%s\n%s' % (notes, elt_seq.upper())
 
 
 if __name__ == '__main__':

@@ -1143,7 +1143,7 @@ def dr_propensity(ins, ref, tmpdir='/tmp'):
 
     peaks = sorted(peaks, key=len)
 
-    print [(p[0], len(p)) for p in peaks]
+    #print [(p[0], len(p)) for p in peaks]
 
     os.remove(tmp_fq)
 

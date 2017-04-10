@@ -1121,8 +1121,9 @@ def dr_propensity(ins, ref, tmpdir='/tmp'):
                 c = line.strip().split('\t')
                 chrom = c[2]
                 pos = int(c[3])
+                mapq = int(c[4])
 
-                if chrom != ins['INFO']['chrom'] and (ins['INFO']['min_supporting_base'] - 1000 > pos or ins['INFO']['max_supporting_base'] + 1000 < pos):
+                if chrom != ins['INFO']['chrom'] and (ins['INFO']['min_supporting_base'] - 1000 > pos or ins['INFO']['max_supporting_base'] + 1000 < pos) and mapq > 0:
                     mappings.append(Mapping(chrom, pos))
 
     mappings.sort()
@@ -1142,7 +1143,7 @@ def dr_propensity(ins, ref, tmpdir='/tmp'):
 
     peaks = sorted(peaks, key=len)
 
-    #print peaks
+    print [(p[0], len(p)) for p in peaks]
 
     os.remove(tmp_fq)
 

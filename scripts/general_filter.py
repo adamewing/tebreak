@@ -127,6 +127,7 @@ def fix_ins_id(ins_id, inslib):
 
     return '%s:%s' % (superfam, subfam)
 
+
 def levenshtein(s1, s2):
     ''' from https://en.wikibooks.org/wiki/Algorithm_Implementation/Strings/Levenshtein_distance#Python '''
     if len(s1) < len(s2):
@@ -149,6 +150,31 @@ def levenshtein(s1, s2):
     return previous_row[-1]
 
 
+def avgmap(maptabix, chrom, start, end):
+    ''' return average mappability across chrom:start-end region; maptabix = pysam.Tabixfile'''
+    scores = []
+
+    if None in (start, end): return None
+
+    if chrom in maptabix.contigs:
+        for rec in maptabix.fetch(chrom, int(start), int(end)):
+            mchrom, mstart, mend, mscore = rec.strip().split()
+            mstart, mend = int(mstart), int(mend)
+            mscore = float(mscore)
+
+            while mstart < mend and mstart:
+                mstart += 1
+                if mstart >= int(start) and mstart <= int(end):
+                    scores.append(mscore)
+
+        if len(scores) > 0:
+            return sum(scores) / float(len(scores))
+        else:
+            return 0.0
+    else:
+        return 0.0
+
+
 def main(args):
 
     inslib = None
@@ -164,6 +190,9 @@ def main(args):
     count_3p_diff = 0
     count_5p_switchcons = 0
     count_3p_switchcons = 0
+
+    if args.maptabix:
+        maptabix = pysam.Tabixfile(args.maptabix)
 
     with open(args.table, 'r') as table:
         for i, line in enumerate(table):
@@ -261,6 +290,24 @@ def main(args):
                                 out = False
 
                 
+                if out and args.maptabix:
+                    mapscore = avgmap(maptabix, rec['Chromosome'], int(rec['Left_Extreme']), int(rec['Right_Extreme']))
+                    if mapscore < 0.5:
+                        logger.info('Filtered %s: mappability low' % rec['UUID'])
+                        out = False
+
+
+                if out:
+                    left = min(int(rec['5_Prime_End']), int(rec['3_Prime_End'])) - 20
+                    right = max(int(rec['5_Prime_End']), int(rec['3_Prime_End'])) + 20
+                    refseq = ref.fetch(rec['Chromosome'], left, right)
+
+                    for b in ('A', 'T', 'C', 'G'):
+                        hp = hompol_scan(refseq, b)
+                        #print hp, refseq
+                        if hp[1] > 20:
+                            logger.info('Filtered %s: homopolymer in insertion site' % rec['UUID'])
+                            out = False
 
                 if out:
                     refseq = ref.fetch(rec['Chromosome'], int(rec['Left_Extreme'])-100, int(rec['Right_Extreme'])+100)
@@ -268,7 +315,7 @@ def main(args):
                     # check that the reference genome region doesn't have a good match to the reference element sequence
                     # inslib[ins_id] vs refseq
 
-                    self_align = align(inslib[ins_id], refseq, minmatch=90)
+                    self_align = align(inslib[ins_id], refseq, minmatch=85)
 
                     if self_align:
                         logger.info('Filtered %s: self-match between genome and refelt: %s' % (rec['UUID'], str(self_align)))
@@ -441,6 +488,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--tabix', default=None, help='tabix files to be used as positional filters (can be comma-delimited list of tabix-indexed files)')
     parser.add_argument('--refgene', default=None, help='filter out insertions with superfamily overlapping matching refgene (important for GRIP searches)')
+    parser.add_argument('--maptabix', default=None, help='use mappability tabix')
 
     parser.add_argument('--realign_all_isoforms', action='store_true', help='enable for potentially better realignment when working on GRIPs')
     parser.add_argument('--require_realign', action='store_true', help='require that all breakends are realignable')

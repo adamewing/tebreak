@@ -2085,8 +2085,6 @@ def disco_run_chunk(args, chunk):
 
         coords = []
 
-        #for interval in chunk:
-        #    chrom, start, end = interval 
         chrom, start, end = chunk
 
         logger.debug('%s:%d-%d: fetching coordinates from %s' % (chrom, start, end, args.bam))
@@ -2184,7 +2182,9 @@ def main(args):
             if args.disco_target is not None:
                 chunks = genome.chunk(procs, pad=5000)
 
-                with open('bugout.txt', 'w') as bugout:
+                chunkout = re.sub('.bam$', '.tebreak.chunklist.out', os.path.basename(bamlist[0]))
+
+                with open(chunkout, 'w') as bugout:
                     for c in chunks:
                         bugout.write('\t'.join(map(str, c)) + '\n')
 
@@ -2192,7 +2192,6 @@ def main(args):
                 for i, chunk in enumerate(chunks, 1):
                     res = pool.apply_async(disco_run_chunk, [args, chunk])
                     reslist.append(res)
-                    #logger.info('submitted %d of %d genome chunks for discordant scan' % (i, len(chunks)))
 
                 ins_list = []
                 for res in reslist:
@@ -2225,7 +2224,6 @@ def main(args):
             for i, chunk in enumerate(chunks, 1):
                 res = pool.apply_async(disco_run_chunk, [args, chunk])
                 reslist.append(res)
-                #logger.info('submitted %d of %d genome chunks for discordant scan' % (i, len(chunks)))
 
             ins_list = []
             for res in reslist:
@@ -2255,8 +2253,6 @@ def main(args):
         # run_chunk(args, exp_rpkm, chunk[0], chunk[1], chunk[2]) # uncomment for mp debug
         res = pool.apply_async(run_chunk, [args, bamlist, exp_rpkm, chunk[0], chunk[1], chunk[2]])
         reslist.append(res)
-
-        #logger.info('submitted %d of %d chunks (%f)...' % (i, len(chunks), 100.0*float(i)/len(chunks)))
 
     insertions = []
     for res in reslist:

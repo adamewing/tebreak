@@ -12,7 +12,7 @@
 \title{TEBreak: Generalised insertion detection}
 \author{Adam D. Ewing (adam.ewing@mater.uq.edu.au)}
 \begin{document}
- \date{July 26, 2016}
+ \date{April 10, 2017}
  \maketitle
 
 \section{Introduction}
@@ -24,6 +24,7 @@ TEBreak requires the following software packages be available:
   \item bwa (\url{http://bio-bwa.sourceforge.net/})
   \item LAST (\url{http://last.cbrc.jp/})
   \item minia (\url{http://minia.genouest.org/})
+ \item exonerate (\url{https://github.com/adamewing/exonerate.git})
 \end{enumerate}
 
 Please run the included setup.py to check that external dependencies are installed properly and to install the required python libraries:
@@ -34,108 +35,43 @@ python setup.py install
 \end{verbatim}
 
 \section{Testing / example run}
-\subsection{Prepare reference genome}
-Any number of variations on the human reference genome are available. To obtain the version used to generate the included example BAM please do the following:
-\begin{verbatim}
-wget ftp://ftp.ncbi.nlm.nih.gov/sra/reports/Assembly/GRCh37-HG19_Broad_variant/Homo_sapiens_assembly19.fasta
-bwa index Homo_sapiens_assembly19.fasta
-samtools faidx Homo_sapiens_assembly19.fasta
-\end{verbatim}
-
 \subsection{Run tebreak.py}
-
-Starting in the TEBreak root directory:
+TEBreak includes a small example intended to test whether the software is installed properly.
+Starting in the TEBreak root directory, try the following:
 
 \begin{verbatim}
 tebreak/tebreak.py \
 -b test/data/example.ins.bam \
--r Homo_sapiens_assembly19.fasta \
+-r test/data/Homo_sapiens_chr4_50000000-60000000_assembly19.fasta \
 -i test/data/example.region.bed \
 --pickle test/example.pickle \
 --detail_out test/example.tebreak.detail.out
 \end{verbatim}
 
-Output should be similar to the following:
-
-\begin{verbatim}
-2015-07-19 17:16:05,185 commandline: tebreak/tebreak.py -b test/data/example.ins.bam -r Homo_sapiens_assembly19.fasta -i test/data/example.region.bed --pickle test/example.pickle --detail_out test/example.tebreak.detail.out
-2015-07-19 17:16:05,186 loading bwa index /home/adam/dev/genomes/broad/Homo_sapiens_assembly19.fasta into shared memory ...
-2015-07-19 17:16:05,192 loaded.
-2015-07-19 17:16:05,244 chunk count: 1
-2015-07-19 17:16:05,248 Processing chunk: 4:57459002-57496002 ...
-2015-07-19 17:16:05,248 Chunk 4:57459002-57496002: Parsing split reads from bam(s): test/data/example.ins.bam ...
-2015-07-19 17:16:05,364 Chunk 4:57459002-57496002: Building clusters from 151 split reads ...
-2015-07-19 17:16:05,369 Chunk 4:57459002-57496002: Building breakends...
-2015-07-19 17:16:05,616 Chunk 4:57459002-57496002: Mapping 74 breakends ...
-2015-07-19 17:16:06,312 Chunk 4:57459002-57496002: Building insertions...
-2015-07-19 17:16:06,333 Chunk 4:57459002-57496002: Processing and filtering 40 potential insertions ...
-2015-07-19 17:16:06,456 Chunk 4:57459002-57496002: Postprocessing 6 filtered insertions, trying to improve consensus breakend sequences ...
-2015-07-19 17:16:08,623 Chunk 4:57459002-57496002: Summarising insertions ...
-2015-07-19 17:16:08,623 Finished chunk: 4:57459002-57496002
-2015-07-19 17:16:08,635 Pickled to test/example.pickle
-\end{verbatim}
+This will yield two files, in this case test/example.pickle and test/example.tebreak.detail.out. If not specified, the output filenames will be based on the input BAM file name (or the first BAM in a comma delimited list of BAMs). The "pickle" file contains information that will be passed on to subsequent steps in TEBreak, the "detail" output contains raw putative insertion sites which generally require further refinement, annotation, and filtering, but can be useful in troubleshooting when a true positive site is missed.
 
 \subsection{Run resolve.py}
 
-The second step is to resolve putative insertions, in this case human transposable element insertions, using resolve.py:
+The next step is to resolve putative insertions, in this case human transposable element insertions, using resolve.py:
 
 \begin{verbatim}
 tebreak/resolve.py \
 -p test/example.pickle \
 -i lib/teref.human.fa \
 --detail_out test/example.resolve.detail.out \
--v > test/example.tab.txt
+-o test/example.table.txt
 \end{verbatim}
 
-You should see something like the following:
-
-\begin{verbatim}
-2015-07-19 17:25:39,039 resolve.py called with args: tebreak/resolve.py -p test/example.pickle -i lib/teref.human.fa --detail_out test/example.resolve.detail.out -v
-2015-07-19 17:25:39,039 loading pickle: test/example.pickle
-2015-07-19 17:25:39,044 finished loading test/example.pickle
-2015-07-19 17:25:39,044 raw candidate count: 6
-2015-07-19 17:25:39,044 prefiltered candidate count: 6
-2015-07-19 17:25:39,044 Create LAST db for tebreak_refs/teref.human.fa ...
-2015-07-19 17:25:39,093 submitted 0 candidates, last uuid: f7b95d73-07e9-4b6d-868b-6553c5a7c5f9
-2015-07-19 17:25:39,120 Samtools indexing /tmp/tebreak.ref.ALU:AluYa5.f7b95d73-07e9-4b6d-868b-6553c5a7c5f9.fa ...
-2015-07-19 17:25:39,128 Create BWA db for /tmp/tebreak.ref.ALU:AluYa5.f7b95d73-07e9-4b6d-868b-6553c5a7c5f9.fa ...
-2015-07-19 17:25:39,253 Samtools indexing /tmp/tebreak.ref.L1:L1preTa.11f42f35-c098-4d56-b9eb-34d62b2b4faa.fa ...
-2015-07-19 17:25:39,259 Create BWA db for /tmp/tebreak.ref.L1:L1preTa.11f42f35-c098-4d56-b9eb-34d62b2b4faa.fa ...
-2015-07-19 17:25:39,370 Samtools indexing /tmp/tebreak.ref.L1:L1Ta.d9fa11ac-dd69-4267-8774-dc8ed6b312e7.fa ...
-2015-07-19 17:25:39,376 Create BWA db for /tmp/tebreak.ref.L1:L1Ta.d9fa11ac-dd69-4267-8774-dc8ed6b312e7.fa ...
-2015-07-19 17:25:39,502 Samtools indexing /tmp/tebreak.ref.ALU:AluYa5.4c1fa9a7-5fed-44c3-8ca3-84247090dd2c.fa ...
-2015-07-19 17:25:39,508 Create BWA db for /tmp/tebreak.ref.ALU:AluYa5.4c1fa9a7-5fed-44c3-8ca3-84247090dd2c.fa ...
-2015-07-19 17:25:39,643 Samtools indexing /tmp/tebreak.ref.ALU:AluYa5.f805e9b6-6922-47cf-bef3-b4d082e07e8d.fa ...
-2015-07-19 17:25:39,649 Create BWA db for /tmp/tebreak.ref.ALU:AluYa5.f805e9b6-6922-47cf-bef3-b4d082e07e8d.fa ...
-2015-07-19 17:25:39,745 Samtools indexing /tmp/tebreak.ref.SVA:SVA_F.1d70cd96-ed12-40ed-ba2c-3495a4db7b20.fa ...
-2015-07-19 17:25:39,751 Create BWA db for /tmp/tebreak.ref.SVA:SVA_F.1d70cd96-ed12-40ed-ba2c-3495a4db7b20.fa ...
-\end{verbatim}
-
-\subsection{Filter the output table}
-
-Please see the section on filtering for details.
-
-First you'll need to build the hg19 mappability index:
-
-\begin{verbatim}
-cd lib
-./human_mappability.sh
-cd ..
-\end{verbatim}
-
-Once that is completed, filter the results from resolve.py:
-
-\begin{verbatim}
-scripts/filter_hg19.py --tabfile test/example.tab.txt > test/example.filtered.tab.txt
-\end{verbatim}
-
-If all went well, test/example.filtered.tab.txt should contain evidence for 5 transposable element insertions (2 L1s and 3 Alus). If it does not, please double check that all prerequisites are installed, read the rest of this document, try again, and e-mail me at adam.ewing@mater.uq.edu.au with error messages if you are still not having any luck.
+If all went well, test/example.table.txt should contain evidence for 5 transposable element insertions (2 L1s and 3 Alus). If it does not, please double check that all prerequisites are installed, try again, and e-mail me at adam.ewing@mater.uq.edu.au with error messages if you are still not having any luck.
 
 \section{Insertion site discovery (tebreak.py)}
 \subsection{Usage}
+
+The following output can be obtained by running tebreak.py -h:
+
 \begin{verbatim}
 usage: tebreak.py [-h] -b BAM -r BWAREF [-p PROCESSES] [-c CHUNKS]
-                  [-i INTERVAL_BED] [--minMWP MINMWP]
+                  [-i INTERVAL_BED] [-d DISCO_TARGET] [--minMWP MINMWP]
                   [--min_minclip MIN_MINCLIP] [--min_maxclip MIN_MAXCLIP]
                   [--min_sr_per_break MIN_SR_PER_BREAK]
                   [--min_consensus_score MIN_CONSENSUS_SCORE] [-m MASK]
@@ -148,15 +84,17 @@ usage: tebreak.py [-h] -b BAM -r BWAREF [-p PROCESSES] [-c CHUNKS]
                   [--exclude_readgroup EXCLUDE_READGROUP]
                   [--max_bam_count MAX_BAM_COUNT] [--map_tabix MAP_TABIX]
                   [--min_mappability MIN_MAPPABILITY]
-                  [--max_disc_fetch MAX_DISC_FETCH] [--tmpdir TMPDIR]
-                  [--pickle PICKLE] [--detail_out DETAIL_OUT] [--wg_rpkm]
-                  [--no_rpkm] [--no_shared_mem]
+                  [--max_disc_fetch MAX_DISC_FETCH]
+                  [--min_disc_reads MIN_DISC_READS] [--bigcluster BIGCLUSTER]
+                  [--skipbig] [--tmpdir TMPDIR] [--pickle PICKLE]
+                  [--detail_out DETAIL_OUT] [--debug]
 
 Find inserted sequences vs. reference
 
 optional arguments:
   -h, --help            show this help message and exit
-  -b BAM, --bam BAM     target BAM(s): can be comma-delimited list
+  -b BAM, --bam BAM     target BAM(s): can be comma-delimited list or .txt
+                        file with bam locations
   -r BWAREF, --bwaref BWAREF
                         bwa/samtools indexed reference genome
   -p PROCESSES, --processes PROCESSES
@@ -166,6 +104,10 @@ optional arguments:
                         helps control memory usage
   -i INTERVAL_BED, --interval_bed INTERVAL_BED
                         BED file with intervals to scan
+  -d DISCO_TARGET, --disco_target DISCO_TARGET
+                        limit breakpoint search to discordant mate-linked
+                        targets (e.g. generated with
+                        /lib/make_discref_hg19.sh)
   --minMWP MINMWP       minimum Mann-Whitney P-value for split qualities
                         (default = 0.01)
   --min_minclip MIN_MINCLIP
@@ -181,7 +123,7 @@ optional arguments:
                         original BAMs if using reduced BAM(s) for -b/--bam
   --max_fold_rpkm MAX_FOLD_RPKM
                         ignore insertions supported by rpkm*max_fold_rpkm
-                        reads (default = 10)
+                        reads (default = None (no filter))
   --max_ins_reads MAX_INS_READS
                         maximum number of reads to use per insertion call
                         (default = 100000)
@@ -208,14 +150,17 @@ optional arguments:
   --max_disc_fetch MAX_DISC_FETCH
                         maximum number of discordant reads to fetch per
                         insertion site per BAM (default = 50)
+  --min_disc_reads MIN_DISC_READS
+                        if using -d/--disco_target, minimum number of
+                        discordant reads to trigger a call (default = 4)
+  --bigcluster BIGCLUSTER
+                        set big cluster warning threshold (default = 1000)
+  --skipbig             drop clusters over size set by --bigcluster
   --tmpdir TMPDIR       temporary directory (default = /tmp)
   --pickle PICKLE       pickle output name
   --detail_out DETAIL_OUT
                         file to write detailed output
-  --wg_rpkm             force calculate rpkm over whole genome
-  --no_rpkm             do not filter sites by rpkm
-  --no_shared_mem
-
+  --debug
 \end{verbatim}
 
 \subsection{Description}
@@ -234,10 +179,23 @@ Output data in python's pickle format, meant for input to other scripts includin
 \paragraph{Detailed human-readable output (--detail\_out)}
 This is a file containing detailed information about consensus reads, aligned segments, and statistics for each putative insertion site detected. Note that this is done with minimal filtering, so these should not be used blindly. Default filename is tebreak.out
 
-\paragraph{Additional options}
+\paragraph{Options important for optimal runtime}
 \begin{itemize}
 \item -p/--processes :  Split work across multiple processes. Parallelism is accomplished through python's multiprocessing module. If specific regions are input via -i/--interval\_bed, these intervals will be distributed one per process. If a whole genome is to be analysed (no -i/--interval\_bed), the genome is split into chunks, one per process, unless a specific number of chunks is specified via -c/--chunks.
+
 \item -i/--interval\_bed : BED file specifying intervals to be scanned for insertion evidence, the first three columns must be chromosome, start, end. A number of intervals equal to the value specified by -p/--processes will be searched in parallel. Overrides -c/--chunks.
+
+\item -c/--chunks : if no input BED is specified via -i/--interval\_bed and no set of discordant targets is specified by -d/--disco\_target, split the genome up into some number of "chunks" (default = number of processes). For whole-genome sequencing data split across 32-64 cores, 30000-40000 chunks often yields reasonable runtimes.
+
+\item -m/--mask : BED file of regions to mask. Reads will not be considered if they fall into regions in this file. Usually this file would include regions likely to have poor unique alignability and a tendency to generate large pileups that leads to slow parsing such as centromeres, telomeres, recent repeats, and extended homopolymers and simple sequence repeats. An example is included for hg19/GRCh37 (lib/hg19.centromere\_telomere.bed).
+
+\item -d/--disco\_target : if paired reads are present and the sequencing scheme permits, you can use discordant read pair mapping to narrow down regions to search for split reads as evidence for insertion breakpoints. Most Illumina WGS/WES sequencing approaches support this. This can result in a dramatic speedup with the tradeoff of a slightly reduced sensitivity in some cases. 
+
+\end{itemize}
+
+
+\paragraph{Additional options}
+\begin{itemize}
 \item --minMWP: Minimum value of Mann-Whitney P-value used to check similarity between the distribution of mapped base qualities versus clipped base qualities for a soft-clipped read (default = 0.01).
 \item --min\_minclip : the shortest amount of soft clipping that will be considered (default = 3, minimum = 2).
 \item --max\_minclip : For a given cluster of clipped reads, the greatest number of bases clipped form any read in the cluster must be at least this amount (default = 10).
@@ -245,8 +203,8 @@ This is a file containing detailed information about consensus reads, aligned se
 \item --min\_consensus\_score : minimum quality score for the scaffold created from clipped reads (default = 0.95)
 \item -m/--mask : BED file of regions to mask. Reads will not be considered if they fall into regions in this file.
 \item --rpkm\_bam : use alternate BAM file(s) for RPKM calculation for avoiding over-aligned regions (useful for subsetted BAMs).
-\item --max\_fold\_rpkm : reject cluster if RPKM for clustered region is greater than the mean RPKM by this factor (default = 10)
-\item --max\_ins\_reads : maximum number of reads per insertion call (default = 1000)
+\item --max\_fold\_rpkm : reject cluster if RPKM for clustered region is greater than the mean RPKM by this factor (default = None (no filter))
+\item --max\_ins\_reads : maximum number of reads per insertion call (default = 100000)
 \item --min\_split\_reads : minimum total split (clipped) read count per insertion (default = 4)
 \item --min\_prox\_mapq : minimum mapping quality for proximal (within-cluster) alignments (default = 10)
 \item --max\_N\_consensus : exclude reads and consensus breakends with greater than this number of N (undefined) bases (default = 4)
@@ -257,10 +215,8 @@ This is a file containing detailed information about consensus reads, aligned se
 \item --map\_tabix : tabix-indexed BED of mappability scores. Generate for human with script in lib/human\_mappability.sh.
 \item --min\_mappability : minimum mappability for cluster (default = 0.5; only effective if --map\_tabix is also specified)
 \item --max\_disc\_fetch : maximum number of discordant mates to fetch per insertion site per BAM. Sites with more than this number of discordant reads associated will be downsampled. This helps with runtime as fetching discordant rates is time-consuming (default = 50).
+\item --min\_disc\_reads : sets the threshold for calling a cluster of discordant reads when using -d/--disco\_target (default = 4)
 \item --tmpdir : directory for temporary files (default = /tmp)
-\item --wg\_rpkm : calculate average RPKM using entire genome instead of regions in -i/--interval\_bed
-\item --no\_rpkm : disable filtering pileup depth by RPKM.
-\item --no\_shared\_mem : By default, tebreak.py will try to use \texttt{bwa shm} to load the reference genome into shared memory as this is much more efficient for multiprocessing. This option disables shared memory.
 
 \end{itemize}
 
@@ -269,14 +225,16 @@ This is a file containing detailed information about consensus reads, aligned se
 \subsection{Usage}
 \begin{verbatim}
 usage: resolve.py [-h] -p PICKLE [-t PROCESSES] -i INSLIB_FASTA
-                  [-m FILTER_BED] [-v] [-o OUT]
+                  [-m FILTER_BED] [-v] [-o OUT] [-r REF]
                   [--max_bam_count MAX_BAM_COUNT]
-                  [--min_ins_match MIN_INS_MATCH] [--minmatch MINMATCH]
-                  [--mindiscord MINDISCORD] [-a ANNOTATION_TABIX]
-                  [--refoutdir REFOUTDIR] [--skip_align] [--use_rg]
+                  [--min_ins_match MIN_INS_MATCH]
+                  [--min_ref_match MIN_REF_MATCH]
+                  [--min_cons_len MIN_CONS_LEN] [--min_discord MIN_DISCORD]
+                  [--min_split MIN_SPLIT] [--ignore_filters]
+                  [-a ANNOTATION_TABIX] [--refoutdir REFOUTDIR] [--use_rg]
                   [--keep_all_tmp_bams] [--detail_out DETAIL_OUT] [--unmapped]
-                  [--te] [--usecachedLAST] [--uuid_list UUID_LIST]
-                  [--callmuts] [--tmpdir TMPDIR]
+                  [--usecachedLAST] [--uuid_list UUID_LIST] [--callmuts]
+                  [--tmpdir TMPDIR]
 
 Resolve insertions from TEbreak data
 
@@ -290,28 +248,34 @@ optional arguments:
                         reference for insertions (not genome)
   -m FILTER_BED, --filter_bed FILTER_BED
                         BED file of regions to mask
-  -v, --verbose         output status information
+  -v, --verbose         output detailed status information
   -o OUT, --out OUT     output table
+  -r REF, --ref REF     reference genome fasta, expect bwa index, triggers
+                        transduction calling
   --max_bam_count MAX_BAM_COUNT
                         skip sites with more than this number of BAMs (default
                         = no limit)
   --min_ins_match MIN_INS_MATCH
-                        minumum match to insertion library
-  --minmatch MINMATCH   minimum match to reference genome
-  --mindiscord MINDISCORD
-                        minimum mapped discordant read count
+                        minumum match to insertion library (default 0.95)
+  --min_ref_match MIN_REF_MATCH
+                        minimum match to reference genome (default 0.98)
+  --min_cons_len MIN_CONS_LEN
+                        min total consensus length (default=250)
+  --min_discord MIN_DISCORD
+                        minimum mapped discordant read count (default = 8)
+  --min_split MIN_SPLIT
+                        minimum split read count (default = 8)
+  --ignore_filters
   -a ANNOTATION_TABIX, --annotation_tabix ANNOTATION_TABIX
                         can be comma-delimited list
   --refoutdir REFOUTDIR
                         output directory for generating tebreak references
                         (default=tebreak_refs)
-  --skip_align          skip re-alignment of discordant ends to ref insertion
   --use_rg              use RG instead of BAM filename for samples
   --keep_all_tmp_bams   leave ALL temporary BAMs (warning: lots of files!)
   --detail_out DETAIL_OUT
                         file to write detailed output
   --unmapped            report insertions that do not match insertion library
-  --te                  set if insertion library is transposons
   --usecachedLAST       try to used cached LAST db, if found
   --uuid_list UUID_LIST
                         limit resolution to UUIDs in first column of input
@@ -354,15 +318,15 @@ Filename for the output table which is usually the primary means to assess inser
 \item -v/--verbose : Output status information.
 \item --max\_bam\_count : do not analyse insertions represented by more than this number of BAMs (default = no filter)
 \item --min\_ins\_match : minimum percent match to insertion library
-\item --minmatch : minimum percent match to reference genome
-\item --mindiscord : minimum number of discordant reads associated with insertion sites
+\item --min\_ref\_match : minimum percent match to reference genome
+\item --min\_discord : minimum number of discordant reads associated with insertion sites (default = 8)
+\item --min\_cons\_len : minimum consensus length (sum of 5p and 3p insertion consensus contigs)
+\item --min\_split : minimum number of split reads associated with insertion sites (default = 8)
 \item --annotation\_tabix : tabix-indexed file, entries overlapping insertions will be annotated in output
 \item --refoutdir : non-temporary output directory for various references generated by resolve.py. This includes LAST references for the insertion library and insertion-specific BAMs if --keep\_ins\_bams is enabled.
-\item --skip\_align : skip insertion-specific realignment of split/discordant reads (not recommended on first pass)
 \item --use\_rg : use the readgroup name instead of the BAM name to count and annotate samples
 \item --keep\_all\_tmp\_bams : retain all temporary BAMs in temporary directory (warning: this can easily be in excess of 100000 files for WGS data and may lead to unhappy filesystems).
 \item --unmapped : also report insertions that do not match the insertion library
-\item --te : enable additional filtering specific to transposable element insertions
 \item --usecachedLAST : useful if -i/--inslib FASTA is large, you can use a pre-built LAST reference (in --refoutdir) e.g. if it was generated on a previous run.
 \item --uuid\_list : limit analysis to set of UUIDs in the first column of specified file (generally, this is the table output by a previous run of resolve.py) - this is useful for changing annotations, altering parameters, debugging, etc.
 \item --callmuts : reports changes in inserted sequence vs insertion reference in the 'Variants' column of the tabular output
@@ -370,12 +334,12 @@ Filename for the output table which is usually the primary means to assess inser
 \end{itemize}
 
 \subsection{Output}
-A table (tab-delimited) is output (with a header) is written to STDOUT, so I would recommend redirecting stdout of resolve.py to a file. The output contains the following columns:
+A table (tab-delimited) is output (with a header) is written to the file specified by -o/--out in resolve.py. The columns are as follows:
 
 \begin{itemize}
 \item UUID : Unique identifier
 \item Chromosome : Chromosome
-\item Left\_Extreme : Coordinate of the left-most reference base mapped to a read supporting the insertion
+\item Left\_Extreme : Coordinate of the left-most reference base mapped to\item --te : enable additional filtering specific to transposable element insertions a read supporting the insertion
 \item Right\_Extreme : Coordinate of the right-most reference base mapped to a read supporting the insertion
 \item 5\_Prime\_End : Breakend corresponding to the 5' end of the inserted sequence (where 5' is can be defined e.g. for transposable elements)
 \item 3\_Prime\_End : Breakend corresponding to the 3' end of the inserted sequence (where 3' is can be defined e.g. for transposable elements)
@@ -393,7 +357,9 @@ A table (tab-delimited) is output (with a header) is written to STDOUT, so I wou
 \item Split\_reads\_5prime : Number of split (clipped) reads supporting 5' end of the insertion
 \item Split\_reads\_3prime : Number of split (clipped) reads supporting 5' end of the insertion
 \item Remapped\_Discordant : Number of discordant read ends re-mappable to insertion reference sequence
+\item Remap\_Disc\_Fraction : The proportion of remapped discordant reads mapping to the reference insertion sequence
 \item Remapped\_Splitreads : Number of split reads re-mappable to insertion reference sequence
+\item Remap\_Split\_Fraction : The proportion of remapped split reads mapping to the reference insertion sequence
 \item 5p\_Cons\_Len : Length of 5' consensus sequence (Column Consensus\_5p)
 \item 3p\_Cons\_Len : Length of 3' consensus sequence (Column Consensus\_3p)
 \item 5p\_Improved : Whether the 5' consensus sequence was able to be improved through local assembly in tebreak.py
@@ -407,33 +373,26 @@ A table (tab-delimited) is output (with a header) is written to STDOUT, so I wou
 \item Insert\_Consensus\_5p : Consensus sequence for 5' supporting contig assembled from insertion side of breakpoint
 \item Insert\_Consensus\_3p : Consensus sequence for 3' supporting contig assembled from insertion side of breakpoint
 \item Variants : if --callmuts option given to resolve.py, this is a list of changes detected between inserted sequence and insertion reference sequence
-\end{itemize}
-
-Additional columns may be present depending on annotation options:
-
-\begin{itemize}
-\item NonRef : non-reference annotation, made with scripts/annotate.py --nonref (column name could vary)
-\item Mappability : added by filter\_hg19.py, measure of mappability/alignability over the interval defined by left and right extrema
-\item ExonerateRealign : added by filter\_hg19.py if run with --insref, reflects results of realigning consensus contigs to element consensus ith Exonerate. Will probably remove in the future.
-\item ChimeraBaseCount : Number of bases overlapping between insertion prediction and target site. Short overlaps may reflect microhomology at the insertion site, longer overlaps may indicate chimeric sequences which are more likely to be false positive (requires filter\_hg19.py run with --chimera)
-\item InsSiteHomology : sequence of overlapped bases (length = ChimeraBaseCount) from consensus sequence (requires filter\_hg19.py run with --chimera)
+\item Genotypes : per-sample read depth information useful for determining genotype
 \end{itemize}
 
 \section{Filtering}
 
-\subsection{Pre-filtering}
-In some cases it is not necessary to analyse the entire genome. Regions of interest in BED format may be input to tebreak.py via the -i/--inverval\_bed option.
 
+\subsection{Pre-filtering}
+In some cases it is not necessary to analyse the entire genome, or only specific regions are of interest. Regions of interest in BED format may be input to tebreak.py via the -i/--inverval\_bed option.
+
+
+\subsection{Post-filtering}
+The insertion resolution script (resolve.py) includes a number of options for filtering insertions, with default parameters generally being tuned towards high sensitivity for high-quality WGS samples at greater than 30x coverage. In many instances, additional filtering may be necessary. For example, false positives may arise due to homopolymer expansions and contrations around reference transposable elements, as is particularly the case in mismatch-repair defective tumour genomes. False positives may also arise from sample preparation methods that induce PCR artefacts such as chimeric reads. Generally, when searching for rare events, the decreased signal-to-noise ratio necessitates a low false positive rate. To perform additional filtering, a script is included in scripts/general\_filter.py which should be regarded as a starting point for obtaining an optimal analysis.
+
+\subsection{Miscellaneous methods for improving runtime}
 \begin{itemize}
-\item If paired-end reads are present, it is possible to pre-select regions where insertions may be indicated by discordant paired-end mappings. This can be accomplished using the script 'discoreads.py' which is in the scripts directory of the TEBreak distribution. 
 \item For whole genome sequencing (WGS) data, it is only the soft-clipped reads and reads in discordant pairs that are informative; the rest of the mapped reads can be discarded. This can be accomplished using the script 'reduce\_bam.py', located in the scripts directory. Pre-processing with this script may yield lower runtime due to less disk access.
 \item For sequence derived from targeted sequencing methods (e.g. whole exome sequencing), it may be useful to only analyse regions covered to at least a certain read depth. This can be accomplished using the script 'covered\_segments.py' in the scripts directory.
 \item To improve the runtime of resolve.py over large datasets (e.g. WGS) the 'pickle' generated by tebreak.py can be reduced using picklescreen.py (in the scripts directory). This will pre-align all junction reads to an insertion reference library, reducing the number of candidates for further analysis by resolve.py.
 \item For larger cohorts, splitting the 'pickle' file up into per-chromosome files may be required to reduce memory usage. This can be accomplished with the 'picklesplit.py' script in the scripts directory.
 \end{itemize}
-
-\subsection{Post-filtering}
-Generally additional filtering is required on the tabular output to achieve the desired level of accuracy. For example, the positions of transposable element insertions should be filtered against the locations of transposable element insertions in the reference genome used for input to tebreak.py. For humans aligned to hg19, a suggested set of filters is implemented in filter\_hg19.py in the scripts folder.
 
 \end{document}
 

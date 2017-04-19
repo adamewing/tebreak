@@ -1738,15 +1738,41 @@ def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
     chunkname = '%s:%d-%d' % (chrom, start, end)
 
     try:
-        bams = [pysam.AlignmentFile(bam, 'rb') for bam in bamlist]
+        for _ in range(5):
+            try:
+                bams = [pysam.AlignmentFile(bam, 'rb') for bam in bamlist]
+                break
+
+            except IOError:
+                logger.warning("IOError trying to read input BAMs, retry in 5s...")
+                time.sleep(5)
+
 
         # table of minimum quality scores
         minqual = {}
 
         # would do this outside but can't pass a non-pickleable object
-        if args.mask is not None: args.mask = build_mask(args.mask, logger)
+        if args.mask is not None:
+            for _ in range(5):
+                try:
+                    args.mask = build_mask(args.mask, logger)
+                    break
 
-        if args.map_tabix is not None: args.map_tabix = pysam.Tabixfile(args.map_tabix)
+                except IOError:
+                    logger.warning("IOError trying to read %s, retry in 5s..." % args.mask)
+                    time.sleep(5)
+
+
+        if args.map_tabix is not None:
+            for _ in range(5):
+                try:
+                    args.map_tabix = pysam.Tabixfile(args.map_tabix)
+                    break
+
+                except IOError:
+                    logger.warning("IOError trying to read %s, retry in 5s..." % args.map_tabix)
+                    time.sleep(5)
+                
 
         start = int(start)
         end   = int(end)

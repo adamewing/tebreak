@@ -1407,6 +1407,7 @@ if __name__ == '__main__':
     parser.add_argument('--usecachedLAST', default=False, action='store_true', help="try to used cached LAST db, if found")
     parser.add_argument('--uuid_list', default=None, help='limit resolution to UUIDs in first column of input list (can be tabular output from previous resolve.py run)')
     parser.add_argument('--callmuts', default=False, action='store_true', help='detect changes in inserted seq. vs ref. (requires bcftools)')
+    parser.add_argument('--nogeno', default=False, action='store_true', help='do not output genotype calls')
     parser.add_argument('--tmpdir', default='/tmp', help="directory for temporary files")
     args = parser.parse_args()
     main(args)

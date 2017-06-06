@@ -60,6 +60,8 @@ if len(sys.argv) == 3:
             if strand == '-':
                 seq = rc(seq)
 
+            #seq = seq + 'A'*100 # polyadenylate
+
             if seq:
                 genes[name2].append(seq)
 

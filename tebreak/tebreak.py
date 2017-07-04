@@ -705,7 +705,7 @@ class Insertion:
                     # criteria for deciding the new consensus is better
                     unaln_frac = float(len(self.be1.consensus) - res.query_alnsize) / len(self.be1.consensus)
 
-                    if res.target_seqsize > len(self.be1.consensus) and unaln_frac < 0.1 and res.pct_match() > 0.95:
+                    if res.target_seqsize > len(self.be1.consensus) and unaln_frac < 0.15 and res.pct_match() > 0.95:
                         self.be1_alt = self.be1
                         self.be1.consensus = ctg_falib[res.target_id]
                         self.be1_improved_cons = True
@@ -1110,6 +1110,55 @@ def is_supplementary(read):
     ''' pysam does not currently include a check for this flag '''
     return bin(read.flag & 2048) == bin(2048)
 
+
+def joinseqs(seq1, seq2, minscore=0.95, minlen=20):
+    ''' join two seqs if the ends match going left to right '''
+    S = -np.ones((256, 256)) + 2 * np.identity(256)
+    S = S.astype(np.int16)
+
+    s1 = align.string_to_alignment(seq1)
+    s2 = align.string_to_alignment(seq2)
+
+    (s, a1, a2) = align.align(s1, s2, -2, -2, S, local=True)
+    a1 = align.alignment_to_string(a1)
+    a2 = ''.join([b for b in list(align.alignment_to_string(a2)) if b != '-'])
+
+    score = float(len(a1) - (len(a1)-s)) / float(len(a1))
+
+    s1_start, s1_end = locate_subseq(seq1, a1)
+    s2_start, s2_end = locate_subseq(seq2, a2)
+
+    joined = None
+
+    if score >= minscore and len(a1) > minlen and (s1_end > len(s1)-2 or s2_start < 2):
+        align_end = locate_subseq(seq2, a2)[1]
+        joined = seq1 + seq2[align_end:]
+
+    return joined, score, len(a1)
+
+
+def asm_rescue(fa):
+    ''' attempt to join best two contigs together '''
+    seqdict = load_falib(fa)
+    seqs = seqdict.values()
+    seqs.sort(lambda x,y: cmp(len(y), len(x)))
+
+    joined_01, score_01, matchlen_01 = joinseqs(seqs[0], seqs[1])
+    joined_10, score_10, matchlen_10 = joinseqs(seqs[1], seqs[0])
+
+    if joined_01 or joined_10:
+        if score_01*matchlen_01 > score_10*matchlen_10:
+            seqdict['rescue_' + os.path.basename(fa)] = joined_01
+
+        else:
+            seqdict['rescue_' + os.path.basename(fa)] = joined_10
+
+    with open(fa, 'w') as out:
+        for name, seq in seqdict.iteritems():
+            out.write(">%s\n%s\n" % (name, seq))
+
+    return fa
+
  
 def fetch_clipped_reads(bams, chrom, start, end, filters, logger=None):
     ''' Return list of SplitRead objects '''
@@ -1432,7 +1481,7 @@ def build_insertions(breakends, maxdist=100):
     return insertions
 
 
-def minia(fq, tmpdir='/tmp'):
+def minia(fq, tmpdir='/tmp', rescue_asm=False):
     ''' sequence assembly '''
     # minia temp files don't seem to be compatabile with concurrency, workaround w/ temp cwd
     oldcwd = os.getcwd()
@@ -1462,7 +1511,12 @@ def minia(fq, tmpdir='/tmp'):
             os.remove(ctgbase + '.h5')
 
         if os.path.exists(ctgbase + '.contigs.fa'):
-            ctg_fa_list.append(ctgbase + '.contigs.fa')
+            ctg_fa = ctgbase + '.contigs.fa'
+
+            if rescue_asm:
+                ctg_fa = asm_rescue(ctg_fa)
+
+            ctg_fa_list.append(ctg_fa)
 
     os.chdir(oldcwd)
     os.rmdir(tmpcwd)
@@ -1667,19 +1721,19 @@ def filter_insertions(insertions, filters, tmpdir='/tmp', debug=True, logger=Non
     return filtered
 
 
-def postprocess_insertions(insertions, filters, bwaref, bams, tmpdir='/tmp', genotype=True):
+def postprocess_insertions(insertions, filters, bwaref, bams, tmpdir='/tmp', genotype=True, rescue_asm=False):
     for ins in insertions:
         support_fq  = ins.supportreads_fastq(tmpdir, limit=filters['max_ins_reads'])
         if support_fq is None: return insertions
 
         cwd = os.getcwd()
-        support_asm = minia(support_fq, tmpdir=tmpdir)
+        support_asm = minia(support_fq, tmpdir=tmpdir, rescue_asm=rescue_asm)
 
         retry_counter = 0 # minia might not be the most reliable option...
         while not os.path.exists(support_asm) and retry_counter < 10:
             retry_counter += 1
             sys.stderr.write('***Assembly retry: %s:%d\n' % (ins.be1.chrom, ins.be1.breakpos))
-            support_asm = minia(support_fq, tmpdir=tmpdir)
+            support_asm = minia(support_fq, tmpdir=tmpdir, rescue_asm=rescue_asm)
 
         if not os.path.exists(support_asm):
             sys.stderr.write('***Assembly failed!: %s:%d\n' % (ins.be1.chrom, ins.be1.breakpos))
@@ -1862,7 +1916,7 @@ def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
                 ins.compile_info(bams, genotype=True)
 
             logger.debug('Chunk %s: Postprocessing %d filtered insertions, trying to improve consensus breakend sequences ...' % (chunkname, len(insertions)))
-            processed_insertions  = postprocess_insertions(insertions, filters, args.bwaref, bams, tmpdir=args.tmpdir)
+            processed_insertions  = postprocess_insertions(insertions, filters, args.bwaref, bams, tmpdir=args.tmpdir, rescue_asm=args.rescue_asm)
 
             logger.debug('Chunk %s: Summarising insertions ...' % chunkname)
             summarised_insertions = [summarise_insertion(ins) for ins in processed_insertions]
@@ -2345,6 +2399,7 @@ if __name__ == '__main__':
     parser.add_argument('--pickle', default=None, help='pickle output name')
     parser.add_argument('--detail_out', default=None, help='file to write detailed output')
  
+    parser.add_argument('--rescue_asm', action='store_true', help='try harder to improve consensus (may cause chimeras)', default=False)
     parser.add_argument('--debug', action='store_true', default=False)
  
     args = parser.parse_args()

@@ -96,7 +96,7 @@ class Ins:
 
         self.out['Genotypes'] = 'NA'
 
-        if self.ins['genotypes']:
+        if 'genotypes' in self.ins:
             self.out['Genotypes'] = self.ins['genotypes']
 
     def assign35ends(self):

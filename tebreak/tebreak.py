@@ -1125,8 +1125,15 @@ def joinseqs(seq1, seq2, minscore=0.95, minlen=20):
 
     score = float(len(a1) - (len(a1)-s)) / float(len(a1))
 
-    s1_start, s1_end = locate_subseq(seq1, a1)
-    s2_start, s2_end = locate_subseq(seq2, a2)
+    try:
+        s1_start, s1_end = locate_subseq(seq1, a1)
+        s2_start, s2_end = locate_subseq(seq2, a2)
+
+    except TypeError:
+        return None, None, None
+
+    except AssertionError:
+        return None, None, None
 
     joined = None
 
@@ -1143,8 +1150,14 @@ def asm_rescue(fa):
     seqs = seqdict.values()
     seqs.sort(lambda x,y: cmp(len(y), len(x)))
 
+    if len(seqs) < 2:
+        return fa
+
     joined_01, score_01, matchlen_01 = joinseqs(seqs[0], seqs[1])
     joined_10, score_10, matchlen_10 = joinseqs(seqs[1], seqs[0])
+
+    if joined_01 == joined_10 == None:
+        return fa
 
     if joined_01 or joined_10:
         if score_01*matchlen_01 > score_10*matchlen_10:
@@ -2392,7 +2405,7 @@ if __name__ == '__main__':
     parser.add_argument('--min_mappability', default=0.1, help='minimum mappability (default = 0.1; only matters with --map_tabix)')
     parser.add_argument('--max_disc_fetch', default=50, help='maximum number of discordant reads to fetch per insertion site per BAM (default = 50)')
     parser.add_argument('--min_disc_reads', default=4, help='if using -d/--disco_target, minimum number of discordant reads to trigger a call (default = 4)')
-    parser.add_argument('--bigcluster', default=1000, help='set big cluster warning threshold (default = 1000)')
+    parser.add_argument('--bigcluster', default=50000, help='set big cluster warning threshold (default = 50000)')
     parser.add_argument('--skipbig', action='store_true', default=False, help='drop clusters over size set by --bigcluster')
 
     parser.add_argument('--tmpdir', default='/tmp', help='temporary directory (default = /tmp)')

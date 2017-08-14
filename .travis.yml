@@ -6,6 +6,13 @@ sudo: required
 before_install: 
     - bash prerequisites.sh
     - WORKDIR=`pwd`
+install:
+    # python reqs
+    - pip install cython
+    - pip install pysam
+    - pip install scipy
+    - pip install bx-python
+
     ##LAST
     - wget http://last.cbrc.jp/last-716.zip
     - unzip last-716.zip
@@ -43,15 +50,9 @@ before_install:
     - autoreconf -i
     - ./configure --prefix=$WORKDIR && make && make check && make install
     - cd ..
-install:
-    - pip install cython
-    - pip install pysam
-    - pip install scipy
-    - pip install bx-python
+
 script:
     ##Installing TEBreak, indexing the reference and running the test
-    - python setup.py build
-    - python setup.py install
     - tebreak/tebreak.py -b test/data/example.ins.bam  -r test/data/Homo_sapiens_chr4_50000000-60000000_assembly19.fasta -p 4 --pickle test/example.pickle --detail_out test/example.tebreak.detail.out
     - tebreak/resolve.py -p test/example.pickle -i lib/teref.human.fa --detail_out test/example.resolve.detail.out -t 4 -v -o test/example.tab.txt
     - cd test

@@ -1173,9 +1173,9 @@ def asm_rescue(fa):
     return fa
 
  
-def fetch_clipped_reads(bams, chrom, start, end, filters, logger=None):
+def fetch_clipped_reads(bams, chrom, start, end, filters, logger=None, limit=500):
     ''' Return list of SplitRead objects '''
-    assert filters['min_minclip'] > 2
+    assert filters['min_minclip'] >= 2 
  
     splitreads = []
  
@@ -1185,6 +1185,8 @@ def fetch_clipped_reads(bams, chrom, start, end, filters, logger=None):
     assert start < end
 
     if start < 0: start = 0
+
+    position_counter = dd(int)
 
     masked_read_count = 0
  
@@ -1214,7 +1216,19 @@ def fetch_clipped_reads(bams, chrom, start, end, filters, logger=None):
                     if altclip <= 2: # could add as a filter
                         if N_count <= filters['max_N_consensus'] and splitqual(read) >= filters['min_MW_P']:
                             chrom = str(bam.getrname(read.tid))
-                            if len(read.get_reference_positions()) > 0:
+
+                            limited = False
+
+                            if position_counter[read.get_reference_positions()[0]] >= limit:
+                                limited = True
+
+                            if position_counter[read.get_reference_positions()[-1]] >= limit:
+                                limited = True
+
+                            position_counter[read.get_reference_positions()[0]] += 1
+                            position_counter[read.get_reference_positions()[-1]] += 1
+                            
+                            if len(read.get_reference_positions()) > 0 and not limited:
                                 splitreads.append(SplitRead(chrom, read, bam.filename, minqual))
                                 #print read.qname, read.cigarstring, N_count, splitqual(read), filters['min_MW_P']
                                 #print read.qual
@@ -1871,7 +1885,7 @@ def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
      
         logger.debug('Processing chunk: %s ...' % chunkname)
         logger.debug('Chunk %s: Parsing split reads from bam(s): %s ...' % (chunkname, args.bam))
-        sr = fetch_clipped_reads(bams, chrom, start, end, filters, logger=logger)
+        sr = fetch_clipped_reads(bams, chrom, start, end, filters, logger=logger, limit=int(args.clip_limit))
 
         sr.sort()
 
@@ -1894,18 +1908,28 @@ def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
                     logger.warning('Skipped cluster due to --skipbig: %s:%d-%d' % (cluster.chrom, cluster.start, cluster.end))
                     continue
 
+            over_rpkm = False
+            rpkm = 0
+            cl_readcount = 0
+
             if args.max_fold_rpkm is not None:
 
                 for bam in bams:
-                    cl_readcount += sum([not read.is_unmapped for read in bam.fetch(cluster.chrom, cl_min, cl_max)])
+                    #cl_readcount += sum([not read.is_unmapped for read in bam.fetch(cluster.chrom, cl_min, cl_max)])
+                    for read in bam.fetch(cluster.chrom, cl_min, cl_max):
+                        if not read.is_unmapped:
+                            cl_readcount += 1
+                            rpkm = cl_readcount/((cl_max-cl_min)/1000.)
+                            if rpkm > filters['max_rpkm']:
+                                over_rpkm = True
+                                break
 
-                rpkm = cl_readcount/((cl_max-cl_min)/1000.)
-
-            if filters['max_rpkm'] == 0 or rpkm < filters['max_rpkm']:
+            #if filters['max_rpkm'] == 0 or rpkm < filters['max_rpkm']:
+            if filters['max_rpkm'] == 0 or not over_rpkm:
                 breakends += build_breakends(cluster, filters, tmpdir=args.tmpdir)
 
             else:
-                logger.debug('Chunk %s, cluster %d-%d over max RPKM with %f' % (chunkname, cl_min, cl_max, rpkm))
+                logger.debug('Chunk %s, cluster %d-%d over max RPKM (%f)' % (chunkname, cl_min, cl_max, rpkm))
 
         logger.debug('Chunk %s: Mapping %d breakends ...' % (chunkname, len(breakends)))
         if len(breakends) > 0:
@@ -2300,12 +2324,12 @@ def main(args):
                         chunks.append((i.chrom, i.start-500, i.end+500))
 
 
-        if args.max_fold_rpkm is not None:
-            exp_rpkm = expected_rpkm(bamlist, genome)
+    if args.max_fold_rpkm is not None:
+        #exp_rpkm = expected_rpkm(bamlist, genome, intervals=args.interval_bed)
+        exp_rpkm = expected_rpkm(bamlist, genome)
 
-    else:
-        if args.max_fold_rpkm is not None:
-            exp_rpkm = expected_rpkm(bamlist, genome, intervals=args.interval_bed)
+        logger.info('mean rpkm: %f' % exp_rpkm)
+        logger.info('set rpkm cutoff for clusters: %f' % (exp_rpkm*float(args.max_fold_rpkm)))
 
 
     if args.interval_bed is not None:
@@ -2332,11 +2356,6 @@ def main(args):
                     chunks.append((i.chrom, i.start-500, i.end+500))
 
     logger.info("genome chunk count: %d" % len(chunks))
-
-
-    if args.max_fold_rpkm is not None and exp_rpkm < 10:
-        logger.warning("expected RPKM is less than 10, ignoring high RPKM cutoffs...\n")
-        exp_rpkm = 0
 
     reslist = []
 
@@ -2386,13 +2405,13 @@ if __name__ == '__main__':
     parser.add_argument('-i', '--interval_bed', default=None, help='BED file with intervals to scan')
     parser.add_argument('-d', '--disco_target', default=None, help='limit breakpoint search to discordant mate-linked targets (e.g. generated with /lib/make_discref_hg19.sh)')
     parser.add_argument('--minMWP', default=0.01, help='minimum Mann-Whitney P-value for split qualities (default = 0.01)')
+    parser.add_argument('--clip_limit', default=500, help='limit number of clipped reads gathered for each breakend (default = 500)')
     parser.add_argument('--min_minclip', default=3, help='min. shortest clipped bases per cluster (default = 3)')
     parser.add_argument('--min_maxclip', default=10, help='min. longest clipped bases per cluster (default = 10)')
     parser.add_argument('--min_sr_per_break', default=1, help='minimum split reads per breakend (default = 1)')
     parser.add_argument('--min_consensus_score', default=0.9, help='quality of consensus alignment (default = 0.9)')
     parser.add_argument('-m', '--mask', default=None, help='BED file of masked regions')
 
-    parser.add_argument('--rpkm_bam', default=None, help='use alternate BAM(s) for RPKM calculation: use original BAMs if using reduced BAM(s) for -b/--bam')
     parser.add_argument('--max_fold_rpkm', default=None, help='ignore insertions supported by rpkm*max_fold_rpkm reads (default = None (no filter))')
     parser.add_argument('--max_ins_reads', default=100000, help='maximum number of reads to use per insertion call (default = 100000)')
     parser.add_argument('--min_split_reads', default=4, help='minimum total split reads per insertion call (default = 4)')

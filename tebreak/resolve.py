@@ -99,6 +99,9 @@ class Ins:
         if 'genotypes' in self.ins:
             self.out['Genotypes'] = self.ins['genotypes']
 
+        if not self.out['Genotypes']:
+            self.out['Genotypes'] = 'NA'
+
     def assign35ends(self):
         self.out['5_Prime_End'] = 'NA'
         self.out['3_Prime_End'] = 'NA'

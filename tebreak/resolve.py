@@ -238,13 +238,25 @@ class Ins:
         if self.use_rg: ctype = 'rg'
 
         for be in ('be1', 'be2'):
+            end = '5p'
+
+            if self.end3 == be:
+                end = '3p'
+
             if be + '_' + ctype + '_count' in self.ins:
+                samples = dd(int)
+                
                 for sample_support in self.ins[be + '_' + ctype + '_count']:
                     sample, count = sample_support.split('|')
-                    samples[sample] += int(count)
+                    samples[sample] = int(count)
 
-            self.out['Sample_count']   = len(samples) 
-            self.out['Sample_support'] = ','.join(['%s|%d' % (sample, count) for sample, count in samples.iteritems()])
+                self.out['Sample_support_' + end] = ','.join(['%s|%d' % (sample, count) for sample, count in samples.iteritems()])
+
+            else:
+                self.out['Sample_support_' + end] = 'NA'
+
+        self.out['Sample_count'] = len(samples)
+            
 
     def consensus(self):
         self.out['Genomic_Consensus_5p'] = 'NA'

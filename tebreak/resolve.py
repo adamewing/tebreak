@@ -245,7 +245,7 @@ class Ins:
 
             if be + '_' + ctype + '_count' in self.ins:
                 samples = dd(int)
-                
+
                 for sample_support in self.ins[be + '_' + ctype + '_count']:
                     sample, count = sample_support.split('|')
                     samples[sample] = int(count)
@@ -899,19 +899,6 @@ def best_ref(ins):
     return None
 
 
-def score_insertion(ins):
-    score = 0
-    bothends = 'be1_cons_seq' in ins['INFO'] and 'be2_cons_seq' in ins['INFO']
-
-    if 'be1_sr_count'  in ins['INFO']: score += ins['INFO']['be1_sr_count']
-    if 'be2_sr_count'  in ins['INFO']: score += ins['INFO']['be2_sr_count']
-    if 'mapped_target' in ins['INFO']: score += ins['INFO']['mapped_target']
-
-    if bothends: score *= 2
-
-    return score
-
-
 def make_tmp_ref(ins, ref_fa, tmpdir='/tmp'):
     ref_id = best_ref(ins)
     if ref_id is None:
@@ -985,71 +972,6 @@ def remap_discordant(ins, inslib_fa=None, useref=None, tmpdir='/tmp'):
     return tmp_bam
 
 
-def identify_transductions(ins):
-    bedict = {'be1': None, 'be2': None}
-
-    if 'be1_bestmatch' in ins['INFO']: bedict['be1'] = ins['INFO']['be1_bestmatch']
-    if 'be2_bestmatch' in ins['INFO']: bedict['be2'] = ins['INFO']['be2_bestmatch']
-
-    for be in ('be1','be2'):
-        if bedict[be] is not None:
-            tr_seqs = []
-            tr_locs = [] # chrom, start, end, 3p or 5p / unmap
-
-            segtype = 'dist'
-            if bedict[be].query_distnum < 0: segtype = 'umap'
-
-            num_segs = 0
-            if ins['INFO'][be+'_'+segtype+'_seq'] is not None: num_segs = len(ins['INFO'][be+'_'+segtype+'_seq'].split(','))
-
-            # more than one sequence
-            if num_segs > 1:
-                for segnum in range(num_segs):
-                    if segtype == 'umap': segnum = -1-segnum
-
-                    if segnum != bedict[be].query_distnum:
-                        if segtype == 'dist':
-                            tr_chrom = ins['INFO'][be+'_'+segtype+'_chr'].split(',')[segnum]
-                            tr_start = ins['INFO'][be+'_'+segtype+'_pos'].split(',')[segnum]
-                            tr_end   = ins['INFO'][be+'_'+segtype+'_end'].split(',')[segnum]
-
-                        tr_side  = '5p'
-                        if ins['INFO'][be+'_is_3prime']: tr_side = '3p'
-
-                        tr_seqs.append(ins['INFO'][be+'_'+segtype+'_seq'].split(',')[segnum])
-                        if segtype == 'dist': tr_locs.append((tr_chrom, tr_start, tr_end, tr_side))
-                        if segtype == 'umap': tr_locs.append(('unmap', 0, 0, tr_side))
-
-            # mapped distal sequence, unmapped transduced seq
-            if segtype == 'dist':
-                if num_segs > 0 and ins['INFO'][be+'_umap_seq'] is not None: # unmapped transduced seqs
-                    for unmap_seq in ins['INFO'][be+'_umap_seq'].split(','):
-                        tr_side  = '5p'
-                        if ins['INFO'][be+'_is_3prime']: tr_side = '3p'
-
-                        tr_seqs.append(unmap_seq)
-                        tr_locs.append(('unmap', 0, 0, tr_side))
-            else:
-                if num_segs > 0 and ins['INFO'][be+'_dist_seq'] is not None:
-                    for i, mapped_seq in enumerate(ins['INFO'][be+'_dist_seq'].split(',')):
-                        tr_side  = '5p'
-                        if ins['INFO'][be+'_is_3prime']: tr_side = '3p'
-
-                        tr_seqs.append(mapped_seq)
-                        tr_locs.append((ins['INFO'][be+'_dist_chr'][i], 
-                                        ins['INFO'][be+'_dist_pos'].split(',')[i], 
-                                        ins['INFO'][be+'_dist_end'].split(',')[i], 
-                                        tr_side
-                                       )
-                        )
-
-            if len(tr_seqs) > 0:
-                ins['INFO'][be+'_trans_seq'] = tr_seqs
-                ins['INFO'][be+'_trans_loc'] = tr_locs
-
-    return ins
-
-
 def get_bam_info(bam, ins):
     max_positions = []
     min_positions = []
@@ -1097,7 +1019,7 @@ def resolve_insertion(args, ins, inslib_fa):
                         if os.path.exists(tmp_bam): os.remove(tmp_bam)
                         if os.path.exists(tmp_bam + '.bai'): os.remove(tmp_bam + '.bai')
 
-            ins = identify_transductions(ins)
+            #ins = identify_transductions(ins)
 
         return ins
 
@@ -1113,95 +1035,66 @@ def resolve_insertion(args, ins, inslib_fa):
         return None
 
 
-def dr_propensity(ins, ref, tmpdir='/tmp'):
+def dr_propensity(insertions, ref, tmpdir='/tmp'):
     ''' bwa align --> screen ins site --> frequency analysis '''
 
-    tmp_fq  = '%s/tebreak.%s.discoremap.fq' % (tmpdir, ins['INFO']['ins_uuid'])
-
-    with open(tmp_fq, 'w') as fq:
-        for dr in ins['READSTORE']:
-            fq.write(dr)
-
-    sam_cmd = ['bwa', 'mem', '-v', '1', '-k', '10', '-M', '-S', '-P', ref, tmp_fq]
-
-    FNULL = open(os.devnull, 'w')
-    p = subprocess.Popen(sam_cmd, stdout=subprocess.PIPE, stderr=FNULL)
-
-    Mapping = namedtuple('Mapping', ['chrom', 'pos'])
-    mappings = []
-
-    for line in p.stdout:
-        if not line.startswith('@'):
-            if bin(int(line.split('\t')[1]) & 4) != bin(4): # not unmapped
-                c = line.strip().split('\t')
-                chrom = c[2]
-                pos = int(c[3])
-                mapq = int(c[4])
-
-                if chrom != ins['INFO']['chrom'] and (ins['INFO']['min_supporting_base'] - 1000 > pos or ins['INFO']['max_supporting_base'] + 1000 < pos) and mapq > 0:
-                    mappings.append(Mapping(chrom, pos))
-
-    mappings.sort()
-
-    peaks = []
-    peak = []
-    for i, mapping in enumerate(mappings):
-        if i == 0:
-            peak.append(mapping)
-
-        if i > 0:
-            if mappings[i-1].chrom == mapping.chrom and mapping.pos - mappings[i-1].pos < 1000:
-                peak.append(mapping)
-            else:
-                peaks.append(peak)
-                peak = [mapping]
-
-    peaks = sorted(peaks, key=len)
-
-    #print [(p[0], len(p)) for p in peaks]
-
-    os.remove(tmp_fq)
-
-
-def resolve_transductions(insertions, ref=None):
-    ''' some insertion calls may have transductions or correspond to transductions; try to work this out '''
-    tr_coord_dict = dd(dict) # chrom --> pos --> [ins]
-
     for ins in insertions:
-        if ins is not None:
-            for be in ('be1','be2'):
-                if be+'_trans_loc' in ins['INFO']:
-                    for (chrom, start, end, side) in ins['INFO'][be+'_trans_loc']:
-                        for pos in map(int, (start, end)):
-                            if pos not in tr_coord_dict[chrom]: tr_coord_dict[chrom][pos] = []
-                            tr_coord_dict[chrom][pos].append(ins)
+        tmp_fq  = '%s/tebreak.%s.discoremap.fq' % (tmpdir, ins['INFO']['ins_uuid'])
 
-        if ref is not None:
-            # work in progress: identify over-represented discordant locations
-            dr_propensity(ins, ref)
+        with open(tmp_fq, 'w') as fq:
+            for dr in ins['READSTORE']:
+                fq.write(dr)
 
-    for parent_ins in insertions:
-        if parent_ins is not None:
-            for be in ('be1','be2'):
-                if parent_ins['INFO']['chrom'] in tr_coord_dict and int(parent_ins['INFO'][be+'_breakpos']) in tr_coord_dict[parent_ins['INFO']['chrom']]:
-                    for trduct_ins in tr_coord_dict[parent_ins['INFO']['chrom']][int(parent_ins['INFO'][be+'_breakpos'])]:
+        sam_cmd = ['bwa', 'mem', '-v', '1', '-k', '10', '-M', '-S', '-P', ref, tmp_fq]
 
-                        trduct_loc_string = '%s:%d-%d' % (trduct_ins['INFO']['chrom'], trduct_ins['INFO']['be1_breakpos'], trduct_ins['INFO']['be2_breakpos'])
-                        parent_loc_string = '%s:%d-%d' % (parent_ins['INFO']['chrom'], parent_ins['INFO']['be1_breakpos'], parent_ins['INFO']['be2_breakpos'])
+        FNULL = open(os.devnull, 'w')
+        p = subprocess.Popen(sam_cmd, stdout=subprocess.PIPE, stderr=FNULL)
 
-                        if score_insertion(parent_ins) < score_insertion(trduct_ins):
-                            if 'transducer' not in parent_ins['INFO']: parent_ins['INFO']['transducer'] = []
-                            if 'transduction' not in trduct_ins['INFO']: trduct_ins['INFO']['transduction'] = []
+        Mapping = namedtuple('Mapping', ['chrom', 'pos'])
 
-                            parent_ins['INFO']['transducer'].append(trduct_loc_string)
-                            trduct_ins['INFO']['transduction'].append(parent_loc_string)
+        mappings = []
 
-                        else:
-                            if 'transducer' not in trduct_ins['INFO']: trduct_ins['INFO']['transducer'] = []
-                            if 'transduction' not in parent_ins['INFO']: parent_ins['INFO']['transduction'] = []
+        for line in p.stdout:
+            if not line.startswith('@'):
+                if bin(int(line.split('\t')[1]) & 4) != bin(4): # not unmapped
+                    c = line.strip().split('\t')
+                    chrom = c[2]
+                    pos = int(c[3])
+                    mapq = int(c[4])
 
-                            parent_ins['INFO']['transduction'].append(trduct_loc_string)
-                            trduct_ins['INFO']['transducer'].append(parent_loc_string)
+                    if chrom != ins['INFO']['chrom'] and (ins['INFO']['min_supporting_base'] - 1000 > pos or ins['INFO']['max_supporting_base'] + 1000 < pos) and mapq > 0:
+                        mappings.append(Mapping(chrom, pos))
+
+        mappings.sort()
+
+        peaks = []
+        peak = []
+        for i, mapping in enumerate(mappings):
+            if i == 0:
+                peak.append(mapping)
+
+            if i > 0:
+                if mappings[i-1].chrom == mapping.chrom and mapping.pos - mappings[i-1].pos < 6000:
+                    peak.append(mapping)
+                else:
+                    peaks.append(peak)
+                    peak = [mapping]
+
+        peaks.append(peak)
+
+        peaks = sorted(peaks, key=len)
+
+        #print [(p[0], len(p)) for p in peaks]
+
+        ins['INFO']['dr_peaks'] = []
+
+        for p in peaks:
+            p_start = sorted(p, key=lambda x: x.pos)[0]
+            p_end   = sorted(p, key=lambda x: x.pos)[-1]
+            ins['INFO']['dr_peaks'].append((chrom, p_start.pos, p_end.pos, len(p)))
+            #print (p[0].chrom, p_start.pos, p_end.pos, len(p))
+
+        os.remove(tmp_fq)
 
     return insertions
 
@@ -1338,16 +1231,24 @@ def main(args):
 
             new_insertions = [res.get() for res in results if res is not None]
             if new_insertions:
-                new_insertions = resolve_transductions(new_insertions, ref=args.ref)
+                #new_insertions = resolve_transductions(new_insertions, ref=args.ref)
                 processed_insertions += new_insertions
                 results = []
 
     new_insertions = [res.get() for res in results if res is not None]
-    new_insertions = resolve_transductions(new_insertions)
+    #new_insertions = resolve_transductions(new_insertions)
     processed_insertions += new_insertions
 
     if args.detail_out is None:
         args.detail_out = '.'.join(args.pickle.split('.')[:-1]) + '.resolve.out'
+
+    if args.ref:
+        logger.info("loading bwa index %s into shared memory ..." % args.ref)
+        p = subprocess.Popen(['bwa', 'shm', args.ref], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        for line in p.stdout: pass # wait for bwa to load
+        logger.debug("loaded.")
+
+        processed_insertions = dr_propensity(processed_insertions, args.ref)
 
     tebreak.text_summary(processed_insertions, cmd=' '.join(sys.argv), outfile=args.detail_out) # debug
 

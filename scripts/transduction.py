@@ -54,10 +54,10 @@ def load_falib(infa):
     return seqdict
 
 
-def align(qryseq, refseq):
+def exonerate_align(qryseq, refseq, tmpdir='/tmp'):
     rnd = str(uuid4())
-    tgtfa = 'tmp.' + rnd + '.tgt.fa'
-    qryfa = 'tmp.' + rnd + '.qry.fa'
+    tgtfa = tmpdir + '/tmp.' + rnd + '.tgt.fa'
+    qryfa = tmpdir + '/tmp.' + rnd + '.qry.fa'
 
     tgt = open(tgtfa, 'w')
     qry = open(qryfa, 'w')
@@ -131,8 +131,8 @@ def get_trn_seq(cons_seq, ins_seq, ref_seq, minlen=20):
     if not guess_forward(cons_seq):
         cons_seq = rc(cons_seq)
 
-    ins_align = align(cons_seq, ins_seq)
-    gen_align = align(cons_seq, ref_seq)
+    ins_align = exonerate_align(cons_seq, ins_seq)
+    gen_align = exonerate_align(cons_seq, ref_seq)
 
     #print 'INS ' + str(ins_align)
     #print 'GEN ' + str(gen_align)
@@ -171,7 +171,7 @@ def get_trn_seq(cons_seq, ins_seq, ref_seq, minlen=20):
     return trn_seq
 
 
-def locate(seq, refgenome):
+def bwa_locate(seq, refgenome):
     rnd = str(uuid4())
     qryfq = 'tmp.' + rnd + '.qry.fq'
 
@@ -260,13 +260,13 @@ def main(args):
                     trn_seq = get_trn_seq(rec['Insert_Consensus_3p'], ins_seq, ref_seq)
                     if trn_seq:
                         #print trn_seq
-                        locs += locate(trn_seq, args.refgenome)
+                        locs += bwa_locate(trn_seq, args.refgenome)
 
                 if rec['Genomic_Consensus_3p'] != 'NA':
                     trn_seq = get_trn_seq(rec['Genomic_Consensus_3p'], ins_seq, ref_seq)
                     if trn_seq:
                         #print trn_seq
-                        locs += locate(trn_seq, args.refgenome)
+                        locs += bwa_locate(trn_seq, args.refgenome)
                 
                 # annotate reference transductions
                 if args.reftranslib is not None:

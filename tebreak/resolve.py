@@ -18,6 +18,7 @@ import align
 import multiprocessing as mp
 
 from uuid import uuid4
+from string import maketrans
 from collections import OrderedDict as od
 from collections import defaultdict as dd
 from collections import Counter, namedtuple
@@ -340,6 +341,7 @@ class Ins:
 
     def __str__(self):
         return '\t'.join(map(str, self.out.values()))
+
 
 
 #######################################
@@ -972,6 +974,76 @@ def remap_discordant(ins, inslib_fa=None, useref=None, tmpdir='/tmp'):
     return tmp_bam
 
 
+def bwa_locate(seq, refgenome, tmpdir='/tmp'):
+    rnd = str(uuid4())
+    qryfq = tmpdir + '/tmp.' + rnd + '.qry.fq'
+
+    with open(qryfq, 'w') as qry:
+        qry.write('@query' + '\n' + seq + '\n+\n' + 'B'*len(seq) + '\n')
+
+    FNULL = open(os.devnull, 'w')
+
+    sam_cmd  = ['bwa', 'mem', refgenome, qryfq]
+    view_cmd = ['samtools', 'view', '-F', '0x4', '-'] # view mapped reads only
+    aln  = subprocess.Popen(sam_cmd, stdout=subprocess.PIPE, stderr=FNULL)
+    view = subprocess.Popen(view_cmd, stdin=aln.stdout, stdout=subprocess.PIPE, stderr=FNULL)
+
+    locs = []
+
+    for line in view.stdout:
+        c = line.strip().split()
+
+        bits  = int(c[1])
+        chrom = c[2]
+        pos   = int(c[3])
+
+        strand = '-'
+        if bits & 0x10 == 0:
+            strand = '+'
+
+        locs.append((chrom, pos, strand))
+
+    os.remove(qryfq)
+
+    return locs
+
+
+def exonerate_align(qryseq, refseq, tmpdir='/tmp'):
+    rnd = str(uuid4())
+    tgtfa = tmpdir + '/tmp.' + rnd + '.tgt.fa'
+    qryfa = tmpdir + '/tmp.' + rnd + '.qry.fa'
+
+    tgt = open(tgtfa, 'w')
+    qry = open(qryfa, 'w')
+
+    tgt.write('>ref' + '\n' + refseq + '\n')
+    qry.write('>qry' + '\n' + qryseq + '\n')
+
+    tgt.close()
+    qry.close()
+
+    cmd = ['exonerate', '--bestn', '1', '-m', 'ungapped', '--showalignment', '1', '--ryo', 'ALN' + '\t%s\t%qab\t%qae\t%tab\t%tae\t%tS\t%pi\n', qryfa, tgtfa]
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    best = []
+    topscore = 0
+
+    for pline in p.stdout.readlines():
+        #print "***|" + pline.strip()
+        if pline.startswith('ALN'):
+            c = pline.strip().split()
+            if int(c[1]) > topscore:
+                topscore = int(c[1])
+                best = c
+        #else:
+        #    print pline.rstrip()
+
+    os.remove(tgtfa)
+    os.remove(qryfa)
+
+    return best
+
+
 def get_bam_info(bam, ins):
     max_positions = []
     min_positions = []
@@ -1018,8 +1090,6 @@ def resolve_insertion(args, ins, inslib_fa):
                     if not args.keep_all_tmp_bams:
                         if os.path.exists(tmp_bam): os.remove(tmp_bam)
                         if os.path.exists(tmp_bam + '.bai'): os.remove(tmp_bam + '.bai')
-
-            #ins = identify_transductions(ins)
 
         return ins
 
@@ -1095,6 +1165,118 @@ def dr_propensity(insertions, ref, tmpdir='/tmp'):
             #print (p[0].chrom, p_start.pos, p_end.pos, len(p))
 
         os.remove(tmp_fq)
+
+    return insertions
+
+
+def guess_forward(seq):
+    nA = len([b for b in list(seq.upper()) if b == 'A'])
+    nT = len([b for b in list(seq.upper()) if b == 'T'])
+
+    if nA > nT:
+        return True
+
+    return False
+
+
+def rc(dna):
+    ''' reverse complement '''
+    complements = maketrans('acgtrymkbdhvACGTRYMKBDHV', 'tgcayrkmvhdbTGCAYRKMVHDB')
+    return dna.translate(complements)[::-1]
+
+
+def get_trn_seq(cons_seq, ins_seq, ref_seq, minlen=20):
+    if not guess_forward(cons_seq):
+        cons_seq = rc(cons_seq)
+
+    ins_align = exonerate_align(cons_seq, ins_seq)
+    gen_align = exonerate_align(cons_seq, ref_seq)
+
+    if ins_align:
+        ins_start, ins_end = sorted(map(int, (ins_align[2], ins_align[3])))
+
+    trn_seq = None
+
+    gen_start = len(cons_seq)
+    if gen_align:
+        gen_start, gen_end = sorted(map(int, (gen_align[2], gen_align[3])))
+
+    if ins_align:
+        trd_start = ins_end
+        trd_end   = gen_start
+
+        if trd_end - trd_start > minlen:
+            trn_seq = cons_seq[trd_start:trd_end]
+
+    if trn_seq is None:
+        cons_cover = np.zeros(len(cons_seq))
+        if ins_align:
+            for i in range(ins_start, ins_end):
+                cons_cover[i] = 1
+
+        if gen_align:
+            for i in range(gen_start, gen_end):
+                cons_cover[i] = 1
+
+        bases = [cons_seq[i] for i in range(len(cons_seq)) if cons_cover[i] == 0]
+    
+        if len(bases) >= minlen:
+            trn_seq = ''.join(bases)
+    
+    return trn_seq
+
+
+def identify_transductions(insertions, ref, inslib, rmsk=None):
+    # build search tree for non-reference donor/sibling elements
+    uuid_forest = dd(Intersecter)
+
+    for ins in insertions:
+        uuid_forest[ins['INFO']['chrom']].add_interval(Interval(ins['INFO']['min_supporting_base'], ins['INFO']['max_supporting_base'], value=ins['INFO']['ins_uuid']))
+
+    # build search tree for repeatmasker-derived sites (format: chrom, start, end, name, superfamily)
+    rmsk_forest = dd(Intersecter)
+
+    if rmsk is not None:
+        with open(rmsk, 'r') as bed:
+            for line in bed:
+                chrom, start, end, strand, family = line.strip().split()
+                start = int(start)
+                end = int(end)
+                annot = '%s\t%s' % (strand, family)
+                rmsk_forest[chrom].add_interval(Interval(int(start-1000), int(end+1000), value=annot))
+
+    for ins in insertions:
+        left  = ins['INFO']['min_supporting_base']-1000
+        right = ins['INFO']['max_supporting_base']+1000
+
+        if left < 0: left = 0
+
+        ref_seq = ref.fetch(ins['INFO']['chrom'], left, right)
+        ins_seq = inslib[best_ref(ins)].rstrip('Aa') # trim ins ref polyA if present
+
+        ins['INFO']['trd_map_locs'] = []
+
+        end3 = 'be1'
+        end5 = 'be2'
+
+        if 'be1_is_3prime' in ins['INFO']:
+            if not ins['INFO']['be1_is_3prime']:
+                end3 = 'be2'
+                end5 = 'be1'
+
+        # search insertion consensus contig
+        if  end3 + '_te_cons_seq' in ins['INFO']:
+            trn_seq = get_trn_seq(ins['INFO'][end3 + '_te_cons_seq'], ins_seq, ref_seq)
+            if trn_seq:
+                #print trn_seq
+                ins['INFO']['trd_map_locs'] += bwa_locate(trn_seq, ref.filename)
+
+        # search genomic consensus contig
+        if end3 + '_cons_seq' in ins['INFO']:
+            trn_seq = get_trn_seq(ins['INFO'][end3 + '_cons_seq'], ins_seq, ref_seq)
+            if trn_seq:
+                #print trn_seq
+                ins['INFO']['trd_map_locs'] += bwa_locate(trn_seq, ref.filename)
 
     return insertions
 
@@ -1248,7 +1430,12 @@ def main(args):
         for line in p.stdout: pass # wait for bwa to load
         logger.debug("loaded.")
 
+        inslib = tebreak.load_falib(args.inslib_fasta)
+        ref = pysam.Fastafile(args.ref)
+
         processed_insertions = dr_propensity(processed_insertions, args.ref)
+        processed_insertions = identify_transductions(processed_insertions, ref, inslib, rmsk=args.donor_bed)
+
 
     tebreak.text_summary(processed_insertions, cmd=' '.join(sys.argv), outfile=args.detail_out) # debug
 
@@ -1304,6 +1491,7 @@ if __name__ == '__main__':
     parser.add_argument('-v', '--verbose', action='store_true', default=False, help="output detailed status information")
     parser.add_argument('-o', '--out', default=None, help="output table")
     parser.add_argument('-r', '--ref', default=None, help="reference genome fasta, expect bwa index, triggers transduction calling")
+    parser.add_argument('-d', '--donor_bed', default=None, help="possible ref donor sites in BED-like format (chrom, start, end, strand, superfamily [e.g. L1/ALU/SVA])")
 
     parser.add_argument('--max_bam_count', default=0, help="skip sites with more than this number of BAMs (default = no limit)")
     parser.add_argument('--min_ins_match', default=0.95, help="minumum match to insertion library (default 0.95)")

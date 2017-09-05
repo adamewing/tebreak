@@ -342,13 +342,13 @@ class Ins:
         donor_tr_info = []
         donor_dr_info = []
 
-        if self.ins['trd_annotation']:
+        if 'trd_annotation' in self.ins and self.ins['trd_annotation']:
             for annot in self.ins['trd_annotation']:
                 for f in annot:
                     if str(f).split(':')[0] in ('REF', 'DR', 'NR'):
                         donor_tr_info.append(f)
 
-        if self.ins['dr_annotation']:
+        if 'dr_annotation' in self.ins and self.ins['dr_annotation']:
             dr_sum = sum([p[-1] for p in self.ins['dr_peaks']])
             for p in self.ins['dr_annotation']:
                 if float(p[3]) / dr_sum > 0.5 and dr_sum > 8:
@@ -358,7 +358,6 @@ class Ins:
 
         self.out['Donor_DR'] = ','.join(list(set(donor_dr_info)))
         self.out['Donor_TR'] = ','.join(list(set(donor_tr_info)))
-
 
 
     def __lt__(self, other):
@@ -1157,6 +1156,8 @@ def dr_propensity(insertions, ref, rmsk=None, tmpdir='/tmp'):
     for ins in insertions:
         tmp_fq  = '%s/tebreak.%s.discoremap.fq' % (tmpdir, ins['INFO']['ins_uuid'])
 
+        logger.info('discordant read propensity for %s' % ins['INFO']['ins_uuid'])
+
         with open(tmp_fq, 'w') as fq:
             for dr in ins['READSTORE']:
                 fq.write(dr)
@@ -1309,6 +1310,10 @@ def identify_transductions(insertions, ref, inslib, rmsk=None):
         # build search tree for discordant clusters
         dr_forest = dd(Intersecter)
 
+        logger.info('identify transductions for %s' % ins['INFO']['ins_uuid'])
+
+        ins['INFO']['trd_map_locs'] = []
+
         if 'dr_peaks' in ins['INFO']:
             for dr_peak in ins['INFO']['dr_peaks']:
                 annot = ':'.join(map(str, dr_peak))
@@ -1322,13 +1327,11 @@ def identify_transductions(insertions, ref, inslib, rmsk=None):
         ref_seq = ref.fetch(ins['INFO']['chrom'], left, right)
 
         insref = best_ref(ins)
-
+        
         if insref is None:
             continue
 
         ins_seq = inslib[insref].rstrip('Aa') # trim ins ref polyA if present
-
-        ins['INFO']['trd_map_locs'] = []
 
         end3 = 'be1'
         end5 = 'be2'

@@ -1196,7 +1196,8 @@ def dr_propensity(insertions, ref, rmsk=None, tmpdir='/tmp'):
                     peaks.append(peak)
                     peak = [mapping]
 
-        peaks.append(peak)
+        if peak:
+            peaks.append(peak)
 
         peaks = sorted(peaks, key=len)
 
@@ -1319,7 +1320,13 @@ def identify_transductions(insertions, ref, inslib, rmsk=None):
         if left < 0: left = 0
 
         ref_seq = ref.fetch(ins['INFO']['chrom'], left, right)
-        ins_seq = inslib[best_ref(ins)].rstrip('Aa') # trim ins ref polyA if present
+
+        insref = best_ref(ins)
+
+        if insref is None:
+            continue
+
+        ins_seq = inslib[insref].rstrip('Aa') # trim ins ref polyA if present
 
         ins['INFO']['trd_map_locs'] = []
 

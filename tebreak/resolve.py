@@ -103,6 +103,9 @@ class Ins:
         if not self.out['Genotypes']:
             self.out['Genotypes'] = 'NA'
 
+        if 'dr_peaks' in self.ins and 'trd_map_locs' in self.ins:
+            self.processes_donor()
+
     def assign35ends(self):
         self.out['5_Prime_End'] = 'NA'
         self.out['3_Prime_End'] = 'NA'
@@ -331,6 +334,31 @@ class Ins:
 
         if len(muts) > 0:
             self.out['Variants'] = ','.join(muts)
+
+    def processes_donor(self):
+        self.out['Donor_DR'] = 'NA'
+        self.out['Donor_TR'] = 'NA'
+
+        donor_tr_info = []
+        donor_dr_info = []
+
+        if self.ins['trd_annotation']:
+            for annot in self.ins['trd_annotation']:
+                for f in annot:
+                    if str(f).split(':')[0] in ('REF', 'DR', 'NR'):
+                        donor_tr_info.append(f)
+
+        if self.ins['dr_annotation']:
+            dr_sum = sum([p[-1] for p in self.ins['dr_peaks']])
+            for p in self.ins['dr_annotation']:
+                if float(p[3]) / dr_sum > 0.5 and dr_sum > 8:
+                    for f in p:
+                        if str(f).split(':')[0] in ('REF', 'NR'):
+                            donor_dr_info.append('%s:%d:%d' % (f,p[3],dr_sum))
+
+        self.out['Donor_DR'] = ','.join(list(set(donor_dr_info)))
+        self.out['Donor_TR'] = ','.join(list(set(donor_tr_info)))
+
 
 
     def __lt__(self, other):
@@ -1105,8 +1133,26 @@ def resolve_insertion(args, ins, inslib_fa):
         return None
 
 
-def dr_propensity(insertions, ref, tmpdir='/tmp'):
+def dr_propensity(insertions, ref, rmsk=None, tmpdir='/tmp'):
     ''' bwa align --> screen ins site --> frequency analysis '''
+    # build search tree for non-reference donor/sibling elements
+    uuid_forest = dd(Intersecter)
+
+    for ins in insertions:
+        uuid_forest[ins['INFO']['chrom']].add_interval(Interval(ins['INFO']['min_supporting_base'], ins['INFO']['max_supporting_base'], value=ins['INFO']['ins_uuid']))
+
+    # build search tree for repeatmasker-derived sites (format: chrom, start, end, name, superfamily)
+    rmsk_forest = dd(Intersecter)
+
+    if rmsk is not None:
+        with open(rmsk, 'r') as bed:
+            for line in bed:
+                chrom, start, end, strand, family = line.strip().split()
+                start = int(start)
+                end = int(end)
+                annot = ':'.join(line.strip().split())
+                rmsk_forest[chrom].add_interval(Interval(int(start-1000), int(end+1000), value=annot))
+
 
     for ins in insertions:
         tmp_fq  = '%s/tebreak.%s.discoremap.fq' % (tmpdir, ins['INFO']['ins_uuid'])
@@ -1154,15 +1200,27 @@ def dr_propensity(insertions, ref, tmpdir='/tmp'):
 
         peaks = sorted(peaks, key=len)
 
-        #print [(p[0], len(p)) for p in peaks]
-
         ins['INFO']['dr_peaks'] = []
+        ins['INFO']['dr_annotation'] = []
 
         for p in peaks:
             p_start = sorted(p, key=lambda x: x.pos)[0]
             p_end   = sorted(p, key=lambda x: x.pos)[-1]
-            ins['INFO']['dr_peaks'].append((chrom, p_start.pos, p_end.pos, len(p)))
-            #print (p[0].chrom, p_start.pos, p_end.pos, len(p))
+
+            annot = ()
+            if p[0].chrom in uuid_forest:
+                for nonref_donor in uuid_forest[p[0].chrom].find(p_start.pos, p_end.pos):
+                    annot += ('NR:' + nonref_donor.value,)
+
+            if p[0].chrom in rmsk_forest:
+                for ref_donor in rmsk_forest[p[0].chrom].find(p_start.pos, p_end.pos):
+                    annot += ('REF:' + ref_donor.value,)
+
+
+            ins['INFO']['dr_peaks'].append((p[0].chrom, p_start.pos, p_end.pos, len(p)))
+
+            if annot:
+                ins['INFO']['dr_annotation'].append((p[0].chrom, p_start.pos, p_end.pos, len(p))+annot)
 
         os.remove(tmp_fq)
 
@@ -1242,10 +1300,19 @@ def identify_transductions(insertions, ref, inslib, rmsk=None):
                 chrom, start, end, strand, family = line.strip().split()
                 start = int(start)
                 end = int(end)
-                annot = '%s\t%s' % (strand, family)
+                annot = ':'.join(line.strip().split())
                 rmsk_forest[chrom].add_interval(Interval(int(start-1000), int(end+1000), value=annot))
 
+
     for ins in insertions:
+        # build search tree for discordant clusters
+        dr_forest = dd(Intersecter)
+
+        if 'dr_peaks' in ins['INFO']:
+            for dr_peak in ins['INFO']['dr_peaks']:
+                annot = ':'.join(map(str, dr_peak))
+                dr_forest[dr_peak[0]].add_interval(Interval(dr_peak[1]-1000, dr_peak[2]+1000, value=annot))
+
         left  = ins['INFO']['min_supporting_base']-1000
         right = ins['INFO']['max_supporting_base']+1000
 
@@ -1277,6 +1344,37 @@ def identify_transductions(insertions, ref, inslib, rmsk=None):
             if trn_seq:
                 #print trn_seq
                 ins['INFO']['trd_map_locs'] += bwa_locate(trn_seq, ref.filename)
+
+        # assign possible donors
+        annot_trd = []
+        ins['INFO']['trd_annotation'] = []
+
+        for trd in ins['INFO']['trd_map_locs']:
+            t_chrom = trd[0]
+            t_loc = trd[1]
+
+            if t_chrom == ins['INFO']['chrom'] and t_loc > ins['INFO']['min_supporting_base'] and t_loc < ins['INFO']['max_supporting_base']:
+                continue # exclude self as donor
+
+            found_donor = False
+
+            if t_chrom in uuid_forest:
+                for nonref_donor in uuid_forest[t_chrom].find(t_loc-1, t_loc):
+                    trd += ('NR:' + nonref_donor.value,)
+                    found_donor = True
+
+            if t_chrom in rmsk_forest:
+                for ref_donor in rmsk_forest[t_chrom].find(t_loc-1,t_loc):
+                    trd += ('REF:' + ref_donor.value,)
+                    found_donor = True
+
+            if t_chrom in dr_forest:
+                for dr_donor in dr_forest[t_chrom].find(t_loc-1, t_loc):
+                    trd += ('DR:' + dr_donor.value,)
+                    found_donor = True
+
+            if found_donor:
+                ins['INFO']['trd_annotation'].append(trd)
 
     return insertions
 
@@ -1433,7 +1531,7 @@ def main(args):
         inslib = tebreak.load_falib(args.inslib_fasta)
         ref = pysam.Fastafile(args.ref)
 
-        processed_insertions = dr_propensity(processed_insertions, args.ref)
+        processed_insertions = dr_propensity(processed_insertions, args.ref, rmsk=args.donor_bed)
         processed_insertions = identify_transductions(processed_insertions, ref, inslib, rmsk=args.donor_bed)
 
 

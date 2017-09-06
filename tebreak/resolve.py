@@ -1132,31 +1132,33 @@ def resolve_insertion(args, ins, inslib_fa):
         return None
 
 
-def dr_propensity(insertions, ref, rmsk=None, tmpdir='/tmp'):
+def dr_propensity(ins, insertions, ref, rmsk):
     ''' bwa align --> screen ins site --> frequency analysis '''
-    # build search tree for non-reference donor/sibling elements
-    uuid_forest = dd(Intersecter)
 
-    for ins in insertions:
-        uuid_forest[ins['INFO']['chrom']].add_interval(Interval(ins['INFO']['min_supporting_base'], ins['INFO']['max_supporting_base'], value=ins['INFO']['ins_uuid']))
+    tmpdir='/tmp'
 
-    # build search tree for repeatmasker-derived sites (format: chrom, start, end, name, superfamily)
-    rmsk_forest = dd(Intersecter)
+    try:
+        # build search tree for non-reference donor/sibling elements
+        uuid_forest = dd(Intersecter)
 
-    if rmsk is not None:
-        with open(rmsk, 'r') as bed:
-            for line in bed:
-                chrom, start, end, strand, family = line.strip().split()
-                start = int(start)
-                end = int(end)
-                annot = ':'.join(line.strip().split())
-                rmsk_forest[chrom].add_interval(Interval(int(start-1000), int(end+1000), value=annot))
+        for nr_ins in insertions:
+            uuid_forest[nr_ins['INFO']['chrom']].add_interval(Interval(nr_ins['INFO']['min_supporting_base'], nr_ins['INFO']['max_supporting_base'], value=nr_ins['INFO']['ins_uuid']))
 
+        # build search tree for repeatmasker-derived sites (format: chrom, start, end, name, superfamily)
+        rmsk_forest = dd(Intersecter)
 
-    for ins in insertions:
+        if rmsk is not None:
+            with open(rmsk, 'r') as bed:
+                for line in bed:
+                    chrom, start, end, strand, family = line.strip().split()
+                    start = int(start)
+                    end = int(end)
+                    annot = ':'.join(line.strip().split())
+                    rmsk_forest[chrom].add_interval(Interval(int(start-1000), int(end+1000), value=annot))
+
         tmp_fq  = '%s/tebreak.%s.discoremap.fq' % (tmpdir, ins['INFO']['ins_uuid'])
 
-        logger.info('discordant read propensity for %s' % ins['INFO']['ins_uuid'])
+        logger.debug('discordant read propensity for %s' % ins['INFO']['ins_uuid'])
 
         with open(tmp_fq, 'w') as fq:
             for dr in ins['READSTORE']:
@@ -1226,7 +1228,18 @@ def dr_propensity(insertions, ref, rmsk=None, tmpdir='/tmp'):
 
         os.remove(tmp_fq)
 
-    return insertions
+        return ins
+
+    except Exception, e:
+        sys.stderr.write('*'*60 + '\tencountered error:\n')
+        traceback.print_exc(file=sys.stderr)
+
+        if ins and 'INFO' in ins and 'chrom' in ins['INFO'] and 'be1_breakpos' in ins['INFO']:
+            sys.stderr.write("Insertion location: %s:%d\n" % (ins['INFO']['chrom'], ins['INFO']['be1_breakpos']))
+
+        sys.stderr.write("*"*60 + "\n")
+
+    return None
 
 
 def guess_forward(seq):
@@ -1286,31 +1299,33 @@ def get_trn_seq(cons_seq, ins_seq, ref_seq, minlen=20):
     return trn_seq
 
 
-def identify_transductions(insertions, ref, inslib, rmsk=None):
+def identify_transductions(ins, insertions, ref, inslib, rmsk):
     # build search tree for non-reference donor/sibling elements
-    uuid_forest = dd(Intersecter)
+    try:
+        ref = pysam.Fastafile(args.ref)
+        uuid_forest = dd(Intersecter)
 
-    for ins in insertions:
-        uuid_forest[ins['INFO']['chrom']].add_interval(Interval(ins['INFO']['min_supporting_base'], ins['INFO']['max_supporting_base'], value=ins['INFO']['ins_uuid']))
+        for nr_ins in insertions:
+            uuid_forest[nr_ins['INFO']['chrom']].add_interval(Interval(nr_ins['INFO']['min_supporting_base'], nr_ins['INFO']['max_supporting_base'], value=nr_ins['INFO']['ins_uuid']))
 
-    # build search tree for repeatmasker-derived sites (format: chrom, start, end, name, superfamily)
-    rmsk_forest = dd(Intersecter)
+        # build search tree for repeatmasker-derived sites (format: chrom, start, end, name, superfamily)
+        rmsk_forest = dd(Intersecter)
 
-    if rmsk is not None:
-        with open(rmsk, 'r') as bed:
-            for line in bed:
-                chrom, start, end, strand, family = line.strip().split()
-                start = int(start)
-                end = int(end)
-                annot = ':'.join(line.strip().split())
-                rmsk_forest[chrom].add_interval(Interval(int(start-1000), int(end+1000), value=annot))
+        if rmsk is not None:
+            with open(rmsk, 'r') as bed:
+                for line in bed:
+                    chrom, start, end, strand, family = line.strip().split()
+                    start = int(start)
+                    end = int(end)
+                    annot = ':'.join(line.strip().split())
+                    rmsk_forest[chrom].add_interval(Interval(int(start-1000), int(end+1000), value=annot))
 
 
-    for ins in insertions:
+
         # build search tree for discordant clusters
         dr_forest = dd(Intersecter)
 
-        logger.info('identify transductions for %s' % ins['INFO']['ins_uuid'])
+        logger.debug('identify transductions for %s' % ins['INFO']['ins_uuid'])
 
         ins['INFO']['trd_map_locs'] = []
 
@@ -1329,7 +1344,7 @@ def identify_transductions(insertions, ref, inslib, rmsk=None):
         insref = best_ref(ins)
         
         if insref is None:
-            continue
+            return ins
 
         ins_seq = inslib[insref].rstrip('Aa') # trim ins ref polyA if present
 
@@ -1386,7 +1401,18 @@ def identify_transductions(insertions, ref, inslib, rmsk=None):
             if found_donor:
                 ins['INFO']['trd_annotation'].append(trd)
 
-    return insertions
+        return ins
+
+    except Exception, e:
+        sys.stderr.write('*'*60 + '\tencountered error:\n')
+        traceback.print_exc(file=sys.stderr)
+
+        if ins and 'INFO' in ins and 'chrom' in ins['INFO'] and 'be1_breakpos' in ins['INFO']:
+            sys.stderr.write("Insertion location: %s:%d\n" % (ins['INFO']['chrom'], ins['INFO']['be1_breakpos']))
+
+        sys.stderr.write("*"*60 + "\n")
+
+    return None
 
 
 def load_uuids(fn):
@@ -1539,10 +1565,30 @@ def main(args):
         logger.debug("loaded.")
 
         inslib = tebreak.load_falib(args.inslib_fasta)
-        ref = pysam.Fastafile(args.ref)
 
-        processed_insertions = dr_propensity(processed_insertions, args.ref, rmsk=args.donor_bed)
-        processed_insertions = identify_transductions(processed_insertions, ref, inslib, rmsk=args.donor_bed)
+        logger.info('realigning discordant ends to identify distal clustering...')
+
+        results = []
+
+        for ins in processed_insertions:
+            res = pool.apply_async(dr_propensity, [ins, processed_insertions, args.ref, args.donor_bed])
+            results.append(res)
+
+        processed_insertions = [res.get() for res in results if res is not None]
+
+        #processed_insertions = dr_propensity(processed_insertions, args.ref, args.donor_bed)
+
+        logger.info('identify potential transductions in consensus contigs...')
+
+        results = []
+
+        for ins in processed_insertions:
+            res = pool.apply_async(identify_transductions, [ins, processed_insertions, args.ref, inslib, args.donor_bed])
+            results.append(res)
+
+        processed_insertions = [res.get() for res in results if res is not None]
+
+        #processed_insertions = identify_transductions(processed_insertions, ref, inslib, rmsk=args.donor_bed)
 
 
     tebreak.text_summary(processed_insertions, cmd=' '.join(sys.argv), outfile=args.detail_out) # debug

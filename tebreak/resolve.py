@@ -189,8 +189,8 @@ class Ins:
         self.out['Split_reads_5prime'] = 0
         self.out['Split_reads_3prime'] = 0
 
-        if self.end3 + '_sr_count' in self.ins: self.out['Split_reads_3prime'] = self.ins[self.end3 + '_sr_count']
-        if self.end5 + '_sr_count' in self.ins: self.out['Split_reads_5prime'] = self.ins[self.end5 + '_sr_count']
+        if self.end5 + '_sr_count' in self.ins: self.out['Split_reads_3prime'] = self.ins[self.end5 + '_sr_count']
+        if self.end3 + '_sr_count' in self.ins: self.out['Split_reads_5prime'] = self.ins[self.end3 + '_sr_count']
 
         self.out['Remapped_Discordant'] = 0
         self.out['Remap_Disc_Fraction'] = 0.0
@@ -238,6 +238,9 @@ class Ins:
     def sample_list(self):
         samples = dd(int)
 
+        self.out['Sample_support_5p'] = 'NA'
+        self.out['Sample_support_3p'] = 'NA'
+
         ctype = 'bf'
         if self.use_rg: ctype = 'rg'
 
@@ -255,9 +258,6 @@ class Ins:
                     samples[sample] = int(count)
 
                 self.out['Sample_support_' + end] = ','.join(['%s|%d' % (sample, count) for sample, count in samples.iteritems()])
-
-            else:
-                self.out['Sample_support_' + end] = 'NA'
 
         self.out['Sample_count'] = len(samples)
             
@@ -356,8 +356,11 @@ class Ins:
                         if str(f).split(':')[0] in ('REF', 'NR'):
                             donor_dr_info.append('%s:%d:%d' % (f,p[3],dr_sum))
 
-        self.out['Donor_DR'] = ','.join(list(set(donor_dr_info)))
-        self.out['Donor_TR'] = ','.join(list(set(donor_tr_info)))
+        if donor_dr_info:
+            self.out['Donor_DR'] = ','.join(list(set(donor_dr_info)))
+
+        if donor_tr_info:
+            self.out['Donor_TR'] = ','.join(list(set(donor_tr_info)))
 
 
     def __lt__(self, other):
@@ -1158,7 +1161,7 @@ def dr_propensity(ins, insertions, ref, rmsk):
 
         tmp_fq  = '%s/tebreak.%s.discoremap.fq' % (tmpdir, ins['INFO']['ins_uuid'])
 
-        logger.debug('discordant read propensity for %s' % ins['INFO']['ins_uuid'])
+        logger.info('discordant read propensity for %s' % ins['INFO']['ins_uuid'])
 
         with open(tmp_fq, 'w') as fq:
             for dr in ins['READSTORE']:
@@ -1532,14 +1535,14 @@ def main(args):
     
     processed_insertions = []
 
-    pool = mp.Pool(processes=int(args.processes))
+    pool_resolve = mp.Pool(processes=int(args.processes))
 
     gc_c = gc.collect()
 
     onepct = int(len(insertions)*.01)+1
 
     for counter, ins in enumerate(insertions):
-        res = pool.apply_async(resolve_insertion, [args, ins, inslib_fa])
+        res = pool_resolve.apply_async(resolve_insertion, [args, ins, inslib_fa])
         results.append(res)
 
         if counter % onepct == 0:
@@ -1547,16 +1550,17 @@ def main(args):
 
             new_insertions = [res.get() for res in results if res is not None]
             if new_insertions:
-                #new_insertions = resolve_transductions(new_insertions, ref=args.ref)
                 processed_insertions += new_insertions
                 results = []
 
     new_insertions = [res.get() for res in results if res is not None]
-    #new_insertions = resolve_transductions(new_insertions)
     processed_insertions += new_insertions
 
     if args.detail_out is None:
         args.detail_out = '.'.join(args.pickle.split('.')[:-1]) + '.resolve.out'
+
+    pool_resolve.close()
+    pool_resolve.join()
 
     if args.ref:
         logger.info("loading bwa index %s into shared memory ..." % args.ref)
@@ -1568,27 +1572,35 @@ def main(args):
 
         logger.info('realigning discordant ends to identify distal clustering...')
 
+        pool_dr = mp.Pool(processes=int(args.processes))
+
         results = []
 
         for ins in processed_insertions:
-            res = pool.apply_async(dr_propensity, [ins, processed_insertions, args.ref, args.donor_bed])
-            results.append(res)
+            if ins is not None:
+                res = pool_dr.apply_async(dr_propensity, [ins, processed_insertions, args.ref, args.donor_bed])
+                results.append(res)
 
         processed_insertions = [res.get() for res in results if res is not None]
 
-        #processed_insertions = dr_propensity(processed_insertions, args.ref, args.donor_bed)
+        pool_dr.close()
+        pool_dr.join()
+
+        pool_tr = mp.Pool(processes=int(args.processes))
 
         logger.info('identify potential transductions in consensus contigs...')
 
         results = []
 
         for ins in processed_insertions:
-            res = pool.apply_async(identify_transductions, [ins, processed_insertions, args.ref, inslib, args.donor_bed])
-            results.append(res)
+            if ins is not None:
+                res = pool_tr.apply_async(identify_transductions, [ins, processed_insertions, args.ref, inslib, args.donor_bed])
+                results.append(res)
 
         processed_insertions = [res.get() for res in results if res is not None]
 
-        #processed_insertions = identify_transductions(processed_insertions, ref, inslib, rmsk=args.donor_bed)
+        pool_tr.close()
+        pool_tr.join()
 
 
     tebreak.text_summary(processed_insertions, cmd=' '.join(sys.argv), outfile=args.detail_out) # debug
@@ -1597,14 +1609,19 @@ def main(args):
 
     #final_insertions = [Ins(ins, args.annotation_tabix, args.use_rg, callmuts=args.callmuts, allow_unmapped=args.unmapped) for ins in processed_insertions if ins is not None]
 
+    pool_final = mp.Pool(processes=int(args.processes))
+
     final_insertions = []
 
     for ins in processed_insertions:
         if ins is not None:
-            res = pool.apply_async(finalise_ins, [ins, args])
+            res = pool_final.apply_async(finalise_ins, [ins, args])
             results.append(res)
 
     final_insertions = [res.get() for res in results if res is not None]
+
+    pool_final.close()
+    pool_final.join()
 
     out_table_fn = args.out
     if out_table_fn is None:

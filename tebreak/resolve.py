@@ -189,8 +189,8 @@ class Ins:
         self.out['Split_reads_5prime'] = 0
         self.out['Split_reads_3prime'] = 0
 
-        if self.end5 + '_sr_count' in self.ins: self.out['Split_reads_3prime'] = self.ins[self.end5 + '_sr_count']
-        if self.end3 + '_sr_count' in self.ins: self.out['Split_reads_5prime'] = self.ins[self.end3 + '_sr_count']
+        if self.end5 + '_sr_count' in self.ins: self.out['Split_reads_5prime'] = self.ins[self.end5 + '_sr_count']
+        if self.end3 + '_sr_count' in self.ins: self.out['Split_reads_3prime'] = self.ins[self.end3 + '_sr_count']
 
         self.out['Remapped_Discordant'] = 0
         self.out['Remap_Disc_Fraction'] = 0.0

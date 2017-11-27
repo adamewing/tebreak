@@ -237,6 +237,7 @@ class Ins:
 
     def sample_list(self):
         samples = dd(int)
+        sample_list = []
 
         self.out['Sample_support_5p'] = 'NA'
         self.out['Sample_support_3p'] = 'NA'
@@ -255,11 +256,13 @@ class Ins:
 
                 for sample_support in self.ins[be + '_' + ctype + '_count']:
                     sample, count = sample_support.split('|')
+                    sample_list.append(sample)
                     samples[sample] = int(count)
 
                 self.out['Sample_support_' + end] = ','.join(['%s|%d' % (sample, count) for sample, count in samples.iteritems()])
 
-        self.out['Sample_count'] = len(samples)
+        sample_list = list(set(sample_list))
+        self.out['Sample_count'] = len(sample_list)
             
 
     def consensus(self):

@@ -312,7 +312,7 @@ def main(args):
                             out = False
 
                 if out:
-                    refseq = ref.fetch(rec['Chromosome'], int(rec['Left_Extreme'])-100, int(rec['Right_Extreme'])+100)
+                    refseq = ref.fetch(rec['Chromosome'],max((int(rec['Left_Extreme'])-100),1),int(rec['Right_Extreme'])+100)
 
                     # check that the reference genome region doesn't have a good match to the reference element sequence
                     # inslib[ins_id] vs refseq

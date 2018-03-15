@@ -137,4 +137,8 @@ Finally, a script is included to annotate the TEBreak table. A useful included a
 $TB/scripts/annotate.py -t $FILTEREDTABLE -x $TB/lib/nonref.collection.hg19.bed.gz -n KnownNonRef --nonref > $FINALTABLE
 ```
 
-For additional documentation, please find the manual in the doc/ subdirectory.
+## Getting help
+
+Reporting [issues](https://github.com/adamewing/tebreak/issues) and questions through github is preferred versus e-mail.
+
+For additional documentation, please find the manual in the [doc](https://github.com/adamewing/tebreak/tree/master/doc) subdirectory.

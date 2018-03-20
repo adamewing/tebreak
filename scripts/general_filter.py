@@ -47,7 +47,7 @@ def hompol_scan(seq, base):
         return 0,0
 
 
-def align(qryseq, refseq, elt='PAIR', minmatch=90.0):
+def align(qryseq, refseq, elt='PAIR', minmatch=85.0):
     rnd = str(uuid4())
     tgtfa = 'tmp.' + rnd + '.tgt.fa'
     qryfa = 'tmp.' + rnd + '.qry.fa'
@@ -69,6 +69,7 @@ def align(qryseq, refseq, elt='PAIR', minmatch=90.0):
 
     for pline in p.stdout.readlines():
         if pline.startswith(elt):
+            #print pline.strip()
             c = pline.strip().split()
             if int(c[1]) > topscore and float(c[6]) >= minmatch:
                 topscore = int(c[1])
@@ -266,11 +267,13 @@ def main(args):
                 if args.fracend is not None and rec['Genomic_Consensus_3p'] != 'NA' and rec['TE_Align_End'] != 'NA':
                     fracend = float(len(inslib[ins_id]) - int(rec['TE_Align_End'])) / float(len(inslib[ins_id]))
                     if fracend > float(args.fracend):
+                        logger.info('Filtered %s: fracend %f > %f' % (rec['UUID'], fracend, float(args.fracend)))
                         out = False
 
                 if args.maxvars is not None and 'Variants' in rec:
                     numvars = len(rec['Variants'].split(','))
                     if numvars > int(args.maxvars):
+                        logger.info('Filtered %s: too many variants (%d)' % (rec['UUID'], numvars))
                         out = False
 
                 if out:
@@ -278,6 +281,7 @@ def main(args):
                         for posfilter in [pysam.Tabixfile(fn) for fn in args.tabix.split(',')]:
                             if rec['Chromosome'] in posfilter.contigs:
                                 if len(list(posfilter.fetch(rec['Chromosome'], int(rec['Left_Extreme']), int(rec['Right_Extreme'])))) > 0:
+                                    logger.info('Filtered %s: overlaps position filter %s' % (rec['UUID'], args.tabix))
                                     out = False
 
                     if args.refgene is not None:
@@ -289,6 +293,7 @@ def main(args):
 
                             gene = '.'.join(rec['Superfamily'].split('.')[:-1])
                             if gene in gene_overlaps:
+                                logger.info('Filtered %s: overlaps refgenes' % rec['UUID'])
                                 out = False
 
                 
@@ -332,6 +337,7 @@ def main(args):
                     elt_3p_align = align(rec['Genomic_Consensus_3p'], inslib[ins_id])
                     gen_5p_align = align(rec['Genomic_Consensus_5p'], refseq)
                     gen_3p_align = align(rec['Genomic_Consensus_3p'], refseq)
+
 
                     if args.realign_all_isoforms:
                         align_store = {'elt_5p': elt_5p_align, 'elt_3p': elt_3p_align, 'gen_5p': gen_5p_align, 'gen_3p': gen_3p_align}
@@ -378,7 +384,6 @@ def main(args):
                             gen_5p_align = retry_gen_5p_align
                             count_5p_switchcons += 1
 
-
                     if not elt_3p_align or not gen_3p_align:
                         retry_elt_3p_align = align(rec['Insert_Consensus_3p'], inslib[ins_id])
                         retry_gen_3p_align = align(rec['Insert_Consensus_3p'], refseq)
@@ -404,6 +409,20 @@ def main(args):
 
                     if gen_3p_align:
                         gen_3p_orient = gen_3p_align[-1]
+
+                    if elt_3p_orient == 'NA':
+                        if 'A'*20 in rec['Insert_Consensus_3p']:
+                            elt_3p_orient = '+'
+
+                        if 'T'*20 in rec['Insert_Consensus_3p']:
+                            elt_3p_orient = '-'
+
+                    if gen_3p_orient == 'NA':
+                        if 'A'*20 in rec['Genomic_Consensus_3p']:
+                            elt_3p_orient = '+'
+
+                        if 'T'*20 in rec['Genomic_Consensus_3p']:
+                            elt_3p_orient = '-'
 
                     new_5p_orient = 'NA'
                     new_3p_orient = 'NA'
@@ -445,10 +464,12 @@ def main(args):
                     rec['Orient_3p'] = new_3p_orient
 
                     if new_3p_orient == new_5p_orient == 'NA':
+                        logger.info('Filtered %s: no orientation' % rec['UUID'])
                         out = False
 
                     if args.require_realign:
                         if 'NA' in (rec['Orient_5p'], rec['Orient_3p']):
+                            logger.info('Filtered %s: missing orientation (filtered due to --require_align)' % rec['UUID'])
                             out = False
 
                     if 'NA' not in (new_5p_orient, new_3p_orient) and 'None' not in (rec['Orient_5p'], rec['Orient_3p']):

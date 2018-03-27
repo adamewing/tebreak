@@ -1559,6 +1559,9 @@ def build_mask(bedfile, logger):
 
     with open(bedfile, 'r') as bed:
         for line in bed:
+            if line.startswith('#'):
+                continue
+
             chrom, start, end = line.strip().split()[:3]
             start = int(start)
             end   = int(end)

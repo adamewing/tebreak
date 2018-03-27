@@ -36,7 +36,7 @@ import profile
 
 
 class Genome:
-    def __init__(self, gfn):
+    def __init__(self, gfn, skip_chroms):
         ''' gfn = genome file name (.fai or chrom, length tsv) '''
         self.chrlen = {} # length of each chromosome
  
@@ -46,8 +46,9 @@ class Genome:
             for line in g:
                 if not line.startswith('#'):
                     chrom, length = line.strip().split()[:2]
-                    self.chrlen[chrom] = int(length)
-                    self.bp += int(length)
+                    if chrom not in skip_chroms:
+                        self.chrlen[chrom] = int(length)
+                        self.bp += int(length)
 
  
     def addpad(self, interval, pad):
@@ -2264,6 +2265,12 @@ def main(args):
 
     ''' Chunk genome or use input BED '''
     
+    skip_chroms = {}
+    if args.skip_chroms is not None:
+        with open(args.skip_chroms, 'r') as _:
+            for line in _:
+                skip_chroms[line.strip().split()[0]] = True
+
     procs = int(args.processes)
     chunk_count = int(args.chunks)
 
@@ -2271,7 +2278,7 @@ def main(args):
 
     pool = mp.Pool(processes=procs)
 
-    genome = Genome(args.bwaref + '.fai')
+    genome = Genome(args.bwaref + '.fai', skip_chroms)
 
     chunks = []
     exp_rpkm = 0
@@ -2325,7 +2332,6 @@ def main(args):
 
 
     if args.max_fold_rpkm is not None:
-        #exp_rpkm = expected_rpkm(bamlist, genome, intervals=args.interval_bed)
         exp_rpkm = expected_rpkm(bamlist, genome)
 
         logger.info('mean rpkm: %f' % exp_rpkm)
@@ -2362,7 +2368,6 @@ def main(args):
     pct = int(len(chunks)*.01)+1
 
     for i, chunk in enumerate(chunks, 1):
-        # run_chunk(args, exp_rpkm, chunk[0], chunk[1], chunk[2]) # uncomment for mp debug
         res = pool.apply_async(run_chunk, [args, bamlist, exp_rpkm, chunk[0], chunk[1], chunk[2]])
         reslist.append(res)
 
@@ -2411,6 +2416,7 @@ if __name__ == '__main__':
     parser.add_argument('--min_sr_per_break', default=1, help='minimum split reads per breakend (default = 1)')
     parser.add_argument('--min_consensus_score', default=0.9, help='quality of consensus alignment (default = 0.9)')
     parser.add_argument('-m', '--mask', default=None, help='BED file of masked regions')
+    parser.add_argument('--skip_chroms', default=None, help='skip chromsomes when finding discordant targets (.txt file)')
 
     parser.add_argument('--max_fold_rpkm', default=None, help='ignore insertions supported by rpkm*max_fold_rpkm reads (default = None (no filter))')
     parser.add_argument('--max_ins_reads', default=100000, help='maximum number of reads to use per insertion call (default = 100000)')

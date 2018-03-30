@@ -264,6 +264,25 @@ def main(args):
                     logger.info('Filtered %s: TSD is a long homopolymer: %s' % (rec['UUID'], rec['TSD_3prime']))
                     out = False
 
+                if args.minlength:
+                    if int(rec['TE_Align_End']) - int(rec['TE_Align_Start']) < int(args.minlength):
+                        logger.info('Filtered %s: insertion shorter than %d bp' % (rec['UUID'], int(args.minlength)))
+                        out = False
+
+                if args.minvaf:
+                    maxvaf = 0.0
+                    if rec['Genotypes'] == 'NA':
+                        out = False
+                    
+                    else:
+                        for gt in rec['Genotypes'].split(','):
+                            gt_sample, gt_pos, gt_neg, gt_vaf = gt.split('|')
+                            if float(gt_vaf) > maxvaf:
+                                maxvaf = float(gt_vaf)
+                    if maxvaf < float(args.minvaf):
+                        logger.info('Filtered %s: no genotype with VAF > %f' % (rec['UUID'], float(args.minvaf)))
+                        out = False
+
                 if args.fracend is not None and rec['Genomic_Consensus_3p'] != 'NA' and rec['TE_Align_End'] != 'NA':
                     fracend = float(len(inslib[ins_id]) - int(rec['TE_Align_End'])) / float(len(inslib[ins_id]))
                     if fracend > float(args.fracend):
@@ -508,6 +527,8 @@ if __name__ == '__main__':
     parser.add_argument('--numdiscord', default=4, help='min number of supporting discordant read mappings (default=4)')
     parser.add_argument('--fracend', default=None, help='filter insertions by distance to reference 3p end by fraction of length')
     parser.add_argument('--maxvars', default=None, help='maximum number of variants in Variants column')
+    parser.add_argument('--minlength', default=None, help='minimum insertion length')
+    parser.add_argument('--minvaf', default=None, help='minimum VAF (one genotype must satisfy condition)')
 
     parser.add_argument('--tabix', default=None, help='tabix files to be used as positional filters (can be comma-delimited list of tabix-indexed files)')
     parser.add_argument('--refgene', default=None, help='filter out insertions with superfamily overlapping matching refgene (important for GRIP searches)')

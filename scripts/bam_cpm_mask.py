@@ -13,6 +13,8 @@ logger.setLevel(logging.INFO)
 
 from math import log10
 
+import pandas as pd
+import scipy.stats as ss
 
 class Segment:
     def __init__(self, chrom, start, end, cpm):

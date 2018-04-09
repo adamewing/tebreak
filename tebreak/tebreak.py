@@ -2261,10 +2261,11 @@ def main(args):
 
     checkref(args.bwaref)
 
-    logger.info("loading bwa index %s into shared memory ..." % args.bwaref)
-    p = subprocess.Popen(['bwa', 'shm', args.bwaref], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    for line in p.stdout: pass # wait for bwa to load
-    logger.debug("loaded.")
+    if not args.skipshm:
+        logger.info("loading bwa index %s into shared memory ..." % args.bwaref)
+        p = subprocess.Popen(['bwa', 'shm', args.bwaref], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        for line in p.stdout: pass # wait for bwa to load
+        logger.debug("loaded.")
 
     ''' Chunk genome or use input BED '''
     
@@ -2440,7 +2441,8 @@ if __name__ == '__main__':
     parser.add_argument('--pickle', default=None, help='pickle output name')
     parser.add_argument('--detail_out', default=None, help='file to write detailed output')
  
-    parser.add_argument('--rescue_asm', action='store_true', help='try harder to improve consensus (may cause chimeras)', default=False)
+    parser.add_argument('--rescue_asm', action='store_true', help='try harder to improve consensus (warning: may cause chimeras)', default=False)
+    parser.add_argument('--skipshm', action='store_true', help='dont load bwa index into shared memory (warning: may increase runtime)')
     parser.add_argument('--debug', action='store_true', default=False)
  
     args = parser.parse_args()

@@ -219,11 +219,12 @@ class Ins:
         if self.end3 + '_cons_seq' in self.ins: self.out['3p_Cons_Len'] = len(self.ins[self.end3 + '_cons_seq'])
 
     def tsd(self):
-        self.out['TSD_3prime'] = 'NA'
         self.out['TSD_5prime'] = 'NA'
+        self.out['TSD_3prime'] = 'NA'
 
-        if self.end3 + '_end_over' in self.ins: self.out['TSD_3prime'] = self.ins[self.end3 + '_end_over']
         if self.end5 + '_end_over' in self.ins: self.out['TSD_5prime'] = self.ins[self.end5 + '_end_over']
+        if self.end3 + '_end_over' in self.ins: self.out['TSD_3prime'] = self.ins[self.end3 + '_end_over']
+        
 
     def improve_cons(self):
         self.out['5p_Improved'] = 'N'

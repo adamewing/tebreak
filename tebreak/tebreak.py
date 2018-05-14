@@ -65,7 +65,7 @@ class Genome:
         return (chrom, start, end)
 
 
-    def chunk(self, n, seed=None, sorted=False, pad=0, flatten=True):
+    def chunk(self, n, seed=1, sorted=False, pad=0, flatten=True):
         ''' break genome into n evenly-sized chunks, return n lists of (chrom, start, end) '''
         chunklen = int(self.bp/n)
         
@@ -76,11 +76,11 @@ class Genome:
  
         chromlist = self.chrlen.keys()
  
+        random.seed(seed)
+
         if sorted:
             chromlist.sort()
-        else:
-            if seed is not None: random.seed(seed)
-            random.shuffle(chromlist)
+
  
         for chrom in chromlist:
             length = self.chrlen[chrom]
@@ -332,8 +332,10 @@ class SplitCluster(ReadCluster):
  
         return new
 
-    def consensus(self, minscore = 0.9):
+    def consensus(self, minscore = 0.9, seed=1):
         ''' build consensus from sorted aligned reads iteratively '''
+
+        np.random.seed(seed)
 
         S = -np.ones((256, 256)) + 2 * np.identity(256)
         S = S.astype(np.int16)
@@ -733,9 +735,11 @@ class Insertion:
         return self.be1_improved_cons, self.be2_improved_cons
 
 
-    def supportreads_fastq(self, outdir, min_readlen=50, limit=1000):
+    def supportreads_fastq(self, outdir, min_readlen=50, limit=1000, seed=1):
         ''' discordant support reads marked DR, split support reads marked SR '''
         assert os.path.exists(outdir)
+
+        random.seed(seed)
 
         outreads  = od()
         usedreads = {}
@@ -1019,7 +1023,9 @@ def rc(dna):
     return dna.translate(complements)[::-1]
 
 
-def subsample_dict(orig, n):
+def subsample_dict(orig, n, seed=1):
+    random.seed(seed)
+
     assert len(orig) >= n
 
     if n == 0:

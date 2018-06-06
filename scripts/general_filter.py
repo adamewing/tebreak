@@ -341,7 +341,7 @@ def main(args):
                     # check that the reference genome region doesn't have a good match to the reference element sequence
                     # inslib[ins_id] vs refseq
 
-                    self_align = align(inslib[ins_id], refseq, minmatch=90)
+                    self_align = align(inslib[ins_id], refseq, minmatch=95)
 
                     if self_align:
                         logger.info('Filtered %s: self-match between genome and refelt: %s' % (rec['UUID'], str(self_align)))

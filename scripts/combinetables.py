@@ -206,7 +206,7 @@ def combine(uuids, recs):
 
     use_YN = ['5p_Improved', '3p_Improved']
 
-    use_union = ['Sample_support_5p', 'Sample_support_3p', 'Variants']
+    use_union = ['Sample_support_5p', 'Sample_support_3p']
 
     use_len = ['Genomic_Consensus_5p',
             'Genomic_Consensus_3p',
@@ -353,7 +353,6 @@ def main(args):
     'Genomic_Consensus_3p',
     'Insert_Consensus_5p',
     'Insert_Consensus_3p',
-    'Variants',
     'Old_UUIDs']
 
     print '\t'.join(header)

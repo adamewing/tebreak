@@ -260,7 +260,7 @@ def main(args):
                     logger.info('Filtered %s: TSD mismatch: %s vs %s' % (rec['UUID'], rec['TSD_5prime'], rec['TSD_3prime']))
                     out = False
 
-                elif (len(list(set(list(rec['TSD_3prime'])))) == 1 or len(list(set(list(rec['TSD_5prime'])))) == 1) and len(rec['TSD_3prime']) > 4:
+                elif (len(list(set(list(rec['TSD_3prime'])))) == 1 or len(list(set(list(rec['TSD_5prime'])))) == 1) and len(rec['TSD_3prime']) > 10:
                     logger.info('Filtered %s: TSD is a long homopolymer: %s' % (rec['UUID'], rec['TSD_3prime']))
                     out = False
 
@@ -341,7 +341,7 @@ def main(args):
                     # check that the reference genome region doesn't have a good match to the reference element sequence
                     # inslib[ins_id] vs refseq
 
-                    self_align = align(inslib[ins_id], refseq, minmatch=85)
+                    self_align = align(inslib[ins_id], refseq, minmatch=90)
 
                     if self_align:
                         logger.info('Filtered %s: self-match between genome and refelt: %s' % (rec['UUID'], str(self_align)))

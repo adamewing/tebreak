@@ -767,10 +767,16 @@ class Insertion:
                             usedreads[name + '/1'] = True
                             name += '.%s/1' % rtype
 
-                        if read.is_read2:
+                        elif read.is_read2:
                             if name + '/2' in usedreads: unseen = False
                             usedreads[name + '/2'] = True
                             name += '.%s/2' % rtype
+
+                        else: # single end reads
+                            if name + '/0' in usedreads: unseen = False
+                            usedreads[name + '/0'] = True
+                            name += '.%s/0' % rtype
+
 
                         if len(read.seq) > min_readlen and unseen: outreads[name] = read.seq + '\n+\n' + read.qual
 

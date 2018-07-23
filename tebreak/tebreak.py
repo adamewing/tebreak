@@ -992,9 +992,9 @@ class DiscoInsCall:
         self.length     = len(coord_list)
 
 
-    def out(self, verbose=True):
+    def out(self, pad=0, verbose=True):
         output = ['#BEGIN']
-        output.append('%s\t%d\t%d\t%s\t%s\t%d' % (self.chrom, self.start, self.end, self.strand, self.bamlist, self.length))
+        output.append('%s\t%d\t%d\t%s\t%s\t%d' % (self.chrom, self.start-pad, self.end+pad, self.strand, self.bamlist, self.length))
         if verbose:
             for c in self.coord_list: output.append(str(c))
         output.append('#END')
@@ -2341,10 +2341,18 @@ def main(args):
 
                 chunks = []
 
-                with open('disc.debug.txt', 'w') as disc_out:
+                discfn = re.sub('.bam$', '.tebreak.disc.txt', os.path.basename(bamlist[0]))
+
+                if args.disc_out:
+                    discfn = args.disc_out
+
+                with open(discfn, 'w') as disc_out:
                     for i in ins_list:
-                        disc_out.write(i.out() + '\n')
+                        disc_out.write(i.out(pad=500) + '\n')
                         chunks.append((i.chrom, i.start-500, i.end+500))
+
+                if args.disc_only:
+                    sys.exit('quitting due to --disc_only, discordant cluster locations are in %s' % discfn)
 
 
     if args.max_fold_rpkm is not None:
@@ -2372,10 +2380,19 @@ def main(args):
 
             chunks = []
 
-            with open('disc.debug.txt', 'w') as disc_out:
+            discfn = re.sub('.bam$', '.tebreak.disc.txt', os.path.basename(bamlist[0]))
+
+            if args.disc_out:
+                discfn = args.disc_out
+
+            with open(discfn, 'w') as disc_out:
                 for i in ins_list:
-                    disc_out.write(i.out() + '\n')
+                    disc_out.write(i.out(pad=500) + '\n')
                     chunks.append((i.chrom, i.start-500, i.end+500))
+
+            if args.disc_only:
+                sys.exit('quitting due to --disc_only, discordant cluster locations are in %s' % discfn)
+
 
     logger.info("genome chunk count: %d" % len(chunks))
 
@@ -2452,7 +2469,9 @@ if __name__ == '__main__':
     parser.add_argument('--tmpdir', default='/tmp', help='temporary directory (default = /tmp)')
     parser.add_argument('--pickle', default=None, help='pickle output name')
     parser.add_argument('--detail_out', default=None, help='file to write detailed output')
- 
+    parser.add_argument('--disc_out', default=None, help='file to write discordant cluster output')
+
+    parser.add_argument('--disc_only', action='store_true', help='only identify discordant clusters and exit (does not run tebreak)')
     parser.add_argument('--rescue_asm', action='store_true', help='try harder to improve consensus (warning: may cause chimeras)', default=False)
     parser.add_argument('--skipshm', action='store_true', help='dont load bwa index into shared memory (warning: may increase runtime)')
     parser.add_argument('--debug', action='store_true', default=False)

@@ -35,7 +35,7 @@ git clone https://github.com/samtools/bcftools.git
 
 make -C htslib && sudo make install -C htslib
 make -C samtools && sudo make install -C samtools
-make -C bcftoools && sudo make install -C bcftools
+make -C bcftools && sudo make install -C bcftools
 ```
 
 ## Minia (sequence assembler)

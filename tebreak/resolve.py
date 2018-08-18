@@ -1106,6 +1106,9 @@ def resolve_insertion(args, ins, inslib_fa):
         ins = add_insdata(ins, last_res)
         ins['INFO']['inslib_fa'] = inslib_fa
 
+        # DEBUG POINT
+        #print ins['INFO']['best_ins_matchpct']
+
         if 'best_ins_matchpct' in ins['INFO'] and ins['INFO']['best_ins_matchpct'] >= float(args.min_ins_match):
             tmp_bam = remap_discordant(ins, inslib_fa=inslib_fa, tmpdir=args.refoutdir)
 
@@ -1669,7 +1672,7 @@ if __name__ == '__main__':
     parser.add_argument('-d', '--donor_bed', default=None, help="possible ref donor sites in BED-like format (chrom, start, end, strand, superfamily [e.g. L1/ALU/SVA])")
 
     parser.add_argument('--max_bam_count', default=0, help="skip sites with more than this number of BAMs (default = no limit)")
-    parser.add_argument('--min_ins_match', default=0.95, help="minumum match to insertion library (default 0.95)")
+    parser.add_argument('--min_ins_match', default=0.90, help="minumum match to insertion library (default 0.90)")
     parser.add_argument('--min_ref_match', default=0.98, help="minimum match to reference genome (default 0.98)")
     parser.add_argument('--min_cons_len', default=250, help='min total consensus length (default=250)')
     parser.add_argument('--min_discord', default=4, help="minimum mapped discordant read count (default = 8)")

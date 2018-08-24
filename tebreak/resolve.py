@@ -1529,6 +1529,7 @@ def main(args):
 
 
     logger.info('prefiltered candidate count: %d' % len(insertions))
+    logger.info('prepare reference %s...' % args.inslib_fasta)
 
     inslib_fa = prepare_ref(args.inslib_fasta, refoutdir=args.refoutdir, makeFAI=args.callmuts, makeBWA=False, usecached=args.usecachedLAST)
 

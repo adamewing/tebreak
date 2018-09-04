@@ -59,6 +59,6 @@ install:
 script:
     ##Installing TEBreak, indexing the reference and running the test
     - tebreak/tebreak.py -b test/data/example.ins.bam  -r test/data/Homo_sapiens_chr4_50000000-60000000_assembly19.fasta -p 4 --pickle test/example.pickle --detail_out test/example.tebreak.detail.out
-    - tebreak/resolve.py -p test/example.pickle -i lib/teref.human.fa --detail_out test/example.resolve.detail.out -t 4 -v -o test/example.tab.txt
+    - tebreak/resolve.py -p test/example.pickle -i lib/teref.human.fa --detail_out test/example.resolve.detail.out -t 4 -v -o test/example.tab.txt -r test/data/Homo_sapiens_chr4_50000000-60000000_assembly19.fasta
     - cd test
     - python checktest.py

@@ -1063,14 +1063,11 @@ def exonerate_align(qryseq, refseq, tmpdir='/tmp'):
     topscore = 0
 
     for pline in p.stdout.readlines():
-        #print "***|" + pline.strip()
         if pline.startswith('ALN'):
             c = pline.strip().split()
             if int(c[1]) > topscore:
                 topscore = int(c[1])
                 best = c
-        #else:
-        #    print pline.rstrip()
 
     os.remove(tgtfa)
     os.remove(qryfa)
@@ -1464,6 +1461,120 @@ def prefilter(args, ins, uuids):
     return False
 
 
+def fix_orient(rec, inslib, ref):
+    ins_id = '%s:%s' % (rec['Superfamily'], rec['Subfamily'])
+
+    refseq = ref.fetch(rec['Chromosome'], int(rec['Left_Extreme']), int(rec['Right_Extreme']))
+
+    elt_5p_align = exonerate_align(rec['Genomic_Consensus_5p'], inslib[ins_id])
+    elt_3p_align = exonerate_align(rec['Genomic_Consensus_3p'], inslib[ins_id])
+    gen_5p_align = exonerate_align(rec['Genomic_Consensus_5p'], refseq)
+    gen_3p_align = exonerate_align(rec['Genomic_Consensus_3p'], refseq)
+
+    # try using the insertion-based consensus if no luck with the genomic one
+    if not elt_5p_align or not gen_5p_align:
+        retry_elt_5p_align = exonerate_align(rec['Insert_Consensus_5p'], inslib[ins_id])
+        retry_gen_5p_align = exonerate_align(rec['Insert_Consensus_5p'], refseq)
+
+        if retry_gen_5p_align and retry_elt_5p_align:
+            elt_5p_align = retry_elt_5p_align
+            gen_5p_align = retry_gen_5p_align
+
+
+    if not elt_3p_align or not gen_3p_align:
+        retry_elt_3p_align = exonerate_align(rec['Insert_Consensus_3p'], inslib[ins_id])
+        retry_gen_3p_align = exonerate_align(rec['Insert_Consensus_3p'], refseq)
+
+        if retry_gen_3p_align and retry_elt_3p_align:
+            elt_3p_align = retry_elt_3p_align
+            gen_3p_align = retry_gen_3p_align
+
+
+    elt_5p_orient = 'NA'
+    elt_3p_orient = 'NA'
+    gen_5p_orient = 'NA'
+    gen_3p_orient = 'NA'
+
+    if elt_5p_align:
+        elt_5p_orient = elt_5p_align[-1]
+
+    if elt_3p_align:
+        elt_3p_orient = elt_3p_align[-1]
+
+    if gen_5p_align:
+        gen_5p_orient = gen_5p_align[-1]
+
+    if gen_3p_align:
+        gen_3p_orient = gen_3p_align[-1]
+
+    new_5p_orient = 'NA'
+    new_3p_orient = 'NA'
+
+    if 'NA' not in (elt_5p_orient, gen_5p_orient):
+        if elt_5p_orient == gen_5p_orient:
+            new_5p_orient = '+'
+        else:
+            new_5p_orient = '-'
+
+    if 'NA' not in (elt_3p_orient, gen_3p_orient):
+        if elt_3p_orient == gen_3p_orient:
+            new_3p_orient = '+'
+        else:
+            new_3p_orient = '-'
+
+    coords_5p = []
+    coords_3p = []
+
+    if elt_5p_align:
+        coords_5p = sorted(map(int, (elt_5p_align[4], elt_5p_align[5])))
+
+    if elt_3p_align:
+        coords_3p = sorted(map(int, (elt_3p_align[4], elt_3p_align[5])))
+
+    flip = False
+    if coords_5p and coords_3p and coords_5p[1] > coords_3p[1]:
+        flip = True
+
+    if rec['Orient_5p'] != new_5p_orient:
+        logger.info('Changed 5p orientation for %s' % rec['UUID'])
+
+    if rec['Orient_3p'] != new_3p_orient:
+        logger.info('Changed 3p orientation for %s' % rec['UUID'])
+
+    rec['Orient_5p'] = new_5p_orient
+    rec['Orient_3p'] = new_3p_orient
+
+    if 'NA' not in (new_5p_orient, new_3p_orient) and 'None' not in (rec['Orient_5p'], rec['Orient_3p']):
+        if rec['Orient_5p'] != rec['Orient_3p']:
+            rec['Inversion'] = 'Y'
+        else:
+            rec['Inversion'] = 'N'
+
+    else:
+        rec['Inversion'] = 'N'
+
+
+    if flip:
+        rec = flip_ends(rec)
+
+    return rec
+
+
+def flip_ends(rec):
+    rec['5_Prime_End'], rec['3_Prime_End'] = rec['3_Prime_End'], rec['5_Prime_End']
+    rec['Orient_5p'], rec['Orient_3p'] = rec['Orient_3p'], rec['Orient_5p']
+    rec['5p_Elt_Match'], rec['3p_Elt_Match'] = rec['3p_Elt_Match'], rec['5p_Elt_Match']
+    rec['5p_Genome_Match'], rec['3p_Genome_Match'] = rec['3p_Genome_Match'], rec['5p_Genome_Match']
+    rec['Split_reads_5prime'], rec['Split_reads_3prime'] = rec['Split_reads_3prime'], rec['Split_reads_5prime']
+    rec['5p_Cons_Len'], rec['3p_Cons_Len'] = rec['3p_Cons_Len'], rec['5p_Cons_Len']
+    rec['5p_Improved'], rec['3p_Improved'] = rec['3p_Improved'], rec['5p_Improved']
+    rec['TSD_3prime'], rec['TSD_5prime'] = rec['TSD_5prime'], rec['TSD_3prime']
+    rec['Genomic_Consensus_5p'], rec['Genomic_Consensus_3p'] = rec['Genomic_Consensus_3p'], rec['Genomic_Consensus_5p']
+    rec['Insert_Consensus_5p'], rec['Insert_Consensus_3p'] = rec['Insert_Consensus_3p'], rec['Insert_Consensus_5p']
+
+    return rec
+
+
 def finalise_ins(ins, args):
     ''' called concurrently; build insertion annotations for output '''
     try:
@@ -1570,13 +1681,17 @@ def main(args):
     pool_resolve.close()
     pool_resolve.join()
 
-    if args.ref:
+    inslib = tebreak.load_falib(args.inslib_fasta)
+    ref = pysam.Fastafile(args.ref)
+
+    if args.donor_bed:
+        if not args.uuid_list:
+            logger.warning('transduction / donor discovery is slow - recommend as second pass using --uuid_list')
+
         logger.info("loading bwa index %s into shared memory ..." % args.ref)
         p = subprocess.Popen(['bwa', 'shm', args.ref], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         for line in p.stdout: pass # wait for bwa to load
         logger.debug("loaded.")
-
-        inslib = tebreak.load_falib(args.inslib_fasta)
 
         logger.info('realigning discordant ends to identify distal clustering...')
 
@@ -1615,8 +1730,6 @@ def main(args):
 
     results = []
 
-    #final_insertions = [Ins(ins, args.annotation_tabix, args.use_rg, callmuts=args.callmuts, allow_unmapped=args.unmapped) for ins in processed_insertions if ins is not None]
-
     pool_final = mp.Pool(processes=int(args.processes))
 
     final_insertions = []
@@ -1654,6 +1767,8 @@ def main(args):
                 out_table.write('%s\n' % ins)
 
             elif ins.ins['passedfilter']:
+                # last-minute orientation fix
+                ins.out = fix_orient(ins.out, inslib, ref)
                 out_table.write('%s\n' % ins)
 
 
@@ -1666,10 +1781,11 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--pickle', required=True, help="pickle file output from tebreak.py")
     parser.add_argument('-t', '--processes', default=1, help="split work across multiple processes")
     parser.add_argument('-i', '--inslib_fasta', required=True, help="reference for insertions (not genome)")
+    parser.add_argument('-r', '--ref', required=True, help="reference genome fasta, expect bwa index, triggers transduction calling")
     parser.add_argument('-m', '--filter_bed', default=None, help="BED file of regions to mask")
     parser.add_argument('-v', '--verbose', action='store_true', default=False, help="output detailed status information")
     parser.add_argument('-o', '--out', default=None, help="output table")
-    parser.add_argument('-r', '--ref', default=None, help="reference genome fasta, expect bwa index, triggers transduction calling")
+    
     parser.add_argument('-d', '--donor_bed', default=None, help="possible ref donor sites in BED-like format (chrom, start, end, strand, superfamily [e.g. L1/ALU/SVA])")
 
     parser.add_argument('--max_bam_count', default=0, help="skip sites with more than this number of BAMs (default = no limit)")

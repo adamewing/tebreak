@@ -19,9 +19,9 @@ install:
     - pip install bx-python
 
     ##LAST
-    - wget http://last.cbrc.jp/last-716.zip
-    - unzip last-716.zip
-    - make CXXFLAGS=-O3 -C last-716 && sudo make install -C last-716
+    - wget https://github.com/adamewing/dep/blob/master/last-737.zip?raw=true -O last-737.zip
+    - unzip last-737.zip
+    - make CXXFLAGS=-O3 -C last-737 && sudo make install -C last-737
     ##BWA (newest version)
     - git clone https://github.com/lh3/bwa.git
     - sudo make -C bwa

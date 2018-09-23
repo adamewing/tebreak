@@ -2207,7 +2207,15 @@ def disco_run_chunk(args, chunk):
         logger.setLevel(logging.INFO)
 
     try:
-        bams = [pysam.AlignmentFile(bam, 'rb') for bam in args.bam.split(',')]
+        bams = []
+
+        if args.bam.endswith('.bam'):
+            bams = [pysam.AlignmentFile(bam, 'rb') for bam in args.bam.split(',')]
+
+        elif args.bam.endswith('.txt'):
+            with open(args.bam, 'r') as bamtxt:
+                for line in bamtxt:
+                    bams.append(pysam.AlignmentFile(line.strip(), 'rb'))
 
         mapping = None
         if args.map_tabix is not None:

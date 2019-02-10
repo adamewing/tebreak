@@ -569,6 +569,9 @@ def consensus(seqs, minscore=0.9):
         a1 = align.alignment_to_string(a1)
         a2 = ''.join([b for b in list(align.alignment_to_string(a2)) if b != '-'])
 
+        if len(a1) == 0:
+            continue
+            
         score = float(len(a1) - (len(a1)-s)) / float(len(a1))
 
         scores.append(score)

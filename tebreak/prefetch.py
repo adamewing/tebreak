@@ -569,7 +569,7 @@ def main(args):
     inbam  = pysam.AlignmentFile(args.bam, 'rb')
     outbam = pysam.AlignmentFile(args.outbam, 'wb', template=inbam)
 
-    logger.output('writing to %s...' % args.outbam)
+    logger.info('writing to %s...' % args.outbam)
 
     for read in inbam.fetch():
         if read.qname in output_reads:

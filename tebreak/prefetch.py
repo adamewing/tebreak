@@ -181,6 +181,9 @@ class DiscoInsCall:
                 if None in (read.rlen, read.alen):
                     continue
 
+                if len(read.get_reference_positions()) == 0:
+                    continue
+
                 if read.rlen - read.alen >= minclip: # soft-clipped
                     altclip = min(read.qstart, read.rlen-read.qend)
 

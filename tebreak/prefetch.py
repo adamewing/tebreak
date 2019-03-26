@@ -173,7 +173,7 @@ class DiscoInsCall:
         sr = []
         bp = []
 
-        assert os.path.exists(teindex + '.sa'), 'not indexed: s%' % teindex
+        assert os.path.exists(teindex + '.sa'), 'not indexed: %s' % teindex
 
         with open(self.uuid + '.fq', 'w') as out:
             for read in bam.fetch(self.chrom, self.start, self.end):

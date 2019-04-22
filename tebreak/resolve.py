@@ -1774,7 +1774,7 @@ def main(args):
 
             elif ins.ins['passedfilter']:
                 # last-minute orientation fix
-                if not args.unmapped:
+                if not args.unmapped and not args.skip_orient_fix:
                     ins.out = fix_orient(ins.out, inslib, ref)
                 out_table.write('%s\n' % ins)
 
@@ -1815,6 +1815,7 @@ if __name__ == '__main__':
     parser.add_argument('--uuid_list', default=None, help='limit resolution to UUIDs in first column of input list (can be tabular output from previous resolve.py run)')
     parser.add_argument('--callmuts', default=False, action='store_true', help='detect changes in inserted seq. vs ref. (requires bcftools)')
     parser.add_argument('--nogeno', default=False, action='store_true', help='do not output genotype calls')
+    parser.add_argument('--skip_orient_fix', default=False, action='store_true', help='do not apply fix for orientation')
     parser.add_argument('--tmpdir', default='/tmp', help="directory for temporary files")
     args = parser.parse_args()
     main(args)

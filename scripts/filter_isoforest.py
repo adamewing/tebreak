@@ -140,6 +140,7 @@ def max_gt_depth(t):
 def main(args):
     data = pd.read_csv(args.table, sep='\t', header=0, index_col=0)
     orig = pd.read_csv(args.table, sep='\t', header=0, index_col=0, keep_default_na=False, na_values=['_'])
+
     orig['pred'] = 0
 
     # modify and generate additional columns
@@ -163,8 +164,9 @@ def main(args):
     subsets = list(set(data['Superfamily']))
     X_train = data.loc[data['NonRef'] > 1]
 
+
     for subset in subsets:
-        logger.info("Training %s" % subset)
+        
         X_train_subset = X_train[X_train['Superfamily'] == subset]
         X_test_subset  = data[data['Superfamily'] == subset]
 
@@ -173,13 +175,19 @@ def main(args):
         X_train_subset = X_train_subset[model_cols]
         X_test_subset = X_test_subset[model_cols]
 
-        clf = IsolationForest(behaviour='new', contamination='auto', random_state=42)
+        logger.info("Training %s" % subset)
+
+        clf = IsolationForest(behaviour='new', contamination='auto', random_state=42, max_samples='auto')
         clf.fit(X_train_subset)
 
         y_pred_train = clf.predict(X_train_subset)
         y_pred_test = clf.predict(X_test_subset)
 
         orig['pred'].loc[orig_subset.index] = y_pred_test
+
+    # positive examples should be positive
+    #orig['pred'].loc[orig['NonRef'] != 'NA'] = 1
+    orig['pred'].loc[data['NonRef'] > 1] = 1
 
 
     orig.to_csv('%s.isoforest.txt' % args.table, sep='\t')

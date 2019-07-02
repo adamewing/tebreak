@@ -21,7 +21,7 @@ def main(args):
                     rec[header[n]] = field
 
 
-                print line.strip()
+                print(line.strip())
 
 
 

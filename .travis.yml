@@ -1,7 +1,7 @@
 language: python
 
 python:
-    - 2.7
+    - 3.7
 
 sudo: required
 
@@ -13,10 +13,10 @@ before_install:
 install:
     
     # python reqs
-    - pip install cython
     - pip install pysam
     - pip install scipy
     - pip install bx-python
+    - pip install scikit-bio
 
     ##LAST
     - wget https://github.com/adamewing/dep/blob/master/last-737.zip?raw=true -O last-737.zip
@@ -42,12 +42,6 @@ install:
     - wget http://gatb-tools.gforge.inria.fr/versions/bin/minia-2.0.3-Linux.tar.gz
     - tar -xvf minia-2.0.3-Linux.tar.gz
     - sudo mv minia-2.0.3-Linux/bin/{dbgh5,dbginfo,h5dump,minia}  $WORKDIR/bin/
-    ##Align
-    - git clone https://github.com/adamewing/align.git
-    - cd align
-    - python setup.py install
-    - cd ..
-    - export PATH=$WORKDIR/bin/:$PATH
     ##Exonerate
     - git clone https://github.com/adamewing/exonerate.git
     - cd exonerate

@@ -37,7 +37,7 @@ def main(args):
 
             if len(annotations) == 0: annotations.append('NA')
 
-            print line.strip() + '\t' + ','.join(annotations)
+            print(line.strip() + '\t' + ','.join(annotations))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='annotate tebreak table')

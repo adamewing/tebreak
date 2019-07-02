@@ -3,7 +3,7 @@
 import os
 import re
 import shutil
-import cPickle as pickle
+import pickle
 import argparse
 import logging
 import subprocess
@@ -44,6 +44,7 @@ def mapfilter(fq, ref, minscore=20, minmatch=0.90, threads=4):
     p = subprocess.Popen(bwa, stdout=subprocess.PIPE)
 
     for rec in p.stdout:
+        rec = rec.decode()
         if not rec.startswith('@'):
             rec = rec.split('\t')
             name = '-'.join(rec[0].split('-')[:-1])
@@ -101,7 +102,7 @@ def makefq(insertions, tmpdir='/tmp', use_distal=False):
 def main(args):
     logger.debug('loading pickle: %s' % args.pickle)
 
-    with open(args.pickle, 'r') as pickin:
+    with open(args.pickle, 'rb') as pickin:
         insertions = pickle.load(pickin)
 
     logger.debug('finished loading %s' % args.pickle)
@@ -132,7 +133,7 @@ def main(args):
 
     out_pickle = '.'.join(args.pickle.split('.')[:-1]) + '.screened.pickle'
 
-    with open(out_pickle, 'w') as pickout:
+    with open(out_pickle, 'wn') as pickout:
         pickle.dump(filtered, pickout)
 
 

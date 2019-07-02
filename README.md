@@ -12,10 +12,10 @@ Contact: adam.ewing@mater.uq.edu.au
 This assumes a working installation of `pip`. Many of these prerequisites can be satisfied through installing [anaconda](https://conda.io/docs/user-guide/install/download.html).
 
 ```
-pip install cython
 pip install pysam
 pip install scipy
 pip install bx-python
+pip install scikit-bio
 ```
 
 If `pip install bx-python` fails you might need `liblzo2-dev` (via apt: `sudo apt-get install -y liblzo2-dev`).
@@ -43,13 +43,6 @@ make -C bcftools && sudo make install -C bcftools
 wget http://gatb-tools.gforge.inria.fr/versions/bin/minia-2.0.3-Linux.tar.gz
 tar -xvf minia-2.0.3-Linux.tar.gz
 sudo mv minia-2.0.3-Linux/bin/{dbgh5,dbginfo,h5dump,minia} /somewhere/in/your/$PATH
-```
-
-## Align (cython Smith-Waterman implementation)
-```
-git clone https://github.com/adamewing/align.git
-cd align
-python setup.py install
 ```
 
 ## Exonerate (aligner)

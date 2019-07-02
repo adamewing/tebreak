@@ -7,6 +7,7 @@ from setuptools import setup
 def check_bwa():
     p = subprocess.Popen(['bwa'], stderr=subprocess.PIPE)
     for line in p.stderr:
+        line = line.decode()
         if line.startswith('Version:'):
             major, minor, sub = line.strip().split()[1].split('.')
             sub = sub.split('-')[0]
@@ -18,6 +19,7 @@ def check_bwa():
 def check_samtools():
     p = subprocess.Popen(['samtools'], stderr=subprocess.PIPE)
     for line in p.stderr:
+        line = line.decode()
         if line.startswith('Version:'):
             major, minor = line.strip().split()[1].split('.')[:2]
             minor = minor.split('-')[0]
@@ -29,6 +31,7 @@ def check_samtools():
 def check_minia():
     p = subprocess.Popen(['minia'], stdout=subprocess.PIPE)
     for line in p.stdout:
+        line = line.decode()
         if line.startswith('[minia options]'):
             return True
     return False
@@ -37,6 +40,7 @@ def check_minia():
 def check_LAST():
     p = subprocess.Popen(['lastal'], stderr=subprocess.PIPE)
     for line in p.stderr:
+        line = line.decode()
         if line.startswith('lastal'):
             return True 
     return False
@@ -49,6 +53,7 @@ def check_python():
 def check_exonerate():
     p = subprocess.Popen(['exonerate'], stdout=subprocess.PIPE)
     for line in p.stdout:
+        line = line.decode()
         if line.startswith('exonerate from exonerate'):
             major, minor = line.strip().split()[-1].split('.')[:2]
             minor = minor.split('-')[0]
@@ -67,7 +72,7 @@ if __name__ == '__main__':
 
 setup(
     name='TEBreak',
-    version='0.0.1',
+    version='1.0',
     author='Adam Ewing',
     author_email='adam.ewing@gmail.com',
     description=("Insertion finder for high throughput sequence data"),
@@ -79,11 +84,8 @@ setup(
         'bx-python>=0.5.0',
         'scipy>=0.14.0',
         'numpy>=1.9.0',
-        'align>=0.1',
-    ],
-    dependency_links = [
-        'git+https://github.com/adamewing/align.git#egg=align-0.1'
-    ],
+        'scikit-bio>=0.5.5',
+    ]
 
 )
 

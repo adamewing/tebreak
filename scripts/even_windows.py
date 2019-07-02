@@ -18,7 +18,7 @@ def main(args):
     first_pos = 0
     prev_rec = None
 
-    reads_per_window = bam.mapped / int(args.windows)
+    reads_per_window = int(bam.mapped / int(args.windows))
 
     assert reads_per_window > 0, "too few reads or too many windows"
 
@@ -30,7 +30,7 @@ def main(args):
                 last_chrom = rec.reference_name
 
             if read_count >= reads_per_window or rec.reference_name != last_chrom:
-                print '%s\t%d\t%d\t%d' % (last_chrom, first_pos, prev_rec.reference_end, read_count)
+                print('%s\t%d\t%d\t%d' % (last_chrom, first_pos, prev_rec.reference_end, read_count))
 
                 read_count = 0
                 last_chrom = rec.reference_name
@@ -44,7 +44,7 @@ def main(args):
 
             prev_rec = rec
 
-    print '%s\t%d\t%d\t%d' % (last_chrom, first_pos, prev_rec.reference_end, read_count)
+    print('%s\t%d\t%d\t%d' % (last_chrom, first_pos, prev_rec.reference_end, read_count))
 
 
 if __name__ == '__main__':

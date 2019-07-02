@@ -6,7 +6,6 @@ import subprocess
 import logging
 import argparse
 
-#import align
 import pysam
 import numpy as np
 
@@ -21,7 +20,7 @@ logger.setLevel(logging.INFO)
 
 def rc(dna):
     ''' reverse complement '''
-    complements = maketrans('acgtrymkbdhvACGTRYMKBDHV', 'tgcayrkmvhdbTGCAYRKMVHDB')
+    complements = str.maketrans('acgtrymkbdhvACGTRYMKBDHV', 'tgcayrkmvhdbTGCAYRKMVHDB')
     return dna.translate(complements)[::-1]
 
 
@@ -68,6 +67,7 @@ def align(qryseq, refseq, elt='PAIR', minmatch=85.0):
     topscore = 0
 
     for pline in p.stdout.readlines():
+        pline = pline.decode()
         if pline.startswith(elt):
             #print pline.strip()
             c = pline.strip().split()
@@ -201,7 +201,7 @@ def main(args):
         for i, line in enumerate(table):
             if i == 0:
                 header = line.strip().split('\t')
-                print line.strip()
+                print(line.strip())
 
             else:
                 rec = {}
@@ -505,7 +505,7 @@ def main(args):
                         rec = flip_ends(rec)
 
                     if out:
-                        print '\t'.join([rec[h] for h in header])
+                        print('\t'.join([rec[h] for h in header]))
 
 
     logger.info('Changed orientation on %d 5p ends' % count_5p_diff)

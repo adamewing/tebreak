@@ -5,7 +5,7 @@ import gc
 import re
 import sys
 import shutil
-import cPickle as pickle
+import pickle
 import argparse
 import logging
 import tebreak
@@ -13,12 +13,15 @@ import pysam
 import subprocess
 import traceback
 import numpy as np
-import align
+#import align
 
 import multiprocessing as mp
 
+import skbio.alignment as skalign
+import skbio.sequence as skseq
+
 from uuid import uuid4
-from string import maketrans
+#from string import maketrans
 from collections import OrderedDict as od
 from collections import defaultdict as dd
 from collections import Counter, namedtuple
@@ -40,7 +43,7 @@ class Annotator:
 
     def annotate(self, chrom, start, end):
         out = od()
-        for fn, tbx in self.tbx.iteritems():
+        for fn, tbx in self.tbx.items():
             out[fn] = []
             if chrom in tbx.contigs:
                 for rec in tbx.fetch(chrom, start, end):
@@ -260,7 +263,7 @@ class Ins:
                     sample_list.append(sample)
                     samples[sample] = int(count)
 
-                self.out['Sample_support_' + end] = ','.join(['%s|%d' % (sample, count) for sample, count in samples.iteritems()])
+                self.out['Sample_support_' + end] = ','.join(['%s|%d' % (sample, count) for sample, count in samples.items()])
 
         sample_list = list(set(sample_list))
         self.out['Sample_count'] = len(sample_list)
@@ -332,6 +335,7 @@ class Ins:
         muts = []
 
         for vcfline in p2.stdout:
+            vcfline = vcfline.decode()
             if not vcfline.startswith('#'):
                 chrom, pos, uid, ref, alt = vcfline.split()[:5]
                 muts.append('%s:%s>%s' % (pos, ref, alt))
@@ -481,6 +485,7 @@ def get_covered_segs(bam, mindepth=1, minlength=50):
     seg = {'chrom': None, 'start': None, 'end': None}
 
     for line in p.stdout:
+        line = line.decode()
         chrom, pos, base, depth = line.strip().split()[:4]
 
         depth = int(depth)
@@ -537,8 +542,8 @@ def qualtrim(read, ctglen, chopclip=False, minqual=35):
 def consensus(seqs, minscore=0.9):
     ''' build consensus from sorted aligned reads iteratively, expects seqs to be sorted in ref genome order '''
 
-    S = -np.ones((256, 256)) + 2 * np.identity(256)
-    S = S.astype(np.int16)
+    #S = -np.ones((256, 256)) + 2 * np.identity(256)
+    #S = S.astype(np.int16)
 
     if len(seqs) == 0:
         return '', 0.0
@@ -561,26 +566,28 @@ def consensus(seqs, minscore=0.9):
     align_init = False
 
     for i, seq in enumerate(uniq_seqs[1:]):
+        s1 = skseq.DNA(cons)
+        s2 = skseq.DNA(seq)
 
-        s1 = align.string_to_alignment(cons)
-        s2 = align.string_to_alignment(seq)
+        aln_res = skalign.local_pairwise_align_ssw(s1, s2)
+        aln_tab = aln_res[0]
 
-        (s, a1, a2) = align.align(s1, s2, -2, -2, S, local=True)
-        a1 = align.alignment_to_string(a1)
-        a2 = ''.join([b for b in list(align.alignment_to_string(a2)) if b != '-'])
+        s1_aln, s2_aln = aln_res[2]
+
+        a1 = cons[s1_aln[0]:s1_aln[1]+1]
 
         if len(a1) == 0:
             continue
             
-        score = float(len(a1) - (len(a1)-s)) / float(len(a1))
+        score = sum(aln_tab.conservation(gap_mode='include')==1.)/aln_tab.shape.position
 
         scores.append(score)
 
         if re.search(a1, cons):
-            cons_start, cons_end = locate_subseq(cons, a1)
+            cons_start, cons_end = s1_aln[0], s1_aln[1]+1
 
             if score >= minscore and cons_end > len(cons)-5:
-                align_end = locate_subseq(seq, a2)[1]
+                align_end = s2_aln[1]+1
                 cons += seq[align_end:]
                 align_init = True
 
@@ -678,6 +685,7 @@ def last_alignment(ins, ref_fa, tmpdir='/tmp'):
     maf_results = []
 
     for line in p.stdout:
+        line = line.decode()
         if not line.startswith('#'):
             if line.strip() != '':
                 maf_lines.append(line.strip())
@@ -988,6 +996,7 @@ def remap_discordant(ins, inslib_fa=None, useref=None, tmpdir='/tmp'):
     with open(tmp_sam, 'w') as sam:
         p = subprocess.Popen(sam_cmd, stdout=subprocess.PIPE, stderr=FNULL)
         for line in p.stdout:
+            line = line.decode()
             if not line.startswith('@'):
                 if bin(int(line.split('\t')[1]) & 4) != bin(4): # not unmapped
                     sam.write(line)
@@ -1028,6 +1037,7 @@ def bwa_locate(seq, refgenome, tmpdir='/tmp'):
     locs = []
 
     for line in view.stdout:
+        line = line.decode()
         c = line.strip().split()
 
         bits  = int(c[1])
@@ -1066,6 +1076,7 @@ def exonerate_align(qryseq, refseq, tmpdir='/tmp'):
     topscore = 0
 
     for pline in p.stdout.readlines():
+        pline = pline.decode()
         if pline.startswith('ALN'):
             c = pline.strip().split()
             if int(c[1]) > topscore:
@@ -1130,7 +1141,7 @@ def resolve_insertion(args, ins, inslib_fa):
 
         return ins
 
-    except Exception, e:
+    except Exception as e:
         sys.stderr.write('*'*60 + '\tencountered error:\n')
         traceback.print_exc(file=sys.stderr)
 
@@ -1184,6 +1195,7 @@ def dr_propensity(ins, insertions, ref, rmsk):
         mappings = []
 
         for line in p.stdout:
+            line = line.decode()
             if not line.startswith('@'):
                 if bin(int(line.split('\t')[1]) & 4) != bin(4): # not unmapped
                     c = line.strip().split('\t')
@@ -1240,7 +1252,7 @@ def dr_propensity(ins, insertions, ref, rmsk):
 
         return ins
 
-    except Exception, e:
+    except Exception as e:
         sys.stderr.write('*'*60 + '\tencountered error:\n')
         traceback.print_exc(file=sys.stderr)
 
@@ -1264,7 +1276,7 @@ def guess_forward(seq):
 
 def rc(dna):
     ''' reverse complement '''
-    complements = maketrans('acgtrymkbdhvACGTRYMKBDHV', 'tgcayrkmvhdbTGCAYRKMVHDB')
+    complements = str.maketrans('acgtrymkbdhvACGTRYMKBDHV', 'tgcayrkmvhdbTGCAYRKMVHDB')
     return dna.translate(complements)[::-1]
 
 
@@ -1413,7 +1425,7 @@ def identify_transductions(ins, insertions, ref, inslib, rmsk):
 
         return ins
 
-    except Exception, e:
+    except Exception as e:
         sys.stderr.write('*'*60 + '\tencountered error:\n')
         traceback.print_exc(file=sys.stderr)
 
@@ -1583,7 +1595,7 @@ def finalise_ins(ins, args):
     try:
         return Ins(ins, args.annotation_tabix, args.use_rg, callmuts=args.callmuts, allow_unmapped=args.unmapped)
 
-    except Exception, e:
+    except Exception as e:
         sys.stderr.write('*'*60 + '\tencountered error:\n')
         traceback.print_exc(file=sys.stderr)
 
@@ -1609,7 +1621,7 @@ def main(args):
     logger.info('resolve.py called with args: %s' % ' '.join(sys.argv))
     logger.info('loading pickle: %s' % args.pickle)
 
-    with open(args.pickle, 'r') as pickin:
+    with open(args.pickle, 'rb') as pickin:
         raw_insertions = pickle.load(pickin)
 
     logger.info('finished loading %s' % args.pickle)
@@ -1637,7 +1649,7 @@ def main(args):
 
 
     logger.debug('prefiltering stats:')
-    for pfr, count in Counter(prefilter_reasons).iteritems():
+    for pfr, count in Counter(prefilter_reasons).items():
         logger.debug('reason %s: %d' % (pfr, count))
 
     # clean up memory?

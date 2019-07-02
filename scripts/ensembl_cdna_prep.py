@@ -16,7 +16,7 @@ if len(sys.argv) == 2:
             seq.append(line.strip())
 
     if seq:
-        print seq[0] + '\n' + ''.join(seq[1:]) + 'A'*50
+        print(seq[0] + '\n' + ''.join(seq[1:]) + 'A'*50)
 
 else:
     sys.exit('usage %s <ensembl.fa>' % sys.argv[0])

@@ -5,22 +5,23 @@ import re
 import sys
 import time
 import pysam
-import align
 import random
 import argparse
 import logging
 import subprocess
 import itertools
 import traceback
-import cPickle as pickle
+import pickle
 import multiprocessing as mp
 
 import numpy as np
 #np.seterr(all='raise')
 import scipy.stats as ss
+
+import skbio.alignment as skalign
+import skbio.sequence as skseq
  
 from uuid import uuid4
-from string import maketrans
 from operator import itemgetter
 from collections import Counter
 from collections import OrderedDict as od
@@ -74,7 +75,7 @@ class Genome:
  
         chunkleft = chunklen # track how much genome needs to go into each chunk
  
-        chromlist = self.chrlen.keys()
+        chromlist = list(self.chrlen.keys())
  
         random.seed(seed)
 
@@ -314,7 +315,7 @@ class SplitCluster(ReadCluster):
         self.reads.sort()
         self.start  = self.reads[0].breakpos
         self.end    = self.reads[-1].breakpos
-        self.median = self.reads[len(self)/2].breakpos
+        self.median = self.reads[int(len(self)/2)].breakpos
  
     def subcluster_by_breakend(self, breakends, direction='both'):
         ''' return a new cluster containing only reads with breakpoints in passed list '''
@@ -337,8 +338,8 @@ class SplitCluster(ReadCluster):
 
         np.random.seed(seed)
 
-        S = -np.ones((256, 256)) + 2 * np.identity(256)
-        S = S.astype(np.int16)
+        #S = -np.ones((256, 256)) + 2 * np.identity(256)
+        #S = S.astype(np.int16)
 
         minqual = self.reads[0].minqual
 
@@ -367,26 +368,27 @@ class SplitCluster(ReadCluster):
             uniq_seqs = [uniq_seqs[u] for u in sorted(np.random.choice(range(len(uniq_seqs)), size=1000))]
 
         for seq in uniq_seqs[1:]:
+            s1 = skseq.DNA(cons)
+            s2 = skseq.DNA(seq)
 
-            s1 = align.string_to_alignment(cons)
-            s2 = align.string_to_alignment(seq)
+            aln_res = skalign.local_pairwise_align_ssw(s1, s2)
+            aln_tab = aln_res[0]
 
-            (s, a1, a2) = align.align(s1, s2, -2, -2, S, local=True)
-            a1 = align.alignment_to_string(a1)
-            a2 = ''.join([b for b in list(align.alignment_to_string(a2)) if b != '-'])
+            s1_aln, s2_aln = aln_res[2]
+
+            a1 = cons[s1_aln[0]:s1_aln[1]+1]
 
             score = 0.0
-            if len(a1) > 0:
-                score = float(len(a1) - (len(a1)-s)) / float(len(a1))
+            if aln_tab.shape.position > 10: # param?
+                score = sum(aln_tab.conservation(gap_mode='include')==1.)/aln_tab.shape.position
 
             if re.search(a1, cons):
-                cons_start, cons_end = locate_subseq(cons, a1)
+                cons_start, cons_end = s1_aln[0], s1_aln[1]+1
 
                 if score >= minscore and cons_end > len(cons)-5:
                     scores.append(score)
-                    align_end = locate_subseq(seq, a2)[1]
+                    align_end = s2_aln[1]+1
                     cons += seq[align_end:]
-                    #print self.start, self.end, cons
 
         if scores:
             return cons, np.mean(scores)
@@ -669,7 +671,7 @@ class Insertion:
             # get mate info
 
             # mate mapped
-            for qname, dr in bam_mapped.iteritems():
+            for qname, dr in bam_mapped.items():
                 for read in bam.fetch(dr.mate_chrom, dr.read.next_reference_start, dr.read.next_reference_start+1):
                     if read.qname == qname and not read.is_secondary and not is_supplementary(read):
                         if read.seq != bam_mapped[qname].read.seq:
@@ -687,7 +689,7 @@ class Insertion:
             all_mapped.update(bam_mapped)
             all_unmapped.update(bam_unmapped)
 
-        self.discreads = all_mapped.values() + all_unmapped.values()
+        self.discreads = list(all_mapped.values()) + list(all_unmapped.values())
 
 
     def improve_consensus(self, ctg_fa, bwaref, tmpdir='/tmp'):
@@ -805,13 +807,13 @@ class Insertion:
                 sampled = random.sample(outreads, limit)
                 subsamp = od()
 
-                for name, data in outreads.iteritems():
+                for name, data in outreads.items():
                     if name in sampled:
                         subsamp[name] = data
 
                 outreads = subsamp
 
-            for name, data in outreads.iteritems():
+            for name, data in outreads.items():
                 out.write('@%s\n%s\n' % (name, data))
                 self.fastqrecs.append('@%s\n%s\n' % (name, data))
 
@@ -1025,7 +1027,7 @@ class DiscoInsCall:
  
 def rc(dna):
     ''' reverse complement '''
-    complements = maketrans('acgtrymkbdhvACGTRYMKBDHV', 'tgcayrkmvhdbTGCAYRKMVHDB')
+    complements = str.maketrans('acgtrymkbdhvACGTRYMKBDHV', 'tgcayrkmvhdbTGCAYRKMVHDB')
     return dna.translate(complements)[::-1]
 
 
@@ -1126,35 +1128,26 @@ def is_supplementary(read):
 
 def joinseqs(seq1, seq2, minscore=0.95, minlen=20):
     ''' join two seqs if the ends match going left to right '''
-    S = -np.ones((256, 256)) + 2 * np.identity(256)
-    S = S.astype(np.int16)
 
-    s1 = align.string_to_alignment(seq1)
-    s2 = align.string_to_alignment(seq2)
-
-    (s, a1, a2) = align.align(s1, s2, -2, -2, S, local=True)
-    a1 = align.alignment_to_string(a1)
-    a2 = ''.join([b for b in list(align.alignment_to_string(a2)) if b != '-'])
-
-    score = float(len(a1) - (len(a1)-s)) / float(len(a1))
-
-    try:
-        s1_start, s1_end = locate_subseq(seq1, a1)
-        s2_start, s2_end = locate_subseq(seq2, a2)
-
-    except TypeError:
+    if not seq1 or not seq2:
         return None, None, None
 
-    except AssertionError:
-        return None, None, None
+    seq1_dna = skseq.DNA(seq1)
+    seq2_dna = skseq.DNA(seq2)
+
+    aln_res = skalign.local_pairwise_align_ssw(seq1_dna, seq2_dna)
+    aln_tab = aln_res[0]
+
+    score = sum(aln_tab.conservation(gap_mode='include')==1.)/aln_tab.shape.position
 
     joined = None
 
-    if score >= minscore and len(a1) > minlen and (s1_end > len(s1)-2 or s2_start < 2):
-        align_end = locate_subseq(seq2, a2)[1]
-        joined = seq1 + seq2[align_end:]
+    seq1_aln, seq2_aln = aln_res[2]
 
-    return joined, score, len(a1)
+    if score > minscore and aln_tab.shape.position >= minlen and (seq1_aln[1] > len(seq1)-2 or seq2_aln[0] < 2):
+        joined = seq1 + seq2[seq2_aln[1]+1:]
+
+    return joined, score, aln_tab.shape.position
 
 
 def asm_rescue(fa):
@@ -1180,7 +1173,7 @@ def asm_rescue(fa):
             seqdict['rescue_' + os.path.basename(fa)] = joined_10
 
     with open(fa, 'w') as out:
-        for name, seq in seqdict.iteritems():
+        for name, seq in seqdict.items():
             out.write(">%s\n%s\n" % (name, seq))
 
     return fa
@@ -1263,8 +1256,8 @@ def splitqual(read):
  
     breakpos = read.get_aligned_pairs()[-1][0] # breakpoint on right
  
-    q1 = map(ord, list(read.qual[:breakpos]))
-    q2 = map(ord, list(read.qual[breakpos:]))
+    q1 = list(map(ord, list(read.qual[:breakpos])))
+    q2 = list(map(ord, list(read.qual[breakpos:])))
 
     if min(q1) == max(q1) == min(q2) == max(q2):
         return 1.0
@@ -1377,7 +1370,7 @@ def map_breakends(breakends, db, tmpdir='/tmp'):
         p = subprocess.Popen(sam_cmd, stdout=subprocess.PIPE, stderr=FNULL)
 
         for line in p.stdout:
-            out.write(line)
+            out.write(line.decode())
  
     sam = pysam.AlignmentFile(tmp_sam)
  
@@ -1433,6 +1426,7 @@ def align_last(fa, db, e=20):
     p = subprocess.Popen(last_cmd, stdout=subprocess.PIPE)
 
     for line in p.stdout:
+        line = line.decode()
         if not line.startswith('#'):
             if line.strip() != '':
                 la_lines.append(line.strip())
@@ -1544,6 +1538,7 @@ def minia(fq, tmpdir='/tmp', rescue_asm=False):
         FNULL = open(os.devnull, 'w')
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=FNULL)
         for line in p.stdout:
+            line = line.decode()
             if line.strip().startswith('max_length'):
                 max_len = int(line.strip()[-1]) 
 
@@ -1580,7 +1575,7 @@ def build_mask(bedfile, logger):
 
             try:
                 forest[chrom].add_interval(Interval(start, end))
-            except Exception, e:
+            except Exception as e:
                 logger.exception('bx interval tree crashed on interval %s:%d-%d' % (chrom, start, end))
                 
 
@@ -1614,7 +1609,7 @@ def avgmap(maptabix, chrom, start, end):
 
 def getVAF(bam, chrom, poslist):
     ''' return number of reads supporting alt (insertion), ref (reference) and vaf (variant allele fraction) '''
-    poslist = map(int, poslist)
+    poslist = list(map(int, poslist))
     alt, ref = break_count(bam, chrom, poslist)
     vaf = 0.0 
 
@@ -1709,12 +1704,12 @@ def filter_insertions(insertions, filters, tmpdir='/tmp', debug=True, logger=Non
 
         exclude = False
 
-        mapq = map(lambda x : str(x.mapq), ins.be1.proximal_subread())
+        mapq = list(map(lambda x : int(x.mapq), ins.be1.proximal_subread()))
         rgs  = [rg.split('|')[0] for rg in ins.be1.cluster.readgroups()]
         bams = [bam.split('|')[0] for bam in ins.be1.cluster.bamfiles()]
 
         if ins.be2 is not None and len(ins.be2.proximal_subread()) > 0:
-            mapq += map(lambda x : str(x.mapq), ins.be2.proximal_subread())
+            mapq += list(map(lambda x : int(x.mapq), ins.be2.proximal_subread()))
             rgs  += [rg.split('|')[0] for rg in ins.be2.cluster.readgroups()]
             bams += [bam.split('|')[0] for bam in ins.be2.cluster.bamfiles()]
 
@@ -1894,7 +1889,7 @@ def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
         }
 
         if args.max_fold_rpkm is not None: filters['max_rpkm'] = int(args.max_fold_rpkm)*exp_rpkm
-        if args.exclude_bam is not None: filters['exclude_bam'] = map(os.path.basename, args.exclude_bam.split(','))
+        if args.exclude_bam is not None: filters['exclude_bam'] = list(map(os.path.basename, args.exclude_bam.split(',')))
         if args.exclude_readgroup is not None: filters['exclude_readgroup'] = args.exclude_readgroup.split(',')
 
         insertions = []
@@ -1983,7 +1978,7 @@ def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
             for bam in bams: bam.close()
             return []
 
-    except Exception, e:
+    except Exception as e:
         sys.stderr.write('*'*60 + '\nencountered error in chunk: %s\n' % chunkname)
         traceback.print_exc(file=sys.stderr)
         sys.stderr.write("*"*60 + "\n")
@@ -2037,7 +2032,7 @@ def text_summary(insertions, cmd=None, outfile='tebreak.out'):
         for ins in insertions:
             if ins is not None:
                 out.write('#BEGIN\n')
-                for label, value in ins['INFO'].iteritems():
+                for label, value in ins['INFO'].items():
                     out.write('%s: %s\n' % (label, str(value)))
                 out.write('#END\n')
 
@@ -2236,8 +2231,8 @@ def disco_run_chunk(args, chunk):
 
         return disco_cluster(forest, coords, mapping, min_size=int(args.min_disc_reads))
 
-    except Exception, e:
-        sys.stderr.write('*'*60 + '\nencountered error in chunk: %s\n' % map(str, chunk))
+    except Exception as e:
+        sys.stderr.write('*'*60 + '\nencountered error in chunk: %s\n' % list(map(str, chunk)))
         traceback.print_exc(file=sys.stderr)
         sys.stderr.write("*"*60 + "\n")
 
@@ -2432,7 +2427,7 @@ def main(args):
     if args.pickle is not None:
         pickoutfn = args.pickle
 
-    with open(pickoutfn, 'w') as pickout:
+    with open(pickoutfn, 'wb') as pickout:
         pickle.dump(insertions, pickout)
 
     logger.info('Pickled to %s' % pickoutfn)

@@ -3,7 +3,7 @@
 
 import os
 import sys
-import cPickle as pickle
+import pickle
 import logging
 
 logger = logging.getLogger(__name__)
@@ -61,7 +61,7 @@ if len(sys.argv) > 2:
     insertions = []
 
     for pfn in sys.argv[2:]:
-        with open(pfn, 'r') as pickin:
+        with open(pfn, 'rb') as pickin:
             insertions += pickle.load(pickin)
 
         logger.info('loaded %s' % pfn)
@@ -72,7 +72,7 @@ if len(sys.argv) > 2:
 
     logger.info('%d records remain after merge.' % len(insertions))
 
-    with open(sys.argv[1], 'w') as pickout:
+    with open(sys.argv[1], 'wb') as pickout:
         pickle.dump(insertions, pickout)
 
     logger.info('wrote %d records to %s' % (len(insertions), sys.argv[1]))

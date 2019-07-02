@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 import os
-import cPickle as pickle
+import pickle
 import argparse
 import logging
 
@@ -39,7 +39,7 @@ def output_fastq(ins, pickle, uuid):
 def main(args):
     logger.debug('loading pickle: %s' % args.pickle)
 
-    with open(args.pickle, 'r') as pickin:
+    with open(args.pickle, 'rb') as pickin:
         insertions = pickle.load(pickin)
 
     logger.debug('finished loading %s' % args.pickle)

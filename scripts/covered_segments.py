@@ -14,6 +14,7 @@ def getsegs(bam, mindepth, minlength):
     seg = {'chrom': None, 'start': None, 'end': None}
 
     for line in p.stdout:
+        line = line.decode()
         chrom, pos, base, depth = line.strip().split()[:4]
 
         depth = int(depth)
@@ -43,7 +44,7 @@ def main(args):
 
     seglist = getsegs(args.bam, int(args.depth), int(args.length))
     for seg in seglist:
-        print '\t'.join((seg['chrom'], str(seg['start']), str(seg['end'])))
+        print('\t'.join((seg['chrom'], str(seg['start']), str(seg['end']))))
 
 
 if __name__ == '__main__':

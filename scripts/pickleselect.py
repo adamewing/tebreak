@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 import os
-import cPickle as pickle
+import pickle
 import argparse
 import logging
 
@@ -22,7 +22,7 @@ def main(args):
 
     insertions = []
 
-    with open(args.pickle, 'r') as pickin:
+    with open(args.pickle, 'rb') as pickin:
         insertions = pickle.load(pickin)
 
     logger.info('finished loading %s' % args.pickle)
@@ -36,7 +36,7 @@ def main(args):
 
     logger.info('kept %d records' % len(filtered))
 
-    with open(args.out, 'w') as pickout:
+    with open(args.out, 'wb') as pickout:
         pickle.dump(filtered, pickout)
 
 

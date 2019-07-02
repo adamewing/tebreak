@@ -27,7 +27,7 @@ def main(args):
         for i, line in enumerate(table):
             if i == 0:
                 header = line.strip().split('\t')
-                print line.strip()
+                print(line.strip())
 
             else:
                 rec = {}
@@ -69,7 +69,7 @@ def main(args):
                             biggest = False
 
                 if biggest:
-                    print line.strip()
+                    print(line.strip())
 
 
 if __name__ == '__main__':

@@ -2162,7 +2162,7 @@ def disco_output_cluster(cluster, forest, mapping, min_size=4):
 
         cluster_end = cluster[-1].end
 
-        bamlist = ','.join(list(set([c.bam for c in cluster])))
+        bamlist = ','.join(list(set([c.bam.decode() for c in cluster])))
 
         return DiscoInsCall(cluster, cluster_chrom, cluster_start, cluster_end, disco_infer_strand(cluster), bamlist)
 

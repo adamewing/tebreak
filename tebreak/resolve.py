@@ -569,7 +569,11 @@ def consensus(seqs, minscore=0.9):
         s1 = skseq.DNA(cons)
         s2 = skseq.DNA(seq)
 
-        aln_res = skalign.local_pairwise_align_ssw(s1, s2)
+        try:
+            aln_res = skalign.local_pairwise_align_ssw(s1, s2)
+        except IndexError:
+            continue
+
         aln_tab = aln_res[0]
 
         s1_aln, s2_aln = aln_res[2]

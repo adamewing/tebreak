@@ -368,10 +368,17 @@ class SplitCluster(ReadCluster):
             uniq_seqs = [uniq_seqs[u] for u in sorted(np.random.choice(range(len(uniq_seqs)), size=1000))]
 
         for seq in uniq_seqs[1:]:
+            cons = cons.replace('N','A') # N not allowed in conservation calculation from scikit-bio
+            seq = seq.replace('N','A')
+
             s1 = skseq.DNA(cons)
             s2 = skseq.DNA(seq)
 
-            aln_res = skalign.local_pairwise_align_ssw(s1, s2)
+            try:
+                aln_res = skalign.local_pairwise_align_ssw(s1, s2)
+            except IndexError: # scikit-bio throws this if no bases align  >:|
+                return cons, 0.0
+                
             aln_tab = aln_res[0]
 
             s1_aln, s2_aln = aln_res[2]
@@ -577,6 +584,9 @@ class Insertion:
     def tsd(self, be1_use_prox=0, be2_use_prox=0):
         ''' target site duplication '''
         if not self.paired():
+            return None
+
+        if self.breakend_overlap() is None:
             return None
  
         if self.breakend_overlap() > 0:
@@ -804,7 +814,7 @@ class Insertion:
                 return None
 
             if len(outreads) > limit:
-                sampled = random.sample(outreads, limit)
+                sampled = random.sample(list(outreads), limit)
                 subsamp = od()
 
                 for name, data in outreads.items():
@@ -963,7 +973,7 @@ class DiscoCoord:
         self.mend    = int(mend)
         self.mstrand = mstrand
         self.label   = label
-        self.bam     = bam_name
+        self.bam     = bam_name.decode()
 
         # if strand of genome element is '-', flip apparent mate strand
         elt_str = self.label.split('|')[-1]
@@ -1135,7 +1145,11 @@ def joinseqs(seq1, seq2, minscore=0.95, minlen=20):
     seq1_dna = skseq.DNA(seq1)
     seq2_dna = skseq.DNA(seq2)
 
-    aln_res = skalign.local_pairwise_align_ssw(seq1_dna, seq2_dna)
+    try:
+        aln_res = skalign.local_pairwise_align_ssw(seq1_dna, seq2_dna)
+    except IndexError:
+        return None, 0.0, 0
+
     aln_tab = aln_res[0]
 
     score = sum(aln_tab.conservation(gap_mode='include')==1.)/aln_tab.shape.position
@@ -2162,7 +2176,7 @@ def disco_output_cluster(cluster, forest, mapping, min_size=4):
 
         cluster_end = cluster[-1].end
 
-        bamlist = ','.join(list(set([c.bam.decode() for c in cluster])))
+        bamlist = ','.join(list(set([c.bam for c in cluster])))
 
         return DiscoInsCall(cluster, cluster_chrom, cluster_start, cluster_end, disco_infer_strand(cluster), bamlist)
 

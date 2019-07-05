@@ -10,7 +10,8 @@ import argparse
 import scipy.stats as ss
 import numpy as np
 
-import align
+import skbio.alignment as skalign
+import skbio.sequence as skseq
 
 from collections import Counter
 from uuid import uuid4
@@ -251,7 +252,7 @@ class SplitCluster(ReadCluster):
         self.reads.sort()
         self.start  = self.reads[0].breakpos
         self.end    = self.reads[-1].breakpos
-        self.median = self.reads[len(self)/2].breakpos
+        self.median = self.reads[int(len(self)/2)].breakpos
  
     def subcluster_by_breakend(self, breakends, direction='both'):
         ''' return a new cluster containing only reads with breakpoints in passed list '''
@@ -303,25 +304,34 @@ class SplitCluster(ReadCluster):
 
         for seq in uniq_seqs[1:]:
 
-            s1 = align.string_to_alignment(cons)
-            s2 = align.string_to_alignment(seq)
+            cons = cons.replace('N', 'A')
+            seq = cons.replace('N', 'A')
 
-            (s, a1, a2) = align.align(s1, s2, -2, -2, S, local=True)
-            a1 = align.alignment_to_string(a1)
-            a2 = ''.join([b for b in list(align.alignment_to_string(a2)) if b != '-'])
+            s1 = skseq.DNA(cons)
+            s2 = skseq.DNA(seq)
+
+            try:
+                aln_res = skalign.local_pairwise_align_ssw(s1, s2)
+            except IndexError:
+                return cons, 0.0
+
+            aln_tab = aln_res[0]
+
+            s1_aln, s2_aln = aln_res[2]
+
+            a1 = cons[s1_aln[0]:s1_aln[1]+1]
 
             score = 0.0
-            if len(a1) > 0:
-                score = float(len(a1) - (len(a1)-s)) / float(len(a1))
+            if aln_tab.shape.position > 10: # param?
+                score = sum(aln_tab.conservation(gap_mode='include')==1.)/aln_tab.shape.position
 
             if re.search(a1, cons):
-                cons_start, cons_end = locate_subseq(cons, a1)
+                cons_start, cons_end = s1_aln[0], s1_aln[1]+1
 
                 if score >= minscore and cons_end > len(cons)-5:
                     scores.append(score)
-                    align_end = locate_subseq(seq, a2)[1]
+                    align_end = s2_aln[1]+1 
                     cons += seq[align_end:]
-                    #print self.start, self.end, cons
 
         if scores:
             return cons, np.mean(scores)
@@ -373,8 +383,8 @@ def splitqual(read):
  
     breakpos = read.get_aligned_pairs()[-1][0] # breakpoint on right
  
-    q1 = map(ord, list(read.qual[:breakpos]))
-    q2 = map(ord, list(read.qual[breakpos:]))
+    q1 = list(map(ord, list(read.qual[:breakpos])))
+    q2 = list(map(ord, list(read.qual[breakpos:])))
 
     if min(q1) == max(q1) == min(q2) == max(q2):
         return 1.0
@@ -501,8 +511,7 @@ def locate_subseq(longseq, shortseq):
 def start_blat_server(blatref, port=9999):
     # parameters from https://genome.ucsc.edu/FAQ/FAQblat.html#blat5
 
-    cmd = ['gfServer', 'start', 'localhost', str(port), '-stepSize=5', blatref]
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    server_up = True
 
     dummy_fa  = '/tmp/' + str(uuid4()) + '.fa'
     dummy_psl = dummy_fa.replace('.fa', '.psl')
@@ -510,16 +519,29 @@ def start_blat_server(blatref, port=9999):
     with open(dummy_fa, 'w') as dout:
         dout.write('>\n' + 'A'*100)
 
-    server_up = False
-
     poll_cmd = ['gfClient', 'localhost', str(port), blatref, dummy_fa, dummy_psl]
     poll_time = 10
+
+    t = subprocess.Popen(poll_cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
+    for line in t.stderr:
+        line = line.decode()
+        if line.startswith('Sorry'):
+            server_up = False
+            logger.info("No BLAT server found, starting one up...")
+            cmd = ['gfServer', 'start', 'localhost', str(port), '-stepSize=5', blatref]
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        else:
+            logger.info("Found BLAT server!")
+
+
 
     while not server_up:
         started = True
         t = subprocess.Popen(poll_cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
 
         for line in t.stderr:
+            line = line.decode()
             if line.startswith('Sorry'):
                 started = False
 
@@ -528,9 +550,9 @@ def start_blat_server(blatref, port=9999):
             sleep(poll_time)
         else:
             server_up=True
-            logger.info("BLAT for %s server up with PID: %d" % (blatref, p.pid))
+            logger.info("BLAT for %s server up" % blatref)
 
-    return p
+    return port
 
 
 def blat(fasta, outpsl, port=9999, minScore=0, maxIntron=None):
@@ -660,6 +682,8 @@ def break_count(bam, chrom, poslist, minpad=5, flex=1, minmapq=10):
     refcount = 0
     discards = 0
 
+    poslist = list(poslist)
+
     tsd_start = min(poslist)
     tsd_end   = max(poslist)
 
@@ -723,7 +747,7 @@ def main(args):
 
     p = start_blat_server(args.blatref)
 
-    print '\t'.join(header)
+    print('\t'.join(header))
 
     with open(args.ins) as bed:
         for line in bed:
@@ -833,7 +857,7 @@ def main(args):
 
                 out = (chrom, start, end, orient, name, junc_5p, junc_3p, tsd_start_5p, tsd_end_5p, tsd_start_3p, tsd_end_3p, support_5p, support_3p, vaf, tsd_seq, psl_rec.cons)
 
-                print '\t'.join(map(str, out))
+                print('\t'.join(map(str, out)))
 
                  
 if __name__ == '__main__':

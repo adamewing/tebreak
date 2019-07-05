@@ -566,6 +566,9 @@ def consensus(seqs, minscore=0.9):
     align_init = False
 
     for i, seq in enumerate(uniq_seqs[1:]):
+        cons = cons.replace('N','A')
+        seq = seq.replace('N', 'A')
+
         s1 = skseq.DNA(cons)
         s2 = skseq.DNA(seq)
 

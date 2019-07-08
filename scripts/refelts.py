@@ -38,8 +38,6 @@ header = [
 'TSD_End_5p',
 'TSD_Start_3p',
 'TSD_End_3p',
-'Support_5p',
-'Support_3p',
 'VAF',
 'TSD_seq',
 'Empty_Site_Consensus'
@@ -746,17 +744,6 @@ def break_count(bam, chrom, poslist, minpad=5, flex=1, minmapq=10):
     return altcount, refcount
 
 
-def support(bam, chrom, pos, margin=10):
-    count = 0
-
-    for read in bam.fetch(chrom, pos-margin, pos+margin):
-        if not read.is_unmapped and not read.is_duplicate:
-            if read.alen == read.rlen: # not clipped:
-                if read.reference_start < pos-10 and read.reference_end > pos+10:
-                    count += 1
-        
-    return count
-
 
 def ref_ins(args, chrom, start, end, orient, name):
     bam = pysam.AlignmentFile(args.bam)
@@ -831,12 +818,8 @@ def ref_ins(args, chrom, start, end, orient, name):
             tsd_end_5p, tsd_end_3p = tsd_end_3p, tsd_end_5p
             vaf_5p, vaf_3p = vaf_3p, vaf_5p
 
-        support_5p = [str(support(bam, chrom, junc_5p))]
-        support_3p = [str(support(bam, chrom, junc_3p))]
 
         if args.persample is not None:
-            support_5p = []
-            support_3p = []
             vaf = []
 
             with open(args.persample) as samples:
@@ -853,14 +836,9 @@ def ref_ins(args, chrom, start, end, orient, name):
 
                     vaf.append('%s|%f' % (sname, svaf))
 
-                    support_5p.append('%s|%d' % (sname, support(sbam, chrom, junc_5p)))
-                    support_3p.append('%s|%d' % (sname, support(sbam, chrom, junc_3p)))
-
         vaf = ','.join(vaf)
-        support_5p = ','.join(support_5p)
-        support_3p = ','.join(support_3p)
 
-        out = (chrom, start, end, orient, name, junc_5p, junc_3p, tsd_start_5p, tsd_end_5p, tsd_start_3p, tsd_end_3p, support_5p, support_3p, vaf, tsd_seq, psl_rec.cons)
+        out = (chrom, start, end, orient, name, junc_5p, junc_3p, tsd_start_5p, tsd_end_5p, tsd_start_3p, tsd_end_3p, vaf, tsd_seq, psl_rec.cons)
 
         return out
 
@@ -868,6 +846,8 @@ def ref_ins(args, chrom, start, end, orient, name):
 
 
 def main(args):
+
+    logger.info('%s started with cmd: %s' % (sys.argv[0], ' '.join(sys.argv)))
 
     p = start_blat_server(args.blatref)
 

@@ -7,6 +7,8 @@ import re
 import subprocess
 import argparse
 
+import multiprocessing as mp
+
 import scipy.stats as ss
 import numpy as np
 
@@ -633,6 +635,12 @@ def tsd(psl, ref, b_left_init=0, b_right_init=0):
             b_left  -= 1
             b_right -= 1
 
+            if b_left < 0:
+                b_left = 0
+
+            if b_right < 0:
+                b_right = 0
+
             nt_l = ref.fetch(chrom, b_left, b_left+1)
             nt_r = ref.fetch(chrom, b_right, b_right+1)
 
@@ -649,11 +657,20 @@ def tsd(psl, ref, b_left_init=0, b_right_init=0):
         b_left += 1
         b_right += 1
 
+        if b_left < 0:
+            b_left = 0
+
+        if b_right < 0:
+            b_right = 0
+
         nt_l = ref.fetch(chrom, b_left, b_left+1)
         nt_r = ref.fetch(chrom, b_right, b_right+1)
 
     l_b_end = b_left
     r_b_end = b_right
+
+    if l_b_start < 0:
+        l_b_start = 0
 
     tsd_seq = ref.fetch(chrom, l_b_start, l_b_end)
 
@@ -741,13 +758,123 @@ def support(bam, chrom, pos, margin=10):
     return count
 
 
-def main(args):
+def ref_ins(args, chrom, start, end, orient, name):
     bam = pysam.AlignmentFile(args.bam)
     ref = pysam.Fastafile(args.fastaref)
+
+    # Find the junction
+
+    start_splits = fetch_clipped_reads(bam, chrom, start-25, start+25)
+    start_splits.sort()
+    start_clusters = build_sr_clusters(start_splits)
+    start_breaks = [build_breakends(c) for c in start_clusters]
+
+    psl_rec = None
+
+    for be in start_breaks:
+        for b in be:
+            psl_rec = eval_break(b, 'right', chrom, start, end)
+
+    if psl_rec is None:
+        end_splits = fetch_clipped_reads(bam, chrom, end-25, end+25)
+        end_splits.sort()
+        end_clusters = build_sr_clusters(end_splits)
+        end_breaks = [build_breakends(c) for c in end_clusters]
+
+        for be in end_breaks:
+            for b in be:
+                psl_rec = eval_break(b, 'left', chrom, start, end)
+
+    # Locate TSD if possible:
+    # may need to jiggle the start location for TSD search
+    tries = [[0,0], [1,1], [-1,-1], [0,-1], [-1,0], [1,0], [0,1]]
+
+    if psl_rec:
+        max_tsd = -1
+        best_tsd = []
+        while len(tries) > 0:
+            tsd_result = tsd(psl_rec, ref, b_left_init=tries[0][0], b_right_init=tries[0][1])
+            if tsd_result[1] - tsd_result[0] > max_tsd:
+                best_tsd = tsd_result
+                max_tsd = tsd_result[1] - tsd_result[0]
+            
+            if len(tries) > 1:
+                tries = tries[1:]
+
+            else:
+                tries = []
+
+        l_tsd_start, l_tsd_end, r_tsd_start, r_tsd_end, tsd_seq = best_tsd
+
+        l_refcount, l_altcount, l_vaf = getVAF(bam, chrom, (l_tsd_start, l_tsd_end))
+        r_refcount, r_altcount, r_vaf = getVAF(bam, chrom, (r_tsd_start, r_tsd_end))
+
+        vaf = ['0.0']
+        if l_altcount + r_altcount + l_refcount + r_refcount > 0:
+            vaf = [str(float(l_altcount + r_altcount) / float(l_altcount + r_altcount + l_refcount + r_refcount))]
+
+        junc_5p = l_tsd_end
+        junc_3p = r_tsd_start
+
+        tsd_start_5p = l_tsd_start
+        tsd_end_5p   = l_tsd_end
+
+        tsd_start_3p = r_tsd_start
+        tsd_end_3p   = r_tsd_end
+
+        vaf_5p = l_vaf
+        vaf_3p = r_vaf
+
+        if orient == '-':
+            junc_5p, junc_3p = junc_3p, junc_5p
+            tsd_start_5p, tsd_start_3p = tsd_start_3p, tsd_start_5p
+            tsd_end_5p, tsd_end_3p = tsd_end_3p, tsd_end_5p
+            vaf_5p, vaf_3p = vaf_3p, vaf_5p
+
+        support_5p = [str(support(bam, chrom, junc_5p))]
+        support_3p = [str(support(bam, chrom, junc_3p))]
+
+        if args.persample is not None:
+            support_5p = []
+            support_3p = []
+            vaf = []
+
+            with open(args.persample) as samples:
+                for line in samples:
+                    sbamfn, sname = line.strip().split()
+                    sbam = pysam.AlignmentFile(sbamfn)
+
+                    l_refcount, l_altcount, l_vaf = getVAF(sbam, chrom, (l_tsd_start, l_tsd_end))
+                    r_refcount, r_altcount, r_vaf = getVAF(sbam, chrom, (r_tsd_start, r_tsd_end))
+
+                    svaf = 0.0
+                    if l_altcount + r_altcount + l_refcount + r_refcount > 0:
+                        svaf = float(l_altcount + r_altcount) / float(l_altcount + r_altcount + l_refcount + r_refcount)
+
+                    vaf.append('%s|%f' % (sname, svaf))
+
+                    support_5p.append('%s|%d' % (sname, support(sbam, chrom, junc_5p)))
+                    support_3p.append('%s|%d' % (sname, support(sbam, chrom, junc_3p)))
+
+        vaf = ','.join(vaf)
+        support_5p = ','.join(support_5p)
+        support_3p = ','.join(support_3p)
+
+        out = (chrom, start, end, orient, name, junc_5p, junc_3p, tsd_start_5p, tsd_end_5p, tsd_start_3p, tsd_end_3p, support_5p, support_3p, vaf, tsd_seq, psl_rec.cons)
+
+        return out
+
+    return None
+
+
+def main(args):
 
     p = start_blat_server(args.blatref)
 
     print('\t'.join(header))
+
+    pool = mp.Pool(processes=int(args.procs))
+    results = []
 
     with open(args.ins) as bed:
         for line in bed:
@@ -757,107 +884,17 @@ def main(args):
 
             assert orient in ('+','-')
 
-            # Find the junction
+            res = pool.apply_async(ref_ins, [args, chrom, start, end, orient, name])
+            results.append(res)
 
-            start_splits = fetch_clipped_reads(bam, chrom, start-25, start+25)
-            start_splits.sort()
-            start_clusters = build_sr_clusters(start_splits)
-            start_breaks = [build_breakends(c) for c in start_clusters]
+    output = []
+    for res in results:
+        out = res.get()
+        if out is not None:
+            output.append(out)
 
-            psl_rec = None
-
-            for be in start_breaks:
-                for b in be:
-                    psl_rec = eval_break(b, 'right', chrom, start, end)
-
-            if psl_rec is None:
-                end_splits = fetch_clipped_reads(bam, chrom, end-25, end+25)
-                end_splits.sort()
-                end_clusters = build_sr_clusters(end_splits)
-                end_breaks = [build_breakends(c) for c in end_clusters]
-
-                for be in end_breaks:
-                    for b in be:
-                        psl_rec = eval_break(b, 'left', chrom, start, end)
-
-            # Locate TSD if possible:
-            # may need to jiggle the start location for TSD search
-            tries = [[0,0], [1,1], [-1,-1], [0,-1], [-1,0], [1,0], [0,1]]
-
-            if psl_rec:
-                max_tsd = -1
-                best_tsd = []
-                while len(tries) > 0:
-                    tsd_result = tsd(psl_rec, ref, b_left_init=tries[0][0], b_right_init=tries[0][1])
-                    if tsd_result[1] - tsd_result[0] > max_tsd:
-                        best_tsd = tsd_result
-                        max_tsd = tsd_result[1] - tsd_result[0]
-                    
-                    if len(tries) > 1:
-                        tries = tries[1:]
-
-                    else:
-                        tries = []
-
-                l_tsd_start, l_tsd_end, r_tsd_start, r_tsd_end, tsd_seq = best_tsd
-
-                l_refcount, l_altcount, l_vaf = getVAF(bam, chrom, (l_tsd_start, l_tsd_end))
-                r_refcount, r_altcount, r_vaf = getVAF(bam, chrom, (r_tsd_start, r_tsd_end))
-
-                vaf = ['0.0']
-                if l_altcount + r_altcount + l_refcount + r_refcount > 0:
-                    vaf = [str(float(l_altcount + r_altcount) / float(l_altcount + r_altcount + l_refcount + r_refcount))]
-
-                junc_5p = l_tsd_end
-                junc_3p = r_tsd_start
-
-                tsd_start_5p = l_tsd_start
-                tsd_end_5p   = l_tsd_end
-
-                tsd_start_3p = r_tsd_start
-                tsd_end_3p   = r_tsd_end
-
-                vaf_5p = l_vaf
-                vaf_3p = r_vaf
-
-                if orient == '-':
-                    junc_5p, junc_3p = junc_3p, junc_5p
-                    tsd_start_5p, tsd_start_3p = tsd_start_3p, tsd_start_5p
-                    tsd_end_5p, tsd_end_3p = tsd_end_3p, tsd_end_5p
-                    vaf_5p, vaf_3p = vaf_3p, vaf_5p
-
-                support_5p = [str(support(bam, chrom, junc_5p))]
-                support_3p = [str(support(bam, chrom, junc_3p))]
-
-                if args.persample is not None:
-                    support_5p = []
-                    support_3p = []
-                    vaf = []
-
-                    with open(args.persample) as samples:
-                        for line in samples:
-                            sbamfn, sname = line.strip().split()
-                            sbam = pysam.AlignmentFile(sbamfn)
-
-                            l_refcount, l_altcount, l_vaf = getVAF(sbam, chrom, (l_tsd_start, l_tsd_end))
-                            r_refcount, r_altcount, r_vaf = getVAF(sbam, chrom, (r_tsd_start, r_tsd_end))
-
-                            svaf = 0.0
-                            if l_altcount + r_altcount + l_refcount + r_refcount > 0:
-                                svaf = float(l_altcount + r_altcount) / float(l_altcount + r_altcount + l_refcount + r_refcount)
-
-                            vaf.append('%s|%f' % (sname, svaf))
-
-                            support_5p.append('%s|%d' % (sname, support(sbam, chrom, junc_5p)))
-                            support_3p.append('%s|%d' % (sname, support(sbam, chrom, junc_3p)))
-
-                vaf = ','.join(vaf)
-                support_5p = ','.join(support_5p)
-                support_3p = ','.join(support_3p)
-
-                out = (chrom, start, end, orient, name, junc_5p, junc_3p, tsd_start_5p, tsd_end_5p, tsd_start_3p, tsd_end_3p, support_5p, support_3p, vaf, tsd_seq, psl_rec.cons)
-
-                print('\t'.join(map(str, out)))
+    for out in output:
+        print('\t'.join(map(str, out)))
 
                  
 if __name__ == '__main__':
@@ -866,6 +903,7 @@ if __name__ == '__main__':
     parser.add_argument('-i', '--ins', required=True, help='insertion locations (five columns required: chrom, start, end, strand, annotation')
     parser.add_argument('-r', '--blatref', required=True, help='BLAT reference')
     parser.add_argument('-f', '--fastaref', required=True, help='samtools faidx indexed genome fasta')
+    parser.add_argument('-p', '--procs', default=1, help='split work across multiple processes')
     parser.add_argument('--port', default=9999)
     parser.add_argument('--persample', default=None, help='List of files (2 column: BAM, Name) for per-sample information')
     args = parser.parse_args()

@@ -626,7 +626,7 @@ class Insertion:
         ''' add supporting read count, VAF for each BAM '''
         if self.tsd():
             for bam in bams:
-                self.genotypes.append([os.path.basename(bam.filename)] + list(getVAF(bam, self.be1.chrom, (self.be1.breakpos, self.be2.breakpos))))
+                self.genotypes.append([os.path.basename(bam.filename.decode())] + list(getVAF(bam, self.be1.chrom, (self.be1.breakpos, self.be2.breakpos))))
 
 
     def fetch_discordant_reads(self, bams, isize=10000, debug=True, logger=None, max_fetch=50):
@@ -655,13 +655,13 @@ class Insertion:
                     chrom = str(bam.getrname(read.tid))
          
                     if read.mate_is_unmapped:
-                        bam_unmapped[read.qname] = DiscoRead(chrom, read, bam.filename)
+                        bam_unmapped[read.qname] = DiscoRead(chrom, read, bam.filename.decode())
          
                     else:
                         pair_dist = abs(read.reference_start - read.next_reference_start)
                         if read.tid != read.next_reference_id or pair_dist > isize:
                             mate_chrom = str(bam.getrname(read.next_reference_id))
-                            bam_mapped[read.qname] = DiscoRead(chrom, read, bam.filename, mate_chrom)
+                            bam_mapped[read.qname] = DiscoRead(chrom, read, bam.filename.decode(), mate_chrom)
 
             #if logger and debug:
                 #logger.debug('Ins %s: fetch discordant from BAM %s: %d mapped, %d unmapped' % (ins_debug_name, bam.filename, len(bam_mapped), len(bam_unmapped)))
@@ -1249,7 +1249,7 @@ def fetch_clipped_reads(bams, chrom, start, end, filters, logger=None, limit=500
                             position_counter[read.get_reference_positions()[-1]] += 1
                             
                             if len(read.get_reference_positions()) > 0 and not limited:
-                                splitreads.append(SplitRead(chrom, read, bam.filename, minqual))
+                                splitreads.append(SplitRead(chrom, read, bam.filename.decode(), minqual))
                                 #print read.qname, read.cigarstring, N_count, splitqual(read), filters['min_MW_P']
                                 #print read.qual
                         else:
@@ -2146,7 +2146,7 @@ def disco_get_coords(forest, bams, logger, chrom=None, start=None, end=None, min
 
                     if mchrom in forest:
                         for rec in forest[mchrom].find(mstart, mend):
-                            coords.append(DiscoCoord(rchrom, rstart, rend, rstr, mchrom, mstart, mend, mstr, rec.value, os.path.basename(bam.filename)))
+                            coords.append(DiscoCoord(rchrom, rstart, rend, rstr, mchrom, mstart, mend, mstr, rec.value, os.path.basename(bam.filename.decode())))
                             break
 
             if i % tick == 0:

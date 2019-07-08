@@ -431,7 +431,7 @@ def extend_consensus(ins, bam):
 
     ctglen = dict(zip(bam.references, bam.lengths))
 
-    covered_segs = get_covered_segs(bam.filename, mindepth=2)
+    covered_segs = get_covered_segs(bam.filename.decode(), mindepth=2)
 
     mq = tebreak.guess_minqual(bam)
 

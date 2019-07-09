@@ -599,7 +599,7 @@ def eval_break(breakend, direct, elt_chrom, elt_start, elt_end):
     return out_psl
 
 
-def tsd(psl, ref, b_left_init=0, b_right_init=0):
+def tsd(psl, ref, b_left_init=0, b_right_init=0, max_iter=100):
     b_left_pos  = b_left_init
     b_right_pos = b_right_init
 
@@ -629,7 +629,8 @@ def tsd(psl, ref, b_left_init=0, b_right_init=0):
         return b_left, b_left, b_right, b_right, 'NA'
 
     else:
-        while nt_l == nt_r:
+        i = 0
+        while nt_l == nt_r and i < max_iter:
             b_left  -= 1
             b_right -= 1
 
@@ -639,8 +640,13 @@ def tsd(psl, ref, b_left_init=0, b_right_init=0):
             if b_right < 0:
                 b_right = 0
 
+            i += 1
+
             nt_l = ref.fetch(chrom, b_left, b_left+1)
             nt_r = ref.fetch(chrom, b_right, b_right+1)
+
+    if i >= max_iter:
+        return b_left, b_left, b_right, b_right, 'NA'
 
     l_b_start = b_left+1
     r_b_start = b_right+1
@@ -651,7 +657,9 @@ def tsd(psl, ref, b_left_init=0, b_right_init=0):
     nt_l = ref.fetch(chrom, b_left, b_left+1)
     nt_r = ref.fetch(chrom, b_right, b_right+1)
 
-    while nt_l == nt_r:
+    i = 0
+
+    while nt_l == nt_r and i < max_iter:
         b_left += 1
         b_right += 1
 
@@ -661,8 +669,13 @@ def tsd(psl, ref, b_left_init=0, b_right_init=0):
         if b_right < 0:
             b_right = 0
 
+        i += 1
+
         nt_l = ref.fetch(chrom, b_left, b_left+1)
         nt_r = ref.fetch(chrom, b_right, b_right+1)
+
+    if i >= max_iter:
+        return b_left, b_left, b_right, b_right, 'NA'
 
     l_b_end = b_left
     r_b_end = b_right
@@ -790,6 +803,7 @@ def ref_ins(args, chrom, start, end, orient, name):
 
             else:
                 tries = []
+
 
         l_tsd_start, l_tsd_end, r_tsd_start, r_tsd_end, tsd_seq = best_tsd
 

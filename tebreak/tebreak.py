@@ -1234,7 +1234,7 @@ def fetch_clipped_reads(bams, chrom, start, end, filters, logger=None, limit=500
                     if 'N' in read.seq: N_count = Counter(read.seq)['N']
      
                     if altclip <= 2: # could add as a filter
-                        if N_count <= filters['max_N_consensus'] and splitqual(read) >= filters['min_MW_P']:
+                        if N_count <= filters['max_N_consensus'] and splitqual(read) >= filters['min_MW_P'] and len(read.get_reference_positions()) > 0:
                             chrom = str(bam.getrname(read.tid))
 
                             limited = False

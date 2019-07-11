@@ -12,7 +12,7 @@ def main(args):
         for i, line in enumerate(table):
             if i == 0:
                 header = line.strip().split('\t')
-                print line.strip()
+                print(line.strip())
 
             else:
                 rec = {}

@@ -13,7 +13,7 @@ def main(args):
             if line.startswith('UUID'):
                 header = line.strip().split()
                 header.append(args.name)
-                print '\t'.join(header)
+                print('\t'.join(header))
                 continue
 
             c = line.strip().split()

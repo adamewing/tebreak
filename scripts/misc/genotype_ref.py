@@ -76,7 +76,7 @@ def main(args):
 
     print('##fileformat=VCFv4.1')
 
-    vcf_cols = ['#CHROM', 'POS ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO', 'FORMAT']
+    vcf_cols = ['#CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO', 'FORMAT']
 
     bams = []
     with open(args.bamlist) as _:
@@ -97,7 +97,7 @@ def main(args):
 
             info = 'ELT=%s;ORIENT=%s' % (rec['Name'], rec['Orientation'])
 
-            vcf_line = [rec['Chromosome'], str(rec['TSD_Start_5p']), '.', rec['TSD_seq'][0], '<INS>', '100', 'PASS', info, 'GT:DS']
+            vcf_line = [rec['Chromosome'], str(rec['TSD_Start_5p']), '.', 'REF', 'ALT', '100', 'PASS', info, 'GT:DS']
 
             for bam_fn in bams:
                 bam = pysam.AlignmentFile(bam_fn)
@@ -107,7 +107,10 @@ def main(args):
 
                 alt_total = vaf_5p[0] + vaf_3p[0]
                 ref_total = vaf_5p[1] + vaf_3p[1]
-                vaf_total = float(alt_total)/float(alt_total+ref_total)
+                vat_total = 0.0
+
+                if alt_total + ref_total > 0:
+                    vaf_total = float(alt_total)/float(alt_total+ref_total)
 
                 dose = 0.0
                 gt = './.'

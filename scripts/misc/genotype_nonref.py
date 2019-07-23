@@ -76,7 +76,7 @@ def main(args):
 
     print('##fileformat=VCFv4.1')
 
-    vcf_cols = ['#CHROM', 'POS ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO', 'FORMAT']
+    vcf_cols = ['#CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO', 'FORMAT']
 
     bams = []
     with open(args.bamlist) as _:
@@ -94,9 +94,9 @@ def main(args):
         for rec in csv_reader:
             tsd = list(map(int, [rec['5_Prime_End'], rec['3_Prime_End']]))
 
-            info = 'ELT=%s;ORIENT=%s' % (rec['Subfamily'], rec['Orient_5p'])
+            info = 'ELT=%s;ORIENT=%s' % (rec['Subfamily'], rec['Orient_3p'])
 
-            vcf_line = [rec['Chromosome'], str(rec['5_Prime_End']), '.', 'A', '<INS>', '100', 'PASS', info, 'GT:DS'] # fix the 'A'?
+            vcf_line = [rec['Chromosome'], str(rec['5_Prime_End']), '.', 'REF', 'ALT', '100', 'PASS', info, 'GT:DS'] # fix the 'A'?
 
             for bam_fn in bams:
                 bam = pysam.AlignmentFile(bam_fn)

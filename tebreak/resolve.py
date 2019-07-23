@@ -1062,7 +1062,7 @@ def bwa_locate(seq, refgenome, tmpdir='/tmp'):
     return locs
 
 
-def exonerate_align(qryseq, refseq, tmpdir='/tmp'):
+def exonerate_align(qryseq, refseq, tmpdir='/tmp', minmatch=90.0):
     rnd = str(uuid4())
     tgtfa = tmpdir + '/tmp.' + rnd + '.tgt.fa'
     qryfa = tmpdir + '/tmp.' + rnd + '.qry.fa'
@@ -1076,7 +1076,7 @@ def exonerate_align(qryseq, refseq, tmpdir='/tmp'):
     tgt.close()
     qry.close()
 
-    cmd = ['exonerate', '--bestn', '1', '-m', 'ungapped', '--showalignment', '1', '--ryo', 'ALN' + '\t%s\t%qab\t%qae\t%tab\t%tae\t%tS\t%pi\n', qryfa, tgtfa]
+    cmd = ['exonerate', '--bestn', '1', '-m', 'ungapped', '--showalignment', '1', '--ryo', 'ALN' + '\t%s\t%qab\t%qae\t%tab\t%tae\t%pi\t%qS\t%tS\n', qryfa, tgtfa]
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     best = []
@@ -1086,7 +1086,7 @@ def exonerate_align(qryseq, refseq, tmpdir='/tmp'):
         pline = pline.decode()
         if pline.startswith('ALN'):
             c = pline.strip().split()
-            if int(c[1]) > topscore:
+            if int(c[1]) > topscore and float(c[6]) >= minmatch:
                 topscore = int(c[1])
                 best = c
 

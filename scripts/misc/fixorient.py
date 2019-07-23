@@ -46,6 +46,7 @@ def align(qryseq, refseq, elt='PAIR', minmatch=90.0):
     topscore = 0
 
     for pline in p.stdout.readlines():
+        pline = pline.decode()
         if pline.startswith(elt):
             c = pline.strip().split()
             if int(c[1]) > topscore and float(c[6]) >= minmatch:
@@ -125,7 +126,7 @@ def main(args):
         for i, line in enumerate(table):
             if i == 0:
                 header = line.strip().split('\t')
-                print line.strip()
+                print(line.strip())
 
             else:
                 rec = {}
@@ -246,7 +247,7 @@ def main(args):
 
                 out = [rec[h] for h in header]
 
-                print '\t'.join(out)
+                print('\t'.join(out))
                 
     logger.info('Changed orientation on %d 5p ends' % count_5p_diff)
     logger.info('Changed orientation on %d 3p ends' % count_3p_diff)

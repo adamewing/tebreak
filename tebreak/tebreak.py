@@ -2146,7 +2146,7 @@ def disco_get_coords(forest, bams, logger, chrom=None, start=None, end=None, min
 
                     if mchrom in forest:
                         for rec in forest[mchrom].find(mstart, mend):
-                            coords.append(DiscoCoord(rchrom, rstart, rend, rstr, mchrom, mstart, mend, mstr, rec.value, os.path.basename(bam.filename.decode())))
+                            coords.append(DiscoCoord(rchrom, rstart, rend, rstr, mchrom, mstart, mend, mstr, rec.value, os.path.basename(bam.filename)))
                             break
 
             if i % tick == 0:

@@ -4,7 +4,7 @@ class MyTestCase(unittest.TestCase):
 
   def test_equal_output(self):
     expected = open("example.tab.reference.txt")
-    output = open("example.tab.txt")
+    output = open("example.table.txt")
     
     self.assertEqual(len(expected.readlines()), len(output.readlines()))
 

@@ -344,9 +344,6 @@ class SplitCluster(ReadCluster):
 
         np.random.seed(seed)
 
-        #S = -np.ones((256, 256)) + 2 * np.identity(256)
-        #S = S.astype(np.int16)
-
         minqual = self.reads[0].minqual
 
         sortable_reads = [SortableRead(sr.read) for sr in self.reads]
@@ -462,9 +459,6 @@ class BreakEnd:
         self.direction = direction
  
         self.mappings = []
- 
-    def microhomology(self):
-        pass # placeholder
  
     def proximal_subread(self):
         ''' return mapping(s) containing breakpoint '''
@@ -1434,17 +1428,6 @@ def orient_subseq(longseq, shortseq):
         return rc(shortseq)
  
  
-# def locate_subseq(longseq, shortseq):
-#     ''' return (start, end) of shortseq in longseq '''
-#     assert len(longseq) >= len(shortseq), 'orient_subseq: %s < %s' % (longseq, shortseq)
- 
-#     match = re.search(shortseq, longseq)
-#     if match is not None:
-#         return sorted((match.start(0), match.end(0)))
- 
-#     return None
- 
- 
 def is_primary(read):
     ''' not included in pysam '''
     return not (read.is_secondary or is_supplementary(read))
@@ -1569,12 +1552,6 @@ def fetch_clipped_reads(bams, chrom, start, end, filters, logger=None, limit=500
                             
                             if len(read.get_reference_positions()) > 0 and not limited:
                                 splitreads.append(SplitRead(chrom, read, bam.filename.decode(), minqual))
-                                #print read.qname, read.cigarstring, N_count, splitqual(read), filters['min_MW_P']
-                                #print read.qual
-                        else:
-                            #print read.qname, read.cigarstring, N_count, splitqual(read), filters['min_MW_P']
-                            #print read.qual
-                            pass
 
     if logger:
         logger.debug('Chunk %s:%d-%d: masked %d reads due to -m/--mask' % (chrom, start, end, masked_read_count))
@@ -1676,8 +1653,7 @@ def build_breakends(cluster, filters, tmpdir='/tmp'):
 
                 if seq != '' and score >= filters['min_consensus_score'] and N_count <= filters['max_N_consensus']:
                     breakends.append(BreakEnd(cluster.chrom, breakpos, subcluster, seq, score, dir))
-                #else:
-                    #print 'filtered:',breakpos,score
+
  
     return breakends
 
@@ -1788,8 +1764,6 @@ def score_breakend_pair(be1, be2, k=2.5, s=3.0):
 
         score = weighted_overlap - distance_penalty + len(be1) + len(be2)
 
-        #print str(be1), str(be1), score
-
         return score
  
     return None
@@ -1889,7 +1863,6 @@ def minia(fq, tmpdir='/tmp', rescue_asm=False):
     os.chdir(oldcwd)
     os.rmdir(tmpcwd)
 
-    #return ctgbase + '.contigs.fa'
     return concat_fa(ctg_fa_list, tmpdir=tmpdir)
 
 
@@ -1994,7 +1967,6 @@ def break_count(bam, chrom, poslist, minpad=5, flex=1, minmapq=10):
             altcount += 1
 
         else:
-            #for pos in poslist: # does this read span a breakpoint in the list?
             if read.alen == len(read.seq):
                 if read.reference_start < tsd_start and read.reference_end > tsd_end: # span TSD
                     refcount += 1
@@ -2110,7 +2082,6 @@ def postprocess_insertions(insertions, filters, bwaref, bams, tmpdir='/tmp', gen
             sys.stderr.write('***Assembly failed!: %s:%d\n' % (ins.be1.chrom, ins.be1.breakpos))
 
         else:
-            #sys.stderr.write('Assembled: %s:%d, filename: %s from %s\n' % (ins.be1.chrom, ins.be1.breakpos, support_asm, support_fq))
             ins.improve_consensus(support_asm, bwaref, tmpdir=tmpdir)
 
         if os.path.exists(support_fq): os.remove(support_fq)
@@ -2545,7 +2516,7 @@ def tebreak(args):
         logger.info("loading bwa index %s into shared memory ..." % args.bwaref)
         p = subprocess.Popen(['bwa', 'shm', args.bwaref], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         for line in p.stdout: pass # wait for bwa to load
-        logger.debug("loaded.")
+        logger.info("loaded.")
 
     ''' Chunk genome or use input BED '''
     
@@ -2582,50 +2553,52 @@ def tebreak(args):
         sys.exit('No entries in -b/--bam input .txt: %s' % args.bam)
 
     if args.interval_bed is None:
-        if args.interval_bed is None:
-            chunks = genome.chunk(chunk_count, sorted=True, pad=5000)
+        chunks = genome.chunk(chunk_count, sorted=True, pad=5000)
 
-            if args.disco_target is not None:
-                chunks = genome.chunk(procs, pad=5000)
+        if args.disco_target is not None:
+            logger.info('discordant targets in: %s' % args.disco_target)
+            chunks = genome.chunk(procs, pad=5000)
 
-                chunkout = re.sub('.bam$', '.tebreak.chunklist.out', os.path.basename(bamlist[0]))
+            chunkout = re.sub('.bam$', '.tebreak.chunklist.out', os.path.basename(bamlist[0]))
 
-                with open(chunkout, 'w') as bugout:
-                    for c in chunks:
-                        bugout.write('\t'.join(map(str, c)) + '\n')
+            with open(chunkout, 'w') as bugout:
+                for c in chunks:
+                    bugout.write('\t'.join(map(str, c)) + '\n')
 
-                reslist = []
-                for i, chunk in enumerate(chunks, 1):
-                    res = pool.apply_async(disco_run_chunk, [args, chunk])
-                    reslist.append(res)
+            reslist = []
+            for i, chunk in enumerate(chunks, 1):
+                res = pool.apply_async(disco_run_chunk, [args, chunk])
+                reslist.append(res)
 
-                ins_list = []
-                for res in reslist:
-                    ins_list += res.get()
+            ins_list = []
+            for res in reslist:
+                ins_list += res.get()
 
-                ins_list = disco_resolve_dups(ins_list)
+            ins_list = disco_resolve_dups(ins_list)
 
-                chunks = []
+            chunks = []
 
-                discfn = re.sub('.bam$', '.tebreak.disc.txt', os.path.basename(bamlist[0]))
+            discfn = re.sub('.bam$', '.tebreak.disc.txt', os.path.basename(bamlist[0]))
 
-                if args.disc_out:
-                    discfn = args.disc_out
+            if args.disc_out:
+                discfn = args.disc_out
 
-                with open(discfn, 'w') as disc_out:
-                    for i in ins_list:
-                        disc_out.write(i.out(pad=500) + '\n')
-                        chunks.append((i.chrom, i.start-500, i.end+500))
+            with open(discfn, 'w') as disc_out:
+                for i in ins_list:
+                    disc_out.write(i.out(pad=500) + '\n')
+                    chunks.append((i.chrom, i.start-500, i.end+500))
 
-                if args.disc_only:
-                    sys.exit('quitting due to --disc_only, discordant cluster locations are in %s' % discfn)
+            if args.disc_only:
+                sys.exit('quitting due to --disc_only, discordant cluster locations are in %s' % discfn)
 
 
     if args.interval_bed is not None:
+        logger.info('interval .bed: %s' % args.interval_bed)
         with open(args.interval_bed, 'r') as bed:
             chunks = [(line.strip().split()[0], int(line.strip().split()[1]), int(line.strip().split()[2])) for line in bed]
 
         if args.disco_target is not None:
+            logger.info('discordant targets in: %s' % args.disco_target)
             reslist = []
             for i, chunk in enumerate(chunks, 1):
                 res = pool.apply_async(disco_run_chunk, [args, chunk])
@@ -2737,8 +2710,6 @@ def extend_consensus(ins, bam):
 
     mq = guess_minqual(bam)
 
-    #print covered_segs
-
     if len(covered_segs) > 0:
 
         for be in ('be1', 'be2'):
@@ -2751,17 +2722,12 @@ def extend_consensus(ins, bam):
                 else: # 5'
                     seg = covered_segs[0]
 
-                #print ins['INFO']['ins_uuid'], be, 'seg', str(seg)
-
                 seqs = [unequal_qualtrim(read, ctglen[seg['chrom']], minqual=mq) for read in bam.fetch(seg['chrom'], seg['start'], seg['end'])]
                 seqs = [s for s in seqs if len(s) > 50]
-
-                #print '***debug, cons:', be, ins['INFO'][be+'_is_3prime']
 
                 best_cons_seq = 'NA'
                 best_cons_score = 0.0
 
-                #for sc_thresh in [0.95, 0.92, 0.9, 0.85]:
                 for sc_thresh in [0.95, 0.92]:
                     te_cons_seq, te_cons_score = consensus(seqs, minscore=sc_thresh)
                     if len(te_cons_seq)*te_cons_score**2 > len(best_cons_seq)*best_cons_score**2:
@@ -2843,9 +2809,6 @@ def unequal_qualtrim(read, ctglen, chopclip=False, minqual=35):
 
 def consensus(seqs, minscore=0.9):
     ''' build consensus from sorted aligned reads iteratively, expects seqs to be sorted in ref genome order '''
-
-    #S = -np.ones((256, 256)) + 2 * np.identity(256)
-    #S = S.astype(np.int16)
 
     if len(seqs) == 0:
         return '', 0.0
@@ -3358,9 +3321,6 @@ def resolve_insertion(args, ins, inslib_fa):
         last_res = last_alignment(ins, inslib_fa)
         ins = add_insdata(ins, last_res)
         ins['INFO']['inslib_fa'] = inslib_fa
-
-        # DEBUG POINT
-        #print ins['INFO']['best_ins_matchpct']
 
         if 'best_ins_matchpct' in ins['INFO'] and ins['INFO']['best_ins_matchpct'] >= float(args.min_ins_match):
             tmp_bam = remap_discordant(ins, inslib_fa=inslib_fa, tmpdir=args.refoutdir)

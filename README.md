@@ -53,12 +53,16 @@ git checkout v2.4.0
 autoreconf -i
 ./configure && make && make check && make install
 ```
+# Install
+```
+python setup.py install
+```
 
 # Test your installation
 Assuming `$TB` is the tebreak directory created by `git clone` or unzipping/untarballing an archive:
 
 ```
-$TB/tebreak/tebreak.py -b $TB/test/data/example.ins.bam -r $TB/test/data/Homo_sapiens_chr4_50000000-60000000_assembly19.fasta -i $TB/lib/teref.human.fa
+tebreak -b $TB/test/data/example.ins.bam -r $TB/test/data/Homo_sapiens_chr4_50000000-60000000_assembly19.fasta -i $TB/lib/teref.human.fa
 ```
 
 This will generate some output to the terminal and the following files should exist in your working directory:
@@ -100,18 +104,18 @@ cd $TB/lib
 
 Additionally, it may be helpful to build a mappability index using the `./human_mappability.sh` script, but it is not required for this example.
 
-## Run tebreak.py
+## Run tebreak
 Note that the BAM file (`$BAM`) passed to -b can be a comma delimited list of BAM files or a `.txt` file containing a list of BAM files.
 
 ```
-$TB/tebreak/tebreak.py -b $BAM -r $REF -p $THREADS -d $TB/lib/hg19.te.disctgt.txt -m $TB/lib/hg19.centromere_telomere.bed --max_ins_reads 500 -i $TB/lib/teref.human.fa 
+tebreak -b $BAM -r $REF -p $THREADS -d $TB/lib/hg19.te.disctgt.txt -m $TB/lib/hg19.centromere_telomere.bed --max_ins_reads 500 -i $TB/lib/teref.human.fa 
 ```
 
 ## Filter the output (optional)
-The results table output by `resolve.py` (`$TABLE`) will contain false positives. If desired, it is possible reduce this with an included script at some cost in terms of sensitivity.
+The results table (`$TABLE`) will contain false positives. If desired, it is possible reduce this with an included script at some cost in terms of sensitivity.
 
 ```
-/path/to/tebreak/scripts/general_filter.py -t $TABLE -i $TB/lib/teref.human.fa -r $REF --numsplit 4 --numdiscord 4 > $FILTEREDTABLE
+$TB/scripts/general_filter.py -t $TABLE -i $TB/lib/teref.human.fa -r $REF --numsplit 4 --numdiscord 4 > $FILTEREDTABLE
 ```
 
 ## Annotate the output (optional)

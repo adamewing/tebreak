@@ -2,7 +2,7 @@
 
 import sys
 import subprocess
-from setuptools import setup
+from setuptools import setup, find_packages
 
 def check_bwa():
     p = subprocess.Popen(['bwa'], stderr=subprocess.PIPE)
@@ -78,7 +78,8 @@ setup(
     description=("Insertion finder for high throughput sequence data"),
     license='MIT',
     url='https://github.com/adamewing/tebreak',
-    packages=['tebreak'],
+    scripts=['tebreak/tebreak'],
+    packages=find_packages(),
     install_requires = [
         'pysam>=0.8.1',
         'bx-python>=0.5.0',

@@ -1834,7 +1834,7 @@ def postprocess_insertions(insertions, filters, bwaref, bams, tmpdir='/tmp', gen
 
 
 
-def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
+def run_chunk(args, bamlist, chrom, start, end):
     logger = logging.getLogger(__name__)
     if args.debug:
         logger.setLevel(logging.DEBUG)
@@ -1893,7 +1893,6 @@ def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
             'min_split_reads':       int(args.min_split_reads),
             'min_prox_mapq':         int(args.min_prox_mapq),
             'max_N_consensus':       int(args.max_N_consensus),
-            'max_rpkm':              0,
             'exclude_bam':           [],
             'exclude_readgroup':     [],
             'max_bam_count':         int(args.max_bam_count),
@@ -1902,7 +1901,6 @@ def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
             'min_mappability':       float(args.min_mappability)
         }
 
-        if args.max_fold_rpkm is not None: filters['max_rpkm'] = int(args.max_fold_rpkm)*exp_rpkm
         if args.exclude_bam is not None: filters['exclude_bam'] = list(map(os.path.basename, args.exclude_bam.split(',')))
         if args.exclude_readgroup is not None: filters['exclude_readgroup'] = args.exclude_readgroup.split(',')
 
@@ -1922,39 +1920,8 @@ def run_chunk(args, bamlist, exp_rpkm, chrom, start, end):
         breakends = []
 
         for cluster in clusters:
-            cl_readcount = 0
             cl_min, cl_max = cluster.find_extrema()
-
-            rpkm = 0
-
-            if len(cluster.reads) > int(args.bigcluster):
-                logger.warning('Warning, big cluster: %d reads at %s:%d-%d' % (len(cluster.reads), cluster.chrom, cluster.start, cluster.end))
-                if args.skipbig:
-                    logger.warning('Skipped cluster due to --skipbig: %s:%d-%d' % (cluster.chrom, cluster.start, cluster.end))
-                    continue
-
-            over_rpkm = False
-            rpkm = 0
-            cl_readcount = 0
-
-            if args.max_fold_rpkm is not None:
-
-                for bam in bams:
-                    #cl_readcount += sum([not read.is_unmapped for read in bam.fetch(cluster.chrom, cl_min, cl_max)])
-                    for read in bam.fetch(cluster.chrom, cl_min, cl_max):
-                        if not read.is_unmapped:
-                            cl_readcount += 1
-                            rpkm = cl_readcount/((cl_max-cl_min)/1000.)
-                            if rpkm > filters['max_rpkm']:
-                                over_rpkm = True
-                                break
-
-            #if filters['max_rpkm'] == 0 or rpkm < filters['max_rpkm']:
-            if filters['max_rpkm'] == 0 or not over_rpkm:
-                breakends += build_breakends(cluster, filters, tmpdir=args.tmpdir)
-
-            else:
-                logger.debug('Chunk %s, cluster %d-%d over max RPKM (%f)' % (chunkname, cl_min, cl_max, rpkm))
+            breakends += build_breakends(cluster, filters, tmpdir=args.tmpdir)
 
         logger.debug('Chunk %s: Mapping %d breakends ...' % (chunkname, len(breakends)))
         if len(breakends) > 0:
@@ -2051,34 +2018,6 @@ def text_summary(insertions, cmd=None, outfile='tebreak.out'):
                 out.write('#END\n')
 
                 out.write('\n')
-
-
-def expected_rpkm(bam_files, genome, intervals=None):
-    ''' expected reads per kilobase mapped '''
-    bams = [pysam.AlignmentFile(bam_file, 'rb') for bam_file in bam_files]
-    total_mapped_reads = sum([bam.mapped for bam in bams])
-    km = genome.bp/1000.
-
-    if intervals is not None:
-        total_length = 0
-        total_mapped_reads = 0
-
-        with open(intervals, 'r') as bed:
-            for line in bed:
-                chrom, start, end = line.strip().split()[:3]
-                start = int(start)
-                end   = int(end)
-
-                total_length += end - start
-
-                for bam in bams:
-                    total_mapped_reads += sum([not read.is_unmapped for read in bam.fetch(chrom, start, end)])
-
-        km = total_length/1000.
-
-    for bam in bams: bam.close()
-
-    return total_mapped_reads/km
 
 
 ## imported from discocluster.py
@@ -2314,8 +2253,6 @@ def main(args):
     genome = Genome(args.bwaref + '.fai', skip_chroms)
 
     chunks = []
-    exp_rpkm = 0
-
     bamlist = []
 
     if args.bam.endswith('.bam'):
@@ -2372,13 +2309,6 @@ def main(args):
                     sys.exit('quitting due to --disc_only, discordant cluster locations are in %s' % discfn)
 
 
-    if args.max_fold_rpkm is not None:
-        exp_rpkm = expected_rpkm(bamlist, genome)
-
-        logger.info('mean rpkm: %f' % exp_rpkm)
-        logger.info('set rpkm cutoff for clusters: %f' % (exp_rpkm*float(args.max_fold_rpkm)))
-
-
     if args.interval_bed is not None:
         with open(args.interval_bed, 'r') as bed:
             chunks = [(line.strip().split()[0], int(line.strip().split()[1]), int(line.strip().split()[2])) for line in bed]
@@ -2418,7 +2348,7 @@ def main(args):
     pct = int(len(chunks)*.01)+1
 
     for i, chunk in enumerate(chunks, 1):
-        res = pool.apply_async(run_chunk, [args, bamlist, exp_rpkm, chunk[0], chunk[1], chunk[2]])
+        res = pool.apply_async(run_chunk, [args, bamlist, chunk[0], chunk[1], chunk[2]])
         reslist.append(res)
 
     insertions = []
@@ -2467,8 +2397,6 @@ if __name__ == '__main__':
     parser.add_argument('--min_consensus_score', default=0.9, help='quality of consensus alignment (default = 0.9)')
     parser.add_argument('-m', '--mask', default=None, help='BED file of masked regions')
     parser.add_argument('--skip_chroms', default=None, help='skip chromsomes when finding discordant targets (.txt file)')
-
-    parser.add_argument('--max_fold_rpkm', default=None, help='ignore insertions supported by rpkm*max_fold_rpkm reads (default = None (no filter))')
     parser.add_argument('--max_ins_reads', default=100000, help='maximum number of reads to use per insertion call (default = 100000)')
     parser.add_argument('--min_split_reads', default=4, help='minimum total split reads per insertion call (default = 4)')
     parser.add_argument('--min_prox_mapq', default=10, help='minimum map quality for proximal subread (default = 10)')
@@ -2480,14 +2408,10 @@ if __name__ == '__main__':
     parser.add_argument('--min_mappability', default=0.1, help='minimum mappability (default = 0.1; only matters with --map_tabix)')
     parser.add_argument('--max_disc_fetch', default=50, help='maximum number of discordant reads to fetch per insertion site per BAM (default = 50)')
     parser.add_argument('--min_disc_reads', default=4, help='if using -d/--disco_target, minimum number of discordant reads to trigger a call (default = 4)')
-    parser.add_argument('--bigcluster', default=50000, help='set big cluster warning threshold (default = 50000)')
-    parser.add_argument('--skipbig', action='store_true', default=False, help='drop clusters over size set by --bigcluster')
-
     parser.add_argument('--tmpdir', default='/tmp', help='temporary directory (default = /tmp)')
     parser.add_argument('--pickle', default=None, help='pickle output name')
     parser.add_argument('--detail_out', default=None, help='file to write detailed output')
     parser.add_argument('--disc_out', default=None, help='file to write discordant cluster output')
-
     parser.add_argument('--disc_only', action='store_true', help='only identify discordant clusters and exit (does not run tebreak)')
     parser.add_argument('--rescue_asm', action='store_true', help='try harder to improve consensus (warning: may cause chimeras)', default=False)
     parser.add_argument('--skipshm', action='store_true', help='dont load bwa index into shared memory (warning: may increase runtime)')

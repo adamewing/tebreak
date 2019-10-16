@@ -3576,6 +3576,9 @@ def resolve(args):
     logger.info('prefiltered candidate count: %d' % len(insertions))
     logger.info('prepare reference %s...' % args.inslib_fasta)
 
+    if args.refoutdir is None:
+        args.refoutdir = '.'.join(args.pickle.split('.')[:-1]) + '.tebreak_refs'
+
     inslib_fa = prepare_ref(args.inslib_fasta, refoutdir=args.refoutdir, makeFAI=args.callmuts, makeBWA=False, usecached=args.usecachedLAST)
 
     results = []
@@ -3721,7 +3724,7 @@ if __name__ == '__main__':
     parser.add_argument('--min_cons_len', default=250, help='(output) min total consensus length (default=250)')
     parser.add_argument('--ignore_filters', action='store_true', default=False, help='(output) unfiltered mode')
     parser.add_argument('-a', '--annotation_tabix', default=None, help="(output) can be comma-delimited list")
-    parser.add_argument('--refoutdir', default='tebreak_refs', help="output directory for generating tebreak references (default=tebreak_refs)")
+    parser.add_argument('--refoutdir', default=None, help="output directory for generating tebreak references (default=input basename)")
     parser.add_argument('--use_rg', action='store_true', default=False, help="(output) use RG instead of BAM filename for samples")
     parser.add_argument('--keep_all_tmp_bams', action='store_true', default=False, help="leave ALL temporary BAMs (warning: lots of files!)")
     #parser.add_argument('--detail_out', default=None, help="file to write detailed output")

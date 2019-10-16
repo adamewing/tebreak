@@ -421,6 +421,9 @@ def fetch_clipped_reads(bam, chrom, start, end):
 
     minqual = guess_minqual(bam) # used for quality trimming when building consensus
 
+    if chrom not in bam.references:
+        return splitreads
+
     for read in bam.fetch(chrom, start, end):
 
         if not read.is_unmapped and not read.is_duplicate and read.mapq > 0:

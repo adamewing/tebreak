@@ -545,6 +545,19 @@ class Insertion:
         if self.be2 is not None: l += len(self.be2.cluster)
         return l
 
+    def max_sr_per_bam(self):
+        ''' return max number of split reads for an individual bam '''
+        sr_per_bam = dd(int) 
+
+        for be in (self.be1, self.be2):
+            if be is not None:
+                for sr in be.cluster.reads:
+                    sr_per_bam[sr.bamfn] += 1
+
+        max_sr = [[k,v] for k, v in sorted(sr_per_bam.items(), key=lambda item: item[1], reverse=True)][0][1]
+
+        return max_sr
+
     def paired(self):
         return None not in (self.be1, self.be2)
  
@@ -2030,6 +2043,10 @@ def filter_insertions(insertions, filters, tmpdir='/tmp', debug=True, logger=Non
 
         if ins.num_sr() < filters['min_split_reads']:
             if debug: logger.debug('%s filtered due to min_split_reads: %d < %d' % (ins_debug_name, ins.num_sr(), filters['min_split_reads']))
+            exclude = True
+
+        elif ins.max_sr_per_bam() < filters['min_split_reads']:
+            if debug: logger.debug('%s filtered due to max sr across all bams < min_split_reads: %d < %d' % (ins_debug_name, ins.max_sr_per_bam(), filters['min_split_reads']))
             exclude = True
 
         if filters['exclude_bam']:

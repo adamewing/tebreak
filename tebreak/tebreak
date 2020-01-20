@@ -2222,6 +2222,8 @@ def run_chunk(args, bamlist, chrom, start, end):
         logger.debug('Chunk %s: Building clusters from %d split reads ...' % (chunkname, len(sr)))
         sr_overdense = False
 
+        args.sr_density = float(args.sr_density)*len(bamlist)
+
         if abs(start-end) > int(args.max_ins_reads):
             if len(sr)/float(abs(start-end)) > float(args.sr_density):
                 sr_overdense = True
@@ -3749,7 +3751,7 @@ if __name__ == '__main__':
     parser.add_argument('--min_mappability', default=0.1, help='minimum mappability (default = 0.1; only matters with --map_tabix)')
     parser.add_argument('--max_disc_fetch', default=50, help='maximum number of discordant reads to fetch per insertion site per BAM (default = 50)')
     parser.add_argument('--min_disc_reads', default=4, help='if using -d/--disco_target, minimum number of discordant reads to trigger a call (default = 4)')
-    parser.add_argument('--sr_density', default=5.0, help='maximum split read density in chunk (default = 5.0)')
+    parser.add_argument('--sr_density', default=5.0, help='maximum split read density in chunk (default = 2.0)')
 
     parser.add_argument('--min_ins_match', default=0.90, help="(output) minumum match to insertion library (default 0.90)")
     parser.add_argument('--min_ref_match', default=0.98, help="(output) minimum match to reference genome (default 0.98)")

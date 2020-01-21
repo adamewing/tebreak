@@ -2592,12 +2592,6 @@ def tebreak(args):
             logger.info('discordant targets in: %s' % args.disco_target)
             chunks = genome.chunk(procs, pad=5000)
 
-            chunkout = re.sub('.bam$', '.tebreak.chunklist.out', os.path.basename(bamlist[0]))
-
-            with open(chunkout, 'w') as bugout:
-                for c in chunks:
-                    bugout.write('\t'.join(map(str, c)) + '\n')
-
             reslist = []
             for i, chunk in enumerate(chunks, 1):
                 res = pool.apply_async(disco_run_chunk, [args, chunk])
@@ -2611,7 +2605,7 @@ def tebreak(args):
 
             chunks = []
 
-            discfn = re.sub('.bam$', '.tebreak.disc.txt', os.path.basename(bamlist[0]))
+            discfn = os.path.basename(bamlist[0]).split('.')[0] + '.tebreak.disc.txt'
 
             if args.disc_out:
                 discfn = args.disc_out
@@ -2645,7 +2639,7 @@ def tebreak(args):
 
             chunks = []
 
-            discfn = re.sub('.bam$', '.tebreak.disc.txt', os.path.basename(bamlist[0]))
+            discfn = os.path.basename(bamlist[0]).split('.')[0] + '.tebreak.disc.txt'
 
             if args.disc_out:
                 discfn = args.disc_out
@@ -2675,7 +2669,7 @@ def tebreak(args):
 
     insertions = resolve_duplicates(insertions)
 
-    detailfn = re.sub('.bam$', '.tebreak.detail.out', os.path.basename(bamlist[0]))
+    detailfn = os.path.basename(bamlist[0]).split('.')[0] + '.tebreak.detail.out'
 
     if args.detail_out is not None:
         detailfn = args.detail_out
@@ -2684,7 +2678,7 @@ def tebreak(args):
 
     logger.info('Wrote detail output to %s' % detailfn)
 
-    pickoutfn = re.sub('.bam$', '.tebreak.pickle', os.path.basename(bamlist[0]))
+    pickoutfn = os.path.basename(bamlist[0]).split('.')[0] + '.tebreak.pickle'
 
     if args.pickle is not None:
         pickoutfn = args.pickle

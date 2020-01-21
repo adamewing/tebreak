@@ -1508,7 +1508,7 @@ def asm_rescue(fa):
     return fa
 
  
-def fetch_clipped_reads(bams, chrom, start, end, filters, logger=None, limit=500):
+def fetch_clipped_reads(bams, chrom, start, end, filters, logger=None):
     ''' Return list of SplitRead objects '''
     assert filters['min_minclip'] >= 2 
  
@@ -1552,18 +1552,10 @@ def fetch_clipped_reads(bams, chrom, start, end, filters, logger=None, limit=500
                         if N_count <= filters['max_N_consensus'] and splitqual(read) >= filters['min_MW_P'] and len(read.get_reference_positions()) > 0:
                             chrom = str(bam.getrname(read.tid))
 
-                            limited = False
-
-                            if position_counter[read.get_reference_positions()[0]] >= limit:
-                                limited = True
-
-                            if position_counter[read.get_reference_positions()[-1]] >= limit:
-                                limited = True
-
                             position_counter[read.get_reference_positions()[0]] += 1
                             position_counter[read.get_reference_positions()[-1]] += 1
                             
-                            if len(read.get_reference_positions()) > 0 and not limited:
+                            if len(read.get_reference_positions()) > 0:
                                 splitreads.append(SplitRead(chrom, read, bam.filename.decode(), minqual))
 
     if logger:
@@ -2215,7 +2207,7 @@ def run_chunk(args, bamlist, chrom, start, end):
      
         logger.debug('Processing chunk: %s ...' % chunkname)
         logger.debug('Chunk %s: Parsing split reads from bam(s): %s ...' % (chunkname, args.bam))
-        sr = fetch_clipped_reads(bams, chrom, start, end, filters, logger=logger, limit=int(args.clip_limit))
+        sr = fetch_clipped_reads(bams, chrom, start, end, filters, logger=logger)
 
         sr.sort()
 
@@ -3728,7 +3720,6 @@ if __name__ == '__main__':
     parser.add_argument('-u', '--use_pickle', default=None, help="pickle intermediate to use (skips breakpoint finding stage)")
 
     parser.add_argument('--minMWP', default=0.01, help='minimum Mann-Whitney P-value for split qualities (default = 0.01)')
-    parser.add_argument('--clip_limit', default=500, help='limit number of clipped reads gathered for each breakend (default = 500)')
     parser.add_argument('--min_minclip', default=3, help='min. shortest clipped bases per cluster (default = 3)')
     parser.add_argument('--min_maxclip', default=10, help='min. longest clipped bases per cluster (default = 10)')
     parser.add_argument('--min_sr_per_break', default=1, help='minimum split reads per breakend (default = 1)')
@@ -3745,7 +3736,7 @@ if __name__ == '__main__':
     parser.add_argument('--min_mappability', default=0.1, help='minimum mappability (default = 0.1; only matters with --map_tabix)')
     parser.add_argument('--max_disc_fetch', default=50, help='maximum number of discordant reads to fetch per insertion site per BAM (default = 50)')
     parser.add_argument('--min_disc_reads', default=4, help='if using -d/--disco_target, minimum number of discordant reads to trigger a call (default = 4)')
-    parser.add_argument('--sr_density', default=5.0, help='maximum split read density in chunk (default = 2.0)')
+    parser.add_argument('--sr_density', default=2.0, help='maximum split read density in chunk (default = 2.0)')
 
     parser.add_argument('--min_ins_match', default=0.90, help="(output) minumum match to insertion library (default 0.90)")
     parser.add_argument('--min_ref_match', default=0.98, help="(output) minimum match to reference genome (default 0.98)")

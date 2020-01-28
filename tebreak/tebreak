@@ -2597,7 +2597,7 @@ def tebreak(args):
 
             chunks = []
 
-            discfn = os.path.basename(bamlist[0]).split('.')[0] + '.tebreak.disc.txt'
+            discfn = '.'.join(os.path.basename(bamlist[0]).split('.')[:-1]) + '.tebreak.disc.txt'
 
             if args.disc_out:
                 discfn = args.disc_out
@@ -2631,7 +2631,7 @@ def tebreak(args):
 
             chunks = []
 
-            discfn = os.path.basename(bamlist[0]).split('.')[0] + '.tebreak.disc.txt'
+            discfn = '.'.join(os.path.basename(bamlist[0]).split('.')[:-1]) + '.tebreak.disc.txt'
 
             if args.disc_out:
                 discfn = args.disc_out
@@ -2661,7 +2661,7 @@ def tebreak(args):
 
     insertions = resolve_duplicates(insertions)
 
-    detailfn = os.path.basename(bamlist[0]).split('.')[0] + '.tebreak.detail.out'
+    detailfn = '.'.join(os.path.basename(bamlist[0]).split('.')[:-1]) + '.tebreak.detail.out'
 
     if args.detail_out is not None:
         detailfn = args.detail_out
@@ -2670,7 +2670,7 @@ def tebreak(args):
 
     logger.info('Wrote detail output to %s' % detailfn)
 
-    pickoutfn = os.path.basename(bamlist[0]).split('.')[0] + '.tebreak.pickle'
+    pickoutfn = '.'.join(os.path.basename(bamlist[0]).split('.')[:-1]) + '.tebreak.pickle'
 
     if args.pickle is not None:
         pickoutfn = args.pickle

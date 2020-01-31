@@ -2134,6 +2134,8 @@ def postprocess_insertions(insertions, filters, bwaref, bams, tmpdir='/tmp', gen
 
 
 def run_chunk(args, bamlist, chrom, start, end):
+    start_time = time.time()
+
     logger = logging.getLogger(__name__)
     if args.debug:
         logger.setLevel(logging.DEBUG)
@@ -2264,7 +2266,7 @@ def run_chunk(args, bamlist, chrom, start, end):
             logger.debug('Chunk %s: Summarising insertions ...' % chunkname)
             summarised_insertions = [summarise_insertion(ins) for ins in processed_insertions]
 
-            logger.debug('Finished chunk: %s' % chunkname)
+            logger.info('Finished chunk: %s, elapsed time: %0.1f sec' % (chunkname, time.time()-start_time))
 
             for bam in bams: bam.close()
             return summarised_insertions
@@ -2462,6 +2464,7 @@ def disco_cluster(forest, coords, mapping, min_size=4, max_spacing=250):
 
 def disco_run_chunk(args, chunk):
     ''' chunk is a list of (chrom, start, end) tuples '''
+
     logger = logging.getLogger(__name__)
     if args.debug:
         logger.setLevel(logging.DEBUG)

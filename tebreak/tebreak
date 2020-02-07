@@ -2698,9 +2698,10 @@ def filter(ins, args):
         passed = False
         ins.ins['filter'].append('no_ends')
 
-    if ins.out['Insert_Consensus_5p'] == ins.out['Insert_Consensus_3p'] == 'NA':
-        passed = False
-        ins.ins['filter'].append('insert_consensus')
+    if int(args.min_disc_reads) > 0:
+        if ins.out['Insert_Consensus_5p'] == ins.out['Insert_Consensus_3p'] == 'NA':
+            passed = False
+            ins.ins['filter'].append('insert_consensus')
 
     prox_len = [len(ins.ins['be1_prox_seq'])]
     if 'be2_prox_seq' in ins.ins:

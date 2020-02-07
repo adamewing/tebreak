@@ -2255,7 +2255,7 @@ def run_chunk(args, bamlist, chrom, start, end):
 
             for ins in insertions:
                 ins_debug_name = '%s:%d-%d' % (ins.be1.chrom, ins.min_supporting_base(), ins.max_supporting_base())
-                if int(args.min_disc_reads) > 0:
+                if int(args.max_disc_fetch) > 0:
                     logger.debug('Chunk: %s, fetch discordant mates for insertion %s ...' % (chunkname, ins_debug_name))
                     ins.fetch_discordant_reads(bams, logger=logger, max_fetch=int(args.max_disc_fetch))
                 ins.compile_info(bams, genotype=True)
@@ -2698,7 +2698,7 @@ def filter(ins, args):
         passed = False
         ins.ins['filter'].append('no_ends')
 
-    if int(args.min_disc_reads) > 0:
+    if int(args.max_disc_fetch) > 0:
         if ins.out['Insert_Consensus_5p'] == ins.out['Insert_Consensus_3p'] == 'NA':
             passed = False
             ins.ins['filter'].append('insert_consensus')
@@ -3403,7 +3403,7 @@ def prefilter(args, ins, uuids):
     if minmatch < float(args.min_ref_match):
         return 'minmatch'
 
-    if ins['INFO']['dr_count'] < int(args.min_disc_reads):
+    if ins['INFO']['dr_count'] < min(int(args.min_disc_reads), int(args.max_disc_fetch)):
         return 'mindisc'
 
     if ins['INFO']['be1_sr_count'] + ins['INFO']['be2_sr_count'] < int(args.min_split_reads):
@@ -3738,7 +3738,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_bam_count', default=0, help='maximum number of bams supporting per insertion')
     parser.add_argument('--map_tabix', default=None, help='tabix-indexed BED of mappability scores')
     parser.add_argument('--min_mappability', default=0.1, help='minimum mappability (default = 0.1; only matters with --map_tabix)')
-    parser.add_argument('--max_disc_fetch', default=50, help='maximum number of discordant reads to fetch per insertion site per BAM (default = 50)')
+    parser.add_argument('--max_disc_fetch', default=50, help='maximum number of discordant reads to fetch per insertion site per BAM (default = 50; 0 = disable fetch)')
     parser.add_argument('--min_disc_reads', default=4, help='if using -d/--disco_target, minimum number of discordant reads to trigger a call (default = 4)')
     parser.add_argument('--sr_density', default=2.0, help='maximum split read density in chunk (default = 2.0)')
 

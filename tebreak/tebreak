@@ -43,7 +43,7 @@ logger.setLevel(logging.INFO)
 
 
 class Genome:
-    def __init__(self, gfn, skip_chroms):
+    def __init__(self, gfn, skip_chroms, minlen=1e6):
         ''' gfn = genome file name (.fai or chrom, length tsv) '''
         self.chrlen = {} # length of each chromosome
  
@@ -53,9 +53,11 @@ class Genome:
             for line in g:
                 if not line.startswith('#'):
                     chrom, length = line.strip().split()[:2]
-                    if chrom not in skip_chroms:
+                    if chrom not in skip_chroms and int(length) > minlen:
                         self.chrlen[chrom] = int(length)
                         self.bp += int(length)
+                    else:
+                        logger.info('skipped chromosome in discordant search: %s' % chrom)
 
  
     def addpad(self, interval, pad):
@@ -2560,7 +2562,7 @@ def tebreak(args):
 
     pool = mp.Pool(processes=procs)
 
-    genome = Genome(args.bwaref + '.fai', skip_chroms)
+    genome = Genome(args.bwaref + '.fai', skip_chroms, minlen=int(args.min_chr_len))
 
     chunks = []
     bamlist = []
@@ -3729,6 +3731,7 @@ if __name__ == '__main__':
     parser.add_argument('--min_sr_per_break', default=1, help='minimum split reads per breakend (default = 1)')
     parser.add_argument('--min_consensus_score', default=0.9, help='quality of consensus alignment (default = 0.9)')
     parser.add_argument('--skip_chroms', default=None, help='skip chromsomes when finding discordant targets (.txt file)')
+    parser.add_argument('--min_chr_len', default=1e6, help='minimum chromosome length to consider in discordant site search (default = 1e6)')
     parser.add_argument('--max_ins_reads', default=1000, help='maximum number of reads to use per insertion call (default = 1000)')
     parser.add_argument('--min_split_reads', default=4, help='minimum total split reads per insertion call (default = 4)')
     parser.add_argument('--min_prox_mapq', default=10, help='minimum map quality for proximal subread (default = 10)')

@@ -69,7 +69,6 @@ def align(qryseq, refseq, elt='PAIR', minmatch=85.0):
     for pline in p.stdout.readlines():
         pline = pline.decode()
         if pline.startswith(elt):
-            #print pline.strip()
             c = pline.strip().split()
             if int(c[1]) > topscore and float(c[6]) >= minmatch:
                 topscore = int(c[1])
@@ -77,7 +76,6 @@ def align(qryseq, refseq, elt='PAIR', minmatch=85.0):
 
     os.remove(tgtfa)
     os.remove(qryfa)
-    #print ' '.join(cmd)
 
     return best
 
@@ -197,11 +195,14 @@ def main(args):
     if args.maptabix:
         maptabix = pysam.Tabixfile(args.maptabix)
 
+    out_fn = '.'.join(args.table.split('.')[:-1]) + '.filter.txt'
+    out_tab = open(out_fn, 'w')
+
     with open(args.table, 'r') as table:
         for i, line in enumerate(table):
             if i == 0:
                 header = line.strip().split('\t')
-                print(line.strip())
+                out_tab.write(line.strip() + '\tFilter\n')
 
             else:
                 rec = {}
@@ -232,47 +233,59 @@ def main(args):
 
                 out = True
 
+                reason = []
+
                 if rec['Insert_Consensus_5p'] == rec['Insert_Consensus_3p'] == 'NA':
                     logger.debug('Filtered %s: no insertion consensus mapped to insertion reference' % rec['UUID'])
                     out = False
+                    reason.append('NoConsMapRef')
 
                 if int(rec['3p_Cons_Len']) + int(rec['5p_Cons_Len']) < int(args.conslen):
                     logger.info('Filtered %s: total consensus length < %d' % (rec['UUID'], int(args.conslen)))
                     out = False
+                    reason.append('TotalConsLen')
 
                 if max(float(rec['5p_Elt_Match']), float(rec['3p_Elt_Match'])) < float(args.eltmatch):
                     logger.info('Filtered %s: max(5p_Elt_Match, 3p_Elt_Match) < %f' % (rec['UUID'], float(args.eltmatch)))
                     out = False
+                    reason.append('MinEltMatch')
 
                 if max(float(rec['5p_Genome_Match']), float(rec['3p_Genome_Match'])) < float(args.refmatch):
                     logger.info('Filtered %s: max(5p_Genome_Match, 3p_Genome_Match) < %f' % (rec['UUID'], float(args.refmatch)))
                     out = False
+                    reason.append('MinRefMatch')
 
                 if float(rec['Remapped_Discordant']) < int(args.numdiscord):
                     logger.info('Filtered %s: low discordant evidence (< %d reads)' % (rec['UUID'], int(args.numdiscord)))
                     out = False
+                    reason.append('MinDiscord')
 
                 if int(rec['Split_reads_5prime']) + int(rec['Split_reads_3prime']) < int(args.numsplit):
                     logger.info('Filtered %s: low split read evidence (< %d reads)' % (rec['UUID'], int(args.numsplit)))
                     out = False
+                    reason.append('MinSplit')
 
                 if levenshtein(rec['TSD_3prime'], rec['TSD_5prime']) > 1:
                     logger.info('Filtered %s: TSD mismatch: %s vs %s' % (rec['UUID'], rec['TSD_5prime'], rec['TSD_3prime']))
                     out = False
+                    reason.append('MismatchTSD')
 
                 elif (len(list(set(list(rec['TSD_3prime'])))) == 1 or len(list(set(list(rec['TSD_5prime'])))) == 1) and len(rec['TSD_3prime']) > 10:
                     logger.info('Filtered %s: TSD is a long homopolymer: %s' % (rec['UUID'], rec['TSD_3prime']))
                     out = False
+                    reason.append('LongHomopolTSD')
 
                 if args.minlength:
                     if int(rec['TE_Align_End']) - int(rec['TE_Align_Start']) < int(args.minlength):
                         logger.info('Filtered %s: insertion shorter than %d bp' % (rec['UUID'], int(args.minlength)))
                         out = False
+                        reason.append('MinTELength')
 
                 if args.minvaf:
                     maxvaf = 0.0
                     if rec['Genotypes'] == 'NA':
                         out = False
+                        reason.append('MissingVAF')
                     
                     else:
                         for gt in rec['Genotypes'].split(','):
@@ -282,18 +295,21 @@ def main(args):
                     if maxvaf < float(args.minvaf):
                         logger.info('Filtered %s: no genotype with VAF > %f' % (rec['UUID'], float(args.minvaf)))
                         out = False
+                        reason.append('MinVAF')
 
                 if args.fracend is not None and rec['Genomic_Consensus_3p'] != 'NA' and rec['TE_Align_End'] != 'NA':
                     fracend = float(len(inslib[ins_id]) - int(rec['TE_Align_End'])) / float(len(inslib[ins_id]))
                     if fracend > float(args.fracend):
                         logger.info('Filtered %s: fracend %f > %f' % (rec['UUID'], fracend, float(args.fracend)))
                         out = False
+                        reason.append('FracEnd')
 
                 if args.maxvars is not None and 'Variants' in rec:
                     numvars = len(rec['Variants'].split(','))
                     if numvars > int(args.maxvars):
                         logger.info('Filtered %s: too many variants (%d)' % (rec['UUID'], numvars))
                         out = False
+                        reason.append('MaxVars')
 
                 if out:
                     if args.tabix is not None:
@@ -302,6 +318,7 @@ def main(args):
                                 if len(list(posfilter.fetch(rec['Chromosome'], int(rec['Left_Extreme']), int(rec['Right_Extreme'])))) > 0:
                                     logger.info('Filtered %s: overlaps position filter %s' % (rec['UUID'], args.tabix))
                                     out = False
+                                    reason.append('PositionFilter')
 
                     if args.refgene is not None:
                         gene_tbx = pysam.Tabixfile(args.refgene)
@@ -314,13 +331,14 @@ def main(args):
                             if gene in gene_overlaps:
                                 logger.info('Filtered %s: overlaps refgenes' % rec['UUID'])
                                 out = False
-
+                                reason.append('OverlapRefgene')
                 
                 if out and args.maptabix:
                     mapscore = avgmap(maptabix, rec['Chromosome'], int(rec['Left_Extreme']), int(rec['Right_Extreme']))
                     if mapscore < 0.5:
                         logger.info('Filtered %s: mappability low' % rec['UUID'])
                         out = False
+                        reason.append('LowMap')
 
 
                 if out:
@@ -334,6 +352,7 @@ def main(args):
                         if hp[1] > 20:
                             logger.info('Filtered %s: homopolymer in insertion site' % rec['UUID'])
                             out = False
+                            reason.append('HomopolSite')
 
                 if out:
                     refseq = ref.fetch(rec['Chromosome'],max((int(rec['Left_Extreme'])-100),1),int(rec['Right_Extreme'])+100)
@@ -346,6 +365,7 @@ def main(args):
                     if self_align:
                         logger.info('Filtered %s: self-match between genome and refelt: %s' % (rec['UUID'], str(self_align)))
                         out = False
+                        reason.append('SelfAlign')
 
                 if out:
                     # realignment
@@ -485,11 +505,13 @@ def main(args):
                     if new_3p_orient == new_5p_orient == 'NA':
                         logger.info('Filtered %s: no orientation' % rec['UUID'])
                         out = False
+                        reason.append('NoOrient')
 
                     if args.require_realign:
                         if 'NA' in (rec['Orient_5p'], rec['Orient_3p']):
                             logger.info('Filtered %s: missing orientation (filtered due to --require_align)' % rec['UUID'])
                             out = False
+                            reason.append('RequireAlign')
 
                     if 'NA' not in (new_5p_orient, new_3p_orient) and 'None' not in (rec['Orient_5p'], rec['Orient_3p']):
                         if rec['Orient_5p'] != rec['Orient_3p']:
@@ -504,14 +526,20 @@ def main(args):
                     if flip:
                         rec = flip_ends(rec)
 
-                    if out:
-                        print('\t'.join([rec[h] for h in header]))
+                out_line = '\t'.join([rec[h] for h in header])
+
+                if out:
+                    reason.append('PASS')
+                out_line += '\t%s' % ','.join(reason)
+
+                out_tab.write(out_line + '\n')
 
 
     logger.info('Changed orientation on %d 5p ends' % count_5p_diff)
     logger.info('Changed orientation on %d 3p ends' % count_3p_diff)
     logger.info('Used insertion consensus for %d 5p ends' % count_5p_switchcons)
     logger.info('Used insertion consensus for %d 3p ends' % count_3p_switchcons)
+    logger.info('Filtered results written to %s' % out_fn)
 
 
 if __name__ == '__main__':

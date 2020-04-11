@@ -38,7 +38,7 @@ class Genome:
         return (chrom, start, end)
 
 
-    def chunk(self, n, seed=None, sorted=True, pad=0):
+    def chunk(self, n, seed=None, sorted=True, pad=0, minlen=1e6):
         ''' break genome into n evenly-sized chunks, return n lists of (chrom, start, end) '''
         chunklen = int(self.bp/n)
         
@@ -47,7 +47,7 @@ class Genome:
  
         chunkleft = chunklen # track how much genome needs to go into each chunk
  
-        chromlist = self.chrlen.keys()
+        chromlist = list(self.chrlen.keys())
  
         if sorted:
             chromlist.sort()
@@ -57,6 +57,8 @@ class Genome:
  
         for chrom in chromlist:
             length = self.chrlen[chrom]
+            if length < minlen:
+                continue
  
             lenleft = length
             if length <= chunkleft:
@@ -98,7 +100,7 @@ class DiscoCoord:
         self.mend    = int(mend)
         self.mstrand = mstrand
         self.label   = label
-        self.bam     = bam_name
+        self.bam     = bam_name.decode()
 
         # if strand of genome element is '-', flip apparent mate strand
         elt_str = self.label.split('|')[-1]
@@ -436,7 +438,9 @@ def main(args):
         ins_list += res.get()
 
     ins_list = disco_resolve_dups(ins_list)
-    for i in ins_list: print i.out()
+
+    for i in ins_list:
+        print(i.out())
 
 
 if __name__ == '__main__':

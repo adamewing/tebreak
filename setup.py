@@ -72,7 +72,7 @@ if __name__ == '__main__':
 
 setup(
     name='TEBreak',
-    version='1.0',
+    version='1.1',
     author='Adam Ewing',
     author_email='adam.ewing@gmail.com',
     description=("Insertion finder for high throughput sequence data"),

@@ -202,7 +202,10 @@ def main(args):
         for i, line in enumerate(table):
             if i == 0:
                 header = line.strip().split('\t')
-                out_tab.write(line.strip() + '\tFilter\n')
+                if 'Filter' not in header:
+                    out_tab.write(line.strip() + '\tFilter\n')
+                else
+                    out_tab.write(line.strip())
 
             else:
                 rec = {}

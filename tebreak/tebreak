@@ -1121,6 +1121,8 @@ class Ins:
         if not self.out['Genotypes']:
             self.out['Genotypes'] = 'NA'
 
+        self.out['Filter'] = 'NA'
+
     def assign35ends(self):
         self.out['5_Prime_End'] = 'NA'
         self.out['3_Prime_End'] = 'NA'
@@ -3425,101 +3427,273 @@ def prefilter(args, ins, uuids):
     return False
 
 
-def fix_orient(rec, inslib, ref):
+def hompol_scan(seq, base):
+    ''' return start and end coords of longest homopolymer run'''
+    max_hompol = []
+    cur_hompol = []
+
+    for i, b in enumerate(seq.upper()):
+        if b == base:
+            cur_hompol.append(i)
+        else:
+            if len(cur_hompol) > len(max_hompol):
+                max_hompol = cur_hompol
+            cur_hompol = []
+
+    if len(cur_hompol) > len(max_hompol):
+        max_hompol = cur_hompol
+
+    if len(max_hompol) > 0:
+        return min(max_hompol), max(max_hompol)-min(max_hompol)
+    else:
+        return 0,0
+
+
+def levenshtein(s1, s2):
+    ''' from https://en.wikibooks.org/wiki/Algorithm_Implementation/Strings/Levenshtein_distance#Python '''
+    if len(s1) < len(s2):
+        return levenshtein(s2, s1)
+
+    # len(s1) >= len(s2)
+    if len(s2) == 0:
+        return len(s1)
+
+    previous_row = range(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1 # j+1 instead of j since previous_row and current_row are one character longer
+            deletions = current_row[j] + 1       # than s2
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+    
+    return previous_row[-1]
+
+
+def final_filter(args, rec, inslib, ref):
+    if args.map_tabix:
+        maptabix = pysam.Tabixfile(args.map_tabix)
+
     ins_id = '%s:%s' % (rec['Superfamily'], rec['Subfamily'])
 
-    refseq = ref.fetch(rec['Chromosome'], int(rec['Left_Extreme']), int(rec['Right_Extreme']))
-
-    elt_5p_align = exonerate_align(rec['Genomic_Consensus_5p'], inslib[ins_id])
-    elt_3p_align = exonerate_align(rec['Genomic_Consensus_3p'], inslib[ins_id])
-    gen_5p_align = exonerate_align(rec['Genomic_Consensus_5p'], refseq)
-    gen_3p_align = exonerate_align(rec['Genomic_Consensus_3p'], refseq)
-
-    # try using the insertion-based consensus if no luck with the genomic one
-    if not elt_5p_align or not gen_5p_align:
-        retry_elt_5p_align = exonerate_align(rec['Insert_Consensus_5p'], inslib[ins_id])
-        retry_gen_5p_align = exonerate_align(rec['Insert_Consensus_5p'], refseq)
-
-        if retry_gen_5p_align and retry_elt_5p_align:
-            elt_5p_align = retry_elt_5p_align
-            gen_5p_align = retry_gen_5p_align
+    if ins_id not in inslib:
+        logger.warn('No insertion identification for %s (ins_id %s)' % (rec['UUID'], ins_id))
+        rec['Filter'] = 'UnknownInsType'
+        return rec
 
 
-    if not elt_3p_align or not gen_3p_align:
-        retry_elt_3p_align = exonerate_align(rec['Insert_Consensus_3p'], inslib[ins_id])
-        retry_gen_3p_align = exonerate_align(rec['Insert_Consensus_3p'], refseq)
+    out = True
 
-        if retry_gen_3p_align and retry_elt_3p_align:
-            elt_3p_align = retry_elt_3p_align
-            gen_3p_align = retry_gen_3p_align
+    reason = []
 
+    if rec['Insert_Consensus_5p'] == rec['Insert_Consensus_3p'] == 'NA':
+        logger.debug('Filtered %s: no insertion consensus mapped to insertion reference' % rec['UUID'])
+        out = False
+        reason.append('NoConsMapRef')
 
-    elt_5p_orient = 'NA'
-    elt_3p_orient = 'NA'
-    gen_5p_orient = 'NA'
-    gen_3p_orient = 'NA'
+    if int(rec['3p_Cons_Len']) + int(rec['5p_Cons_Len']) < int(args.min_cons_len):
+        logger.debug('Filtered %s: total consensus length < %d' % (rec['UUID'], int(args.min_cons_len)))
+        out = False
+        reason.append('TotalConsLen')
 
-    if elt_5p_align:
-        elt_5p_orient = elt_5p_align[-1]
+    if max(float(rec['5p_Elt_Match']), float(rec['3p_Elt_Match'])) < float(args.min_ins_match):
+        logger.debug('Filtered %s: max(5p_Elt_Match, 3p_Elt_Match) < %f' % (rec['UUID'], float(args.min_ins_match)))
+        out = False
+        reason.append('MinEltMatch')
 
-    if elt_3p_align:
-        elt_3p_orient = elt_3p_align[-1]
+    if max(float(rec['5p_Genome_Match']), float(rec['3p_Genome_Match'])) < float(args.min_ref_match):
+        logger.debug('Filtered %s: max(5p_Genome_Match, 3p_Genome_Match) < %f' % (rec['UUID'], float(args.min_ref_match)))
+        out = False
+        reason.append('MinRefMatch')
 
-    if gen_5p_align:
-        gen_5p_orient = gen_5p_align[-1]
+    if float(rec['Remapped_Discordant']) < int(args.min_disc_reads):
+        logger.debug('Filtered %s: low discordant evidence (< %d reads)' % (rec['UUID'], int(args.min_disc_reads)))
+        out = False
+        reason.append('MinDiscord')
 
-    if gen_3p_align:
-        gen_3p_orient = gen_3p_align[-1]
+    if int(rec['Split_reads_5prime']) + int(rec['Split_reads_3prime']) < int(args.min_split_reads):
+        logger.debug('Filtered %s: low split read evidence (< %d reads)' % (rec['UUID'], int(args.min_split_reads)))
+        out = False
+        reason.append('MinSplit')
 
-    new_5p_orient = 'NA'
-    new_3p_orient = 'NA'
+    if levenshtein(rec['TSD_3prime'], rec['TSD_5prime']) > 1:
+        logger.debug('Filtered %s: TSD mismatch: %s vs %s' % (rec['UUID'], rec['TSD_5prime'], rec['TSD_3prime']))
+        out = False
+        reason.append('MismatchTSD')
 
-    if 'NA' not in (elt_5p_orient, gen_5p_orient):
-        if elt_5p_orient == gen_5p_orient:
-            new_5p_orient = '+'
+    elif (len(list(set(list(rec['TSD_3prime'])))) == 1 or len(list(set(list(rec['TSD_5prime'])))) == 1) and len(rec['TSD_3prime']) > 10:
+        logger.debug('Filtered %s: TSD is a long homopolymer: %s' % (rec['UUID'], rec['TSD_3prime']))
+        out = False
+        reason.append('LongHomopolTSD')
+
+    if args.minlength:
+        if int(rec['TE_Align_End']) - int(rec['TE_Align_Start']) < int(args.minlength):
+            logger.debug('Filtered %s: insertion shorter than %d bp' % (rec['UUID'], int(args.minlength)))
+            out = False
+            reason.append('MinTELength')
+
+    if args.minvaf:
+        maxvaf = 0.0
+        if rec['Genotypes'] == 'NA':
+            out = False
+            reason.append('MissingVAF')
+        
         else:
-            new_5p_orient = '-'
+            for gt in rec['Genotypes'].split(','):
+                gt_sample, gt_pos, gt_neg, gt_vaf = gt.split('|')
+                if float(gt_vaf) > maxvaf:
+                    maxvaf = float(gt_vaf)
+        if maxvaf < float(args.minvaf):
+            logger.debug('Filtered %s: no genotype with VAF > %f' % (rec['UUID'], float(args.minvaf)))
+            out = False
+            reason.append('MinVAF')
 
-    if 'NA' not in (elt_3p_orient, gen_3p_orient):
-        if elt_3p_orient == gen_3p_orient:
-            new_3p_orient = '+'
-        else:
-            new_3p_orient = '-'
+    if args.fracend is not None and rec['Genomic_Consensus_3p'] != 'NA' and rec['TE_Align_End'] != 'NA':
+        fracend = float(len(inslib[ins_id]) - int(rec['TE_Align_End'])) / float(len(inslib[ins_id]))
+        if fracend > float(args.fracend):
+            logger.debug('Filtered %s: fracend %f > %f' % (rec['UUID'], fracend, float(args.fracend)))
+            out = False
+            reason.append('FracEnd')
 
-    coords_5p = []
-    coords_3p = []
+    if args.maxvars is not None and 'Variants' in rec:
+        numvars = len(rec['Variants'].split(','))
+        if numvars > int(args.maxvars):
+            logger.debug('Filtered %s: too many variants (%d)' % (rec['UUID'], numvars))
+            out = False
+            reason.append('MaxVars')
+    
+    if out and args.map_tabix:
+        mapscore = avgmap(maptabix, rec['Chromosome'], int(rec['Left_Extreme']), int(rec['Right_Extreme']))
+        if mapscore < 0.5:
+            logger.debug('Filtered %s: mappability low' % rec['UUID'])
+            out = False
+            reason.append('LowMap')
 
-    if elt_5p_align:
-        coords_5p = sorted(map(int, (elt_5p_align[4], elt_5p_align[5])))
+    if out:
+        left = min(int(rec['5_Prime_End']), int(rec['3_Prime_End'])) - 20
+        right = max(int(rec['5_Prime_End']), int(rec['3_Prime_End'])) + 20
+        refseq = ref.fetch(rec['Chromosome'], left, right)
 
-    if elt_3p_align:
-        coords_3p = sorted(map(int, (elt_3p_align[4], elt_3p_align[5])))
+        for b in ('A', 'T', 'C', 'G'):
+            hp = hompol_scan(refseq, b)
+            #print hp, refseq
+            if hp[1] > 20:
+                logger.debug('Filtered %s: homopolymer in insertion site' % rec['UUID'])
+                out = False
+                reason.append('HomopolSite')
 
-    flip = False
-    if coords_5p and coords_3p and coords_5p[1] > coords_3p[1]:
-        flip = True
+    if out:
+        refseq = ref.fetch(rec['Chromosome'],max((int(rec['Left_Extreme'])-100),1),int(rec['Right_Extreme'])+100)
 
-    if rec['Orient_5p'] != new_5p_orient:
-        logger.info('Changed 5p orientation for %s' % rec['UUID'])
+        # check that the reference genome region doesn't have a good match to the reference element sequence
+        # inslib[ins_id] vs refseq
 
-    if rec['Orient_3p'] != new_3p_orient:
-        logger.info('Changed 3p orientation for %s' % rec['UUID'])
+        self_align = exonerate_align(inslib[ins_id], refseq, minmatch=95)
 
-    rec['Orient_5p'] = new_5p_orient
-    rec['Orient_3p'] = new_3p_orient
+        if self_align:
+            logger.debug('Filtered %s: self-match between genome and refelt: %s' % (rec['UUID'], str(self_align)))
+            out = False
+            reason.append('SelfAlign')
 
-    if 'NA' not in (new_5p_orient, new_3p_orient) and 'None' not in (rec['Orient_5p'], rec['Orient_3p']):
-        if rec['Orient_5p'] != rec['Orient_3p']:
-            rec['Inversion'] = 'Y'
+    if out:
+        refseq = ref.fetch(rec['Chromosome'], int(rec['Left_Extreme']), int(rec['Right_Extreme']))
+
+        elt_5p_align = exonerate_align(rec['Genomic_Consensus_5p'], inslib[ins_id])
+        elt_3p_align = exonerate_align(rec['Genomic_Consensus_3p'], inslib[ins_id])
+        gen_5p_align = exonerate_align(rec['Genomic_Consensus_5p'], refseq)
+        gen_3p_align = exonerate_align(rec['Genomic_Consensus_3p'], refseq)
+
+        # try using the insertion-based consensus if no luck with the genomic one
+        if not elt_5p_align or not gen_5p_align:
+            retry_elt_5p_align = exonerate_align(rec['Insert_Consensus_5p'], inslib[ins_id])
+            retry_gen_5p_align = exonerate_align(rec['Insert_Consensus_5p'], refseq)
+
+            if retry_gen_5p_align and retry_elt_5p_align:
+                elt_5p_align = retry_elt_5p_align
+                gen_5p_align = retry_gen_5p_align
+
+
+        if not elt_3p_align or not gen_3p_align:
+            retry_elt_3p_align = exonerate_align(rec['Insert_Consensus_3p'], inslib[ins_id])
+            retry_gen_3p_align = exonerate_align(rec['Insert_Consensus_3p'], refseq)
+
+            if retry_gen_3p_align and retry_elt_3p_align:
+                elt_3p_align = retry_elt_3p_align
+                gen_3p_align = retry_gen_3p_align
+
+
+        elt_5p_orient = 'NA'
+        elt_3p_orient = 'NA'
+        gen_5p_orient = 'NA'
+        gen_3p_orient = 'NA'
+
+        if elt_5p_align:
+            elt_5p_orient = elt_5p_align[-1]
+
+        if elt_3p_align:
+            elt_3p_orient = elt_3p_align[-1]
+
+        if gen_5p_align:
+            gen_5p_orient = gen_5p_align[-1]
+
+        if gen_3p_align:
+            gen_3p_orient = gen_3p_align[-1]
+
+        new_5p_orient = 'NA'
+        new_3p_orient = 'NA'
+
+        if 'NA' not in (elt_5p_orient, gen_5p_orient):
+            if elt_5p_orient == gen_5p_orient:
+                new_5p_orient = '+'
+            else:
+                new_5p_orient = '-'
+
+        if 'NA' not in (elt_3p_orient, gen_3p_orient):
+            if elt_3p_orient == gen_3p_orient:
+                new_3p_orient = '+'
+            else:
+                new_3p_orient = '-'
+
+        coords_5p = []
+        coords_3p = []
+
+        if elt_5p_align:
+            coords_5p = sorted(map(int, (elt_5p_align[4], elt_5p_align[5])))
+
+        if elt_3p_align:
+            coords_3p = sorted(map(int, (elt_3p_align[4], elt_3p_align[5])))
+
+        flip = False
+        if coords_5p and coords_3p and coords_5p[1] > coords_3p[1]:
+            flip = True
+
+        if rec['Orient_5p'] != new_5p_orient:
+            logger.debug('Changed 5p orientation for %s' % rec['UUID'])
+
+        if rec['Orient_3p'] != new_3p_orient:
+            logger.debug('Changed 3p orientation for %s' % rec['UUID'])
+
+        rec['Orient_5p'] = new_5p_orient
+        rec['Orient_3p'] = new_3p_orient
+
+        if 'NA' not in (new_5p_orient, new_3p_orient) and 'None' not in (rec['Orient_5p'], rec['Orient_3p']):
+            if rec['Orient_5p'] != rec['Orient_3p']:
+                rec['Inversion'] = 'Y'
+            else:
+                rec['Inversion'] = 'N'
+
         else:
             rec['Inversion'] = 'N'
 
-    else:
-        rec['Inversion'] = 'N'
 
+        if flip:
+            rec = flip_ends(rec)
 
-    if flip:
-        rec = flip_ends(rec)
+    if out:
+        reason.append('PASS')
+
+    rec['Filter'] = ','.join(reason)
 
     return rec
 
@@ -3584,7 +3758,7 @@ def resolve(args):
 
         else:
             prefilter_reasons.append(prefiltered)
-            if args.ignore_filters:
+            if args.ignore_prefilters:
                 ins['filter'] = [prefiltered]
                 insertions.append(ins)
 
@@ -3664,26 +3838,26 @@ def resolve(args):
 
     with open(out_table_fn, 'w') as out_table:
         if len(final_insertions) > 0:
-            if args.ignore_filters:
-                final_insertions[0].out['Filters'] = 'NA'
+            if args.ignore_prefilters:
+                final_insertions[0].out['Prefilters'] = 'NA'
 
             out_table.write('%s\n' % final_insertions[0].header())
 
         for ins in sorted(final_insertions):
             ins = filter(ins, args)
 
-            if args.ignore_filters:
-                ins.out['Filters'] = 'NA'
+            if args.ignore_prefilters:
+                ins.out['Prefilters'] = 'NA'
                 if not ins.ins['passedfilter']:
                     if ins.ins['filter']:
-                        ins.out['Filters'] = ','.join(ins.ins['filter'])
+                        ins.out['Prefilters'] = ','.join(ins.ins['filter'])
 
                 out_table.write('%s\n' % ins)
 
             elif ins.ins['passedfilter']:
                 # last-minute orientation fix
-                if not args.unmapped and not args.skip_orient_fix:
-                    ins.out = fix_orient(ins.out, inslib, ref)
+                if not args.unmapped and not args.skip_final_filter:
+                    ins.out = final_filter(args, ins.out, inslib, ref)
                 out_table.write('%s\n' % ins)
 
     return out_table_fn
@@ -3745,10 +3919,10 @@ if __name__ == '__main__':
     parser.add_argument('--min_disc_reads', default=4, help='if using -d/--disco_target, minimum number of discordant reads to trigger a call (default = 4)')
     parser.add_argument('--sr_density', default=2.0, help='maximum split read density in chunk (default = 2.0)')
 
-    parser.add_argument('--min_ins_match', default=0.90, help="(output) minumum match to insertion library (default 0.90)")
+    parser.add_argument('--min_ins_match', default=0.95, help="(output) minumum match to insertion library (default 0.90)")
     parser.add_argument('--min_ref_match', default=0.98, help="(output) minimum match to reference genome (default 0.98)")
     parser.add_argument('--min_cons_len', default=250, help='(output) min total consensus length (default=250)')
-    parser.add_argument('--ignore_filters', action='store_true', default=False, help='(output) unfiltered mode')
+    parser.add_argument('--ignore_prefilters', action='store_true', default=False, help='skip application of prefilters (most new results will be garbage)')
     parser.add_argument('-a', '--annotation_tabix', default=None, help="(output) can be comma-delimited list")
     parser.add_argument('--refoutdir', default=None, help="output directory for generating tebreak references (default=input basename)")
     parser.add_argument('--use_rg', action='store_true', default=False, help="(output) use RG instead of BAM filename for samples")
@@ -3758,7 +3932,11 @@ if __name__ == '__main__':
     parser.add_argument('--uuid_list', default=None, help='limit resolution to UUIDs in first column of input list (can be tabular output from previous run)')
     parser.add_argument('--callmuts', default=False, action='store_true', help='detect changes in inserted seq. vs ref. (requires bcftools)')
     parser.add_argument('--nogeno', default=False, action='store_true', help='do not output genotype calls')
-    parser.add_argument('--skip_orient_fix', default=False, action='store_true', help='do not apply fix for orientation')
+    parser.add_argument('--skip_final_filter', default=False, action='store_true', help='do not apply final filters or fix for orientation')
+    parser.add_argument('--fracend', default=None, help='filter insertions by distance to reference 3p end by fraction of length')
+    parser.add_argument('--maxvars', default=None, help='maximum number of variants in Variants column')
+    parser.add_argument('--minlength', default=None, help='minimum insertion length')
+    parser.add_argument('--minvaf', default=None, help='minimum VAF (one genotype must satisfy condition)')
 
     parser.add_argument('--tmpdir', default='/tmp', help='temporary directory (default = /tmp)')
     parser.add_argument('--pickle', default=None, help='pickle output name')

@@ -204,7 +204,7 @@ def main(args):
                 header = line.strip().split('\t')
                 if 'Filter' not in header:
                     out_tab.write(line.strip() + '\tFilter\n')
-                else
+                else:
                     out_tab.write(line.strip())
 
             else:

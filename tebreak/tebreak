@@ -1702,7 +1702,7 @@ def map_breakends(breakends, db, tmpdir='/tmp'):
             passed_parse = True
 
         except IOError as e:
-            sys.stderr.write("warning: pysam failed parse at read %d, modifying file and re-try...\n" % i)
+            logger.warning("warning: pysam failed parse at read %d, modifying file and re-try...\n" % i)
             sam.close()
             lines = []
             with open(tmp_sam, 'r') as sam:
@@ -1727,13 +1727,13 @@ def build_last_db(fa):
     ''' make db for LAST alignments '''
     subprocess.call(['lastdb', '-s', '4G', fa, fa])
     if not os.path.exists(fa + '.tis'):
-        sys.stderr.write('Warning: could not lastdb -4G %s %s\n' % (fa, fa))
+        logger.debug('Warning: could not lastdb -s -4G %s %s\n' % (fa, fa))
 
 
 def align_last(fa, db, e=20):
     ''' returns list of LASTResult objects '''
     if not os.path.exists(db + '.tis'):
-        sys.stderr.write('Warning: no lastdb index for %s\n' % db)
+        logger.debug('Warning: no lastdb index for %s\n' % db)
         return []
 
     last_cmd = ['lastal', '-e', str(e), db, fa]
@@ -2088,11 +2088,11 @@ def postprocess_insertions(insertions, filters, bwaref, bams, tmpdir='/tmp', gen
         retry_counter = 0 # minia might not be the most reliable option...
         while not os.path.exists(support_asm) and retry_counter < 10:
             retry_counter += 1
-            sys.stderr.write('***Assembly retry: %s:%d\n' % (ins.be1.chrom, ins.be1.breakpos))
+            logger.debug('***Assembly retry: %s:%d\n' % (ins.be1.chrom, ins.be1.breakpos))
             support_asm = minia(support_fq, tmpdir=tmpdir, rescue_asm=rescue_asm)
 
         if not os.path.exists(support_asm):
-            sys.stderr.write('***Assembly failed!: %s:%d\n' % (ins.be1.chrom, ins.be1.breakpos))
+            logger.debug('***Assembly failed!: %s:%d\n' % (ins.be1.chrom, ins.be1.breakpos))
 
         else:
             ins.improve_consensus(support_asm, bwaref, tmpdir=tmpdir)

@@ -1466,7 +1466,7 @@ def joinseqs(seq1, seq2, minscore=0.95, minlen=20):
 
     try:
         aln_res = skalign.local_pairwise_align_ssw(seq1_dna, seq2_dna)
-    except IndexError:
+    except (IndexError, ValueError):
         return None, 0.0, 0
 
     aln_tab = aln_res[0]
@@ -2866,7 +2866,7 @@ def consensus(seqs, minscore=0.9):
 
         try:
             aln_res = skalign.local_pairwise_align_ssw(s1, s2)
-        except IndexError:
+        except (IndexError, ValueError):
             continue
 
         aln_tab = aln_res[0]

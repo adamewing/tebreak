@@ -381,7 +381,7 @@ class SplitCluster(ReadCluster):
 
             try:
                 aln_res = skalign.local_pairwise_align_ssw(s1, s2)
-            except IndexError: # scikit-bio throws this if no bases align  >:|
+            except (IndexError, ValueError): # scikit-bio throws this if no bases align  >:|
                 return cons, 0.0
                 
             aln_tab = aln_res[0]

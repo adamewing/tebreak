@@ -34,14 +34,15 @@ header = [
 'Name',
 'Junc_5p',
 'Junc_3p',
-'TSD_Start_5p',
-'TSD_End_5p',
-'TSD_Start_3p',
-'TSD_End_3p',
-'VAF',
 'TSD_seq',
-'Empty_Site_Consensus'
+'Empty_Site_Consensus',
+'AltCount_5p',
+'AltCount_3p',
+'RefCount_5p',
+'RefCount_3p',
+'VAF'
 ]
+
 
 class Block:
     def __init__(self, tstart, tend):
@@ -305,14 +306,14 @@ class SplitCluster(ReadCluster):
         for seq in uniq_seqs[1:]:
 
             cons = cons.replace('N', 'A')
-            seq = cons.replace('N', 'A')
+            seq = seq.replace('N', 'A')
 
             s1 = skseq.DNA(cons)
             s2 = skseq.DNA(seq)
 
             try:
                 aln_res = skalign.local_pairwise_align_ssw(s1, s2)
-            except IndexError:
+            except:
                 return cons, 0.0
 
             aln_tab = aln_res[0]
@@ -375,7 +376,6 @@ class BreakEnd:
         return '%s:%d:%s:%s' % (self.chrom, self.breakpos, self.consensus, self.direction)
 
 
-
 def splitqual(read):
     ''' return Mann-Whitney P for clipped vs unclipped quals '''
     
@@ -407,7 +407,7 @@ def guess_minqual(bam):
     return minscore
 
 
-def fetch_clipped_reads(bam, chrom, start, end):
+def fetch_clipped_reads(bams, chrom, start, end):
     ''' Return list of SplitRead objects '''
  
     splitreads = []
@@ -419,29 +419,32 @@ def fetch_clipped_reads(bam, chrom, start, end):
 
     if start < 0: start = 0
 
-    minqual = guess_minqual(bam) # used for quality trimming when building consensus
+    minqual = guess_minqual(bams[0]) # used for quality trimming when building consensus
 
-    if chrom not in bam.references:
-        return splitreads
+    for bam in bams:
+        if chrom not in bam.references:
+            return splitreads
 
-    for read in bam.fetch(chrom, start, end):
 
-        if not read.is_unmapped and not read.is_duplicate and read.mapq > 0:
-            if read.rlen - read.alen >= 3: # 'soft' clipped?
- 
-                # length of 'minor' clip
-                altclip = min(read.qstart, read.rlen-read.qend)
+    for bam in bams:
+        for read in bam.fetch(chrom, start, end):
 
-                # junk bases
-                N_count = 0
-                if 'N' in read.seq: N_count = Counter(read.seq)['N']
- 
-                if altclip <= 2: # could add as a filter
-                    if N_count <= 2 and splitqual(read) >= 0.01:
-                        chrom = str(bam.getrname(read.tid))
+            if not read.is_unmapped and not read.is_duplicate and read.mapq > 0:
+                if read.rlen - read.alen >= 3: # 'soft' clipped?
+     
+                    # length of 'minor' clip
+                    altclip = min(read.qstart, read.rlen-read.qend)
 
-                        if len(read.get_reference_positions()) > 0:
-                            splitreads.append(SplitRead(chrom, read, bam.filename, minqual))
+                    # junk bases
+                    N_count = 0
+                    if 'N' in read.seq: N_count = Counter(read.seq)['N']
+     
+                    if altclip <= 2: # could add as a filter
+                        if N_count <= 2 and splitqual(read) >= 0.01:
+                            chrom = str(bam.getrname(read.tid))
+
+                            if len(read.get_reference_positions()) > 0:
+                                splitreads.append(SplitRead(chrom, read, bam.filename, minqual))
 
     return splitreads
 
@@ -522,7 +525,7 @@ def start_blat_server(blatref, port=9999):
     with open(dummy_fa, 'w') as dout:
         dout.write('>\n' + 'A'*100)
 
-    poll_cmd = ['gfClient', 'localhost', str(port), blatref, dummy_fa, dummy_psl]
+    poll_cmd = ['gfClient', 'localhost', str(port), os.path.dirname(blatref), dummy_fa, dummy_psl]
     poll_time = 10
 
     t = subprocess.Popen(poll_cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
@@ -558,7 +561,7 @@ def start_blat_server(blatref, port=9999):
     return port
 
 
-def blat(fasta, outpsl, port=9999, minScore=0, maxIntron=None):
+def blat(fasta, outpsl, blatrefdir, port=9999, minScore=0, maxIntron=None):
     ''' BLAT using gfClient utility '''
     cmd  = ['gfClient', 'localhost', str(port), '-nohead']
 
@@ -568,14 +571,14 @@ def blat(fasta, outpsl, port=9999, minScore=0, maxIntron=None):
     if minScore is not None:
         cmd.append('-minScore=' + str(minScore))
 
-    cmd += ['/', fasta, outpsl]
+    cmd += [blatrefdir, fasta, outpsl]
 
     p = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
     for line in p.stdout:
         pass
 
 
-def eval_break(breakend, direct, elt_chrom, elt_start, elt_end):
+def eval_break(blatrefdir, breakend, direct, elt_chrom, elt_start, elt_end):
     if breakend.direction != direct:
         return False
 
@@ -587,19 +590,20 @@ def eval_break(breakend, direct, elt_chrom, elt_start, elt_end):
     with open(fa_tmp, 'w') as fa_out:
         fa_out.write('>%s_%d\n%s\n' % (breakend.chrom, breakend.cluster.start, breakend.consensus))
 
-    blat(fa_tmp, psl_tmp)
+    blat(fa_tmp, psl_tmp, blatrefdir)
 
     with open(psl_tmp, 'r') as psl:
         for line in psl:
             rec = PSL(line.strip(), breakend.consensus)
             if float(rec.matches) / len(breakend.consensus) > 0.9:
-                if elt_chrom.lstrip('chr') == rec.tName.lstrip('chr') and int(rec.tStart) < elt_start + 50 and int(rec.tEnd) > elt_end-50:
+                # BLAT strips 'chr' prefix from PSL output
+                if elt_chrom.lstrip('chr') == rec.tName and int(rec.tStart) < elt_start + 50 and int(rec.tEnd) > elt_end-50:
                     out_psl = rec
 
-    os.remove(fa_tmp)
-    os.remove(psl_tmp)
+        os.remove(fa_tmp)
+        os.remove(psl_tmp)
 
-    return out_psl
+        return out_psl
 
 
 def tsd(psl, ref, b_left_init=0, b_right_init=0, max_iter=100):
@@ -620,10 +624,16 @@ def tsd(psl, ref, b_left_init=0, b_right_init=0, max_iter=100):
             b_right_pos = b_right_init + block.tstart
 
 
-    chrom = psl.tName.lstrip('chr')
+    chrom = 'chr' + psl.tName
 
     b_left  = b_left_pos 
     b_right = b_right_pos
+
+    if b_left < 0:
+        b_left = 0
+
+    if b_right < 0:
+        b_right = 0
 
     nt_l = ref.fetch(chrom, b_left, b_left+1)
     nt_r = ref.fetch(chrom, b_right, b_right+1)
@@ -760,14 +770,150 @@ def break_count(bam, chrom, poslist, minpad=5, flex=1, minmapq=10):
     return altcount, refcount
 
 
+def junc_search(bams, chrom, pos, end, window=200, minmapq=10):
+
+    junc_pos = []
+
+    for bam in bams:
+        for read in bam.fetch(chrom, pos-window, pos+window):
+            if read.mapq < minmapq:
+                continue
+
+            if end == 'L':
+                if read.cigartuples[-1][0] == 4:
+                    junc_pos.append(read.reference_end)
+
+            if end == 'R':
+                if read.cigartuples[0][0] == 4:
+                    junc_pos.append(read.reference_start)
+
+    if len(junc_pos) < 4:
+        logger.warning('no good junction candidate: %s %d %s' % (chrom, pos, end))
+        return pos
+
+    c = Counter(junc_pos)
+
+    best_junc = c.most_common()[0][0]
+    best_count = c.most_common()[0][1]
+
+    if best_count/len(junc_pos) < .5:
+        logger.warning('no good junction candidate: %s %d %s' % (chrom, pos, end))
+        return pos
+
+    return best_junc
+
+
+def support(bams, chrom, pos, end, tsd_len, margin=5, minmapq=10):
+    alt_count = 0
+    ref_count = 0
+
+    for bam in bams:
+        for read in bam.fetch(chrom, pos-margin-tsd_len, pos+margin+tsd_len):
+            if read.mapq < minmapq:
+                continue
+
+            if not read.is_unmapped and not read.is_duplicate:
+                if read.alen == read.rlen: # not clipped:
+                    if read.reference_start < pos-margin and read.reference_end > pos+margin:
+                        ref_count += 1
+
+                else:
+                    if end == 'L':
+                        if read.cigartuples[-1][0] == 4:
+                            #print(end, pos, pos-margin-tsd_len, pos+margin+tsd_len, read.reference_end)
+                            if pos-margin-tsd_len < read.reference_end and pos+margin+tsd_len > read.reference_end:
+                                alt_count += 1
+
+                    if end == 'R':
+                        if read.cigartuples[0][0] == 4:
+                            #print(end, pos, pos-margin-tsd_len, pos+margin+tsd_len, read.reference_start)
+                            if pos-margin-tsd_len < read.reference_start and pos+margin+tsd_len > read.reference_start:
+                                alt_count += 1
+
+    return alt_count, ref_count
+
+
+def ref_no_junc(args, chrom, start, end, orient, name):
+    bams = [pysam.AlignmentFile(bam) for bam in args.bam.split(',')]
+    ref = pysam.Fastafile(args.fastaref)
+
+
+    l_altcount, l_refcount = support(bams, chrom, int(start), 'L', 0)
+    r_altcount, r_refcount = support(bams, chrom, int(end), 'R', 0)
+
+    vaf = 0.0
+    if l_altcount + r_altcount + l_refcount + r_refcount > 0:
+        vaf = float(l_altcount + r_altcount) / float(l_altcount + r_altcount + l_refcount + r_refcount)
+
+    altcount_5p = l_altcount
+    altcount_3p = r_altcount
+
+    refcount_5p = l_refcount
+    refcount_3p = r_refcount
+
+    junc_5p = start
+    junc_3p = end
+
+    if orient == '-':
+        junc_5p, junc_3p = junc_3p, junc_5p
+        altcount_5p, altcount_3p = altcount_3p, altcount_5p
+        refcount_5p, refcount_3p = refcount_3p, refcount_5p
+
+    if args.persample is not None:
+        vaf = []
+
+        altcount_5p = []
+        altcount_3p = []
+        refcount_5p = []
+        refcount_3p = []
+
+        with open(args.persample) as samples:
+            for line in samples:
+                sbamfn, sname = line.strip().split()
+                sbam = [pysam.AlignmentFile(sbamfn)]
+
+                l_altcount, l_refcount = support(sbam, chrom, start, 'L', 0) 
+                r_altcount, r_refcount = support(sbam, chrom, end, 'R', 0)
+
+                svaf = 0.0
+                if l_altcount + r_altcount + l_refcount + r_refcount > 0:
+                    svaf = float(l_altcount + r_altcount) / float(l_altcount + r_altcount + l_refcount + r_refcount)
+
+                vaf.append('%s|%.3f' % (sname, svaf))
+
+                s_altcount_5p = l_altcount
+                s_altcount_3p = r_altcount
+                s_refcount_5p = l_refcount
+                s_refcount_3p = r_refcount
+
+                if orient == '-':
+                    s_altcount_5p, s_altcount_3p = s_altcount_3p, s_altcount_5p
+                    s_refcount_5p, s_refcount_3p = s_refcount_3p, s_refcount_5p
+
+                #print(sbamfn, l_altcount, l_refcount, r_altcount, r_refcount)
+
+                altcount_5p.append('%s|%d' % (sname, s_altcount_5p))
+                altcount_3p.append('%s|%d' % (sname, s_altcount_3p))
+                refcount_5p.append('%s|%d' % (sname, s_refcount_5p))
+                refcount_3p.append('%s|%d' % (sname, s_refcount_3p))
+
+        vaf = ','.join(vaf)
+        altcount_5p = ','.join(altcount_5p)
+        altcount_3p = ','.join(altcount_3p)
+        refcount_5p = ','.join(refcount_5p)
+        refcount_3p = ','.join(refcount_3p)
+
+    out = (chrom, start, end, orient, name, junc_5p, junc_3p, 'NA', 'NA', altcount_5p, altcount_3p, refcount_5p, refcount_3p, vaf)
+    return out
+
 
 def ref_ins(args, chrom, start, end, orient, name):
-    bam = pysam.AlignmentFile(args.bam)
+    bams = [pysam.AlignmentFile(bam) for bam in args.bam.split(',')]
     ref = pysam.Fastafile(args.fastaref)
 
     # Find the junction
 
-    start_splits = fetch_clipped_reads(bam, chrom, start-25, start+25)
+    start_splits = fetch_clipped_reads(bams, chrom, start-25, start+25)
     start_splits.sort()
     start_clusters = build_sr_clusters(start_splits)
     start_breaks = [build_breakends(c) for c in start_clusters]
@@ -776,17 +922,17 @@ def ref_ins(args, chrom, start, end, orient, name):
 
     for be in start_breaks:
         for b in be:
-            psl_rec = eval_break(b, 'right', chrom, start, end)
+            psl_rec = eval_break(os.path.dirname(args.blatref), b, 'right', chrom, start, end)
 
     if psl_rec is None:
-        end_splits = fetch_clipped_reads(bam, chrom, end-25, end+25)
+        end_splits = fetch_clipped_reads(bams, chrom, end-25, end+25)
         end_splits.sort()
         end_clusters = build_sr_clusters(end_splits)
         end_breaks = [build_breakends(c) for c in end_clusters]
 
         for be in end_breaks:
             for b in be:
-                psl_rec = eval_break(b, 'left', chrom, start, end)
+                psl_rec = eval_break(os.path.dirname(args.blatref), b, 'left', chrom, start, end)
 
     # Locate TSD if possible:
     # may need to jiggle the start location for TSD search
@@ -808,17 +954,30 @@ def ref_ins(args, chrom, start, end, orient, name):
                 tries = []
 
 
+        if 0 in best_tsd:
+            return ref_no_junc(args, chrom, start, end, orient, name)
+
         l_tsd_start, l_tsd_end, r_tsd_start, r_tsd_end, tsd_seq = best_tsd
 
-        l_refcount, l_altcount, l_vaf = getVAF(bam, chrom, (l_tsd_start, l_tsd_end))
-        r_refcount, r_altcount, r_vaf = getVAF(bam, chrom, (r_tsd_start, r_tsd_end))
+        l_junc = junc_search(bams, chrom, start, 'L')
+        r_junc = junc_search(bams, chrom, end, 'R')
 
-        vaf = ['0.0']
+        l_altcount, l_refcount = support(bams, chrom, l_junc, 'L', len(tsd_seq)) 
+        r_altcount, r_refcount = support(bams, chrom, r_junc, 'R', len(tsd_seq))
+
+        logger.info('%s:%d-%d  %s:%d-%d  %s  %d' % (chrom, start, end, chrom, l_tsd_end, r_tsd_start, psl_rec.cons, len(psl_rec.cons)))
+
+        vaf = 0.0
         if l_altcount + r_altcount + l_refcount + r_refcount > 0:
-            vaf = [str(float(l_altcount + r_altcount) / float(l_altcount + r_altcount + l_refcount + r_refcount))]
+            vaf = float(l_altcount + r_altcount) / float(l_altcount + r_altcount + l_refcount + r_refcount)
 
-        junc_5p = l_tsd_end
-        junc_3p = r_tsd_start
+        if vaf == 0.0:
+            return ref_no_junc(args, chrom, start, end, orient, name)
+
+        vaf = str(vaf)
+
+        junc_5p = l_junc
+        junc_3p = r_junc
 
         tsd_start_5p = l_tsd_start
         tsd_end_5p   = l_tsd_end
@@ -826,40 +985,67 @@ def ref_ins(args, chrom, start, end, orient, name):
         tsd_start_3p = r_tsd_start
         tsd_end_3p   = r_tsd_end
 
-        vaf_5p = l_vaf
-        vaf_3p = r_vaf
+        altcount_5p = l_altcount
+        altcount_3p = r_altcount
+
+        refcount_5p = l_refcount
+        refcount_3p = r_refcount
 
         if orient == '-':
             junc_5p, junc_3p = junc_3p, junc_5p
             tsd_start_5p, tsd_start_3p = tsd_start_3p, tsd_start_5p
             tsd_end_5p, tsd_end_3p = tsd_end_3p, tsd_end_5p
-            vaf_5p, vaf_3p = vaf_3p, vaf_5p
-
+            altcount_5p, altcount_3p = altcount_3p, altcount_5p
+            refcount_5p, refcount_3p = refcount_3p, refcount_5p
+            
 
         if args.persample is not None:
             vaf = []
 
+            altcount_5p = []
+            altcount_3p = []
+            refcount_5p = []
+            refcount_3p = []
+
             with open(args.persample) as samples:
                 for line in samples:
                     sbamfn, sname = line.strip().split()
-                    sbam = pysam.AlignmentFile(sbamfn)
+                    sbam = [pysam.AlignmentFile(sbamfn)]
 
-                    l_refcount, l_altcount, l_vaf = getVAF(sbam, chrom, (l_tsd_start, l_tsd_end))
-                    r_refcount, r_altcount, r_vaf = getVAF(sbam, chrom, (r_tsd_start, r_tsd_end))
+                    l_altcount, l_refcount = support(sbam, chrom, l_junc, 'L', len(tsd_seq)) 
+                    r_altcount, r_refcount = support(sbam, chrom, r_junc, 'R', len(tsd_seq))
 
                     svaf = 0.0
                     if l_altcount + r_altcount + l_refcount + r_refcount > 0:
                         svaf = float(l_altcount + r_altcount) / float(l_altcount + r_altcount + l_refcount + r_refcount)
 
-                    vaf.append('%s|%f' % (sname, svaf))
+                    vaf.append('%s|%.3f' % (sname, svaf))
 
-        vaf = ','.join(vaf)
+                    s_altcount_5p = l_altcount
+                    s_altcount_3p = r_altcount
+                    s_refcount_5p = l_refcount
+                    s_refcount_3p = r_refcount
 
-        out = (chrom, start, end, orient, name, junc_5p, junc_3p, tsd_start_5p, tsd_end_5p, tsd_start_3p, tsd_end_3p, vaf, tsd_seq, psl_rec.cons)
+                    if orient == '-':
+                        s_altcount_5p, s_altcount_3p = s_altcount_3p, s_altcount_5p
+                        s_refcount_5p, s_refcount_3p = s_refcount_3p, s_refcount_5p
+
+                    altcount_5p.append('%s|%d' % (sname, s_altcount_5p))
+                    altcount_3p.append('%s|%d' % (sname, s_altcount_3p))
+                    refcount_5p.append('%s|%d' % (sname, s_refcount_5p))
+                    refcount_3p.append('%s|%d' % (sname, s_refcount_3p))
+
+            vaf = ','.join(vaf)
+            altcount_5p = ','.join(altcount_5p)
+            altcount_3p = ','.join(altcount_3p)
+            refcount_5p = ','.join(refcount_5p)
+            refcount_3p = ','.join(refcount_3p)
+
+        out = (chrom, start, end, orient, name, junc_5p, junc_3p, tsd_seq.upper(), psl_rec.cons, altcount_5p, altcount_3p, refcount_5p, refcount_3p, vaf)
 
         return out
 
-    return None
+    return ref_no_junc(args, chrom, start, end, orient, name)
 
 
 def main(args):
@@ -875,28 +1061,28 @@ def main(args):
 
     with open(args.ins) as bed:
         for line in bed:
-            chrom, start, end, orient, name = line.strip().split()[:5]
+            chrom, start, end, name, orient = line.strip().split()[:5]
             start = int(start)
             end   = int(end)
 
-            assert orient in ('+','-')
+            assert orient in ('+','-'), orient
 
             res = pool.apply_async(ref_ins, [args, chrom, start, end, orient, name])
             results.append(res)
 
     output = []
+
     for res in results:
         out = res.get()
-        if out is not None:
-            output.append(out)
+        output.append(out)
 
     for out in output:
         print('\t'.join(map(str, out)))
 
-                 
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Find breakpoints, TSD, VAF, and read counts for reference insertions')
-    parser.add_argument('-b', '--bam', required=True, help='initial BAM for deletion discovery')
+    parser.add_argument('-b', '--bam', required=True, help='initial BAM(s) for deletion discovery')
     parser.add_argument('-i', '--ins', required=True, help='insertion locations (five columns required: chrom, start, end, strand, annotation')
     parser.add_argument('-r', '--blatref', required=True, help='BLAT reference')
     parser.add_argument('-f', '--fastaref', required=True, help='samtools faidx indexed genome fasta')

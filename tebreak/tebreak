@@ -1652,6 +1652,10 @@ def build_breakends(cluster, filters, tmpdir='/tmp'):
         for dir in ('left', 'right'):
             subcluster = cluster.subcluster_by_breakend([breakpos], direction=dir)
             if len(subcluster) >= filters['min_sr_per_break'] and subcluster.max_cliplen() >= filters['min_maxclip']:
+                
+                if filters['max_sr_per_break'] > 0 and len(subcluster) > filters['max_sr_per_break']:
+                    continue
+
                 seq     = subcluster.reads[0].read.seq
                 score   = 1.0
 
@@ -2192,6 +2196,7 @@ def run_chunk(args, bamlist, chrom, start, end):
             'min_maxclip':           int(args.min_maxclip),
             'min_minclip':           int(args.min_minclip),
             'min_sr_per_break':      int(args.min_sr_per_break),
+            'max_sr_per_break':      int(args.max_sr_per_break),
             'min_consensus_score':   float(args.min_consensus_score),
             'min_MW_P':              float(args.minMWP),
             'max_ins_reads':         int(args.max_ins_reads),
@@ -3903,6 +3908,7 @@ if __name__ == '__main__':
     parser.add_argument('--min_minclip', default=3, help='min. shortest clipped bases per cluster (default = 3)')
     parser.add_argument('--min_maxclip', default=10, help='min. longest clipped bases per cluster (default = 10)')
     parser.add_argument('--min_sr_per_break', default=1, help='minimum split reads per breakend (default = 1)')
+    parser.add_argument('--max_sr_per_break', default=1, help='maximum split reads per breakend (default = 0 [disabled])')
     parser.add_argument('--min_consensus_score', default=0.9, help='quality of consensus alignment (default = 0.9)')
     parser.add_argument('--skip_chroms', default=None, help='skip chromsomes when finding discordant targets (.txt file)')
     parser.add_argument('--min_chr_len', default=1e6, help='minimum chromosome length to consider in discordant site search (default = 1e6)')

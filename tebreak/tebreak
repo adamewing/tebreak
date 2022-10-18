@@ -1652,8 +1652,9 @@ def build_breakends(cluster, filters, tmpdir='/tmp'):
         for dir in ('left', 'right'):
             subcluster = cluster.subcluster_by_breakend([breakpos], direction=dir)
             if len(subcluster) >= filters['min_sr_per_break'] and subcluster.max_cliplen() >= filters['min_maxclip']:
-                
+
                 if filters['max_sr_per_break'] > 0 and len(subcluster) > filters['max_sr_per_break']:
+                    print('foo')
                     continue
 
                 seq     = subcluster.reads[0].read.seq
@@ -2015,7 +2016,8 @@ def summarise_insertion(ins):
 
 def filter_insertions(insertions, filters, tmpdir='/tmp', debug=True, logger=None):
     filtered = []
-    if logger is None: debug = False
+    if logger is None:
+        debug = False
 
     for ins in insertions:
         ins_debug_name = '%s:%d-%d' % (ins.be1.chrom, ins.min_supporting_base(), ins.max_supporting_base())
@@ -2076,7 +2078,8 @@ def filter_insertions(insertions, filters, tmpdir='/tmp', debug=True, logger=Non
                 if debug: logger.debug('%s filtered due to min_mappability: %d < %d' % (ins_debug_name, ins.mappability, filters['min_mappability']))
                 exclude = True
 
-        if not exclude: filtered.append(ins)
+        if not exclude:
+            filtered.append(ins)
 
     return filtered
 
@@ -2265,7 +2268,7 @@ def run_chunk(args, bamlist, chrom, start, end):
             for ins in insertions:
                 ins_debug_name = '%s:%d-%d' % (ins.be1.chrom, ins.min_supporting_base(), ins.max_supporting_base())
                 if int(args.max_disc_fetch) > 0:
-                    logger.debug('Chunk: %s, fetch discordant mates for insertion %s ...' % (chunkname, ins_debug_name))
+                    logger.debug('Chunk: %s, fetch discordant mates for insertion %s max %d ...' % (chunkname, ins_debug_name, int(args.max_disc_fetch)))
                     ins.fetch_discordant_reads(bams, logger=logger, max_fetch=int(args.max_disc_fetch))
                 ins.compile_info(bams, genotype=True)
 
@@ -3908,7 +3911,7 @@ if __name__ == '__main__':
     parser.add_argument('--min_minclip', default=3, help='min. shortest clipped bases per cluster (default = 3)')
     parser.add_argument('--min_maxclip', default=10, help='min. longest clipped bases per cluster (default = 10)')
     parser.add_argument('--min_sr_per_break', default=1, help='minimum split reads per breakend (default = 1)')
-    parser.add_argument('--max_sr_per_break', default=1, help='maximum split reads per breakend (default = 0 [disabled])')
+    parser.add_argument('--max_sr_per_break', default=0, help='maximum split reads per breakend (default = 0 [disabled])')
     parser.add_argument('--min_consensus_score', default=0.9, help='quality of consensus alignment (default = 0.9)')
     parser.add_argument('--skip_chroms', default=None, help='skip chromsomes when finding discordant targets (.txt file)')
     parser.add_argument('--min_chr_len', default=1e6, help='minimum chromosome length to consider in discordant site search (default = 1e6)')

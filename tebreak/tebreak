@@ -1292,8 +1292,11 @@ class Ins:
         self.out['Insert_Consensus_5p'] = 'NA'
         self.out['Insert_Consensus_3p'] = 'NA'
 
-        if self.end5 + '_cons_seq' in self.ins: self.out['Genomic_Consensus_5p'] = self.ins[self.end5 + '_cons_seq']
-        if self.end3 + '_cons_seq' in self.ins: self.out['Genomic_Consensus_3p'] = self.ins[self.end3 + '_cons_seq']
+        if self.end5 + '_cons_seq' in self.ins:
+            self.out['Genomic_Consensus_5p'] = self.ins[self.end5 + '_cons_seq']
+
+        if self.end3 + '_cons_seq' in self.ins:
+            self.out['Genomic_Consensus_3p'] = self.ins[self.end3 + '_cons_seq']
 
         if self.end5 + '_joined_cons' in self.ins:
             self.out['Genomic_Consensus_5p'] = self.ins[self.end5 + '_joined_cons']
@@ -1303,8 +1306,11 @@ class Ins:
             self.out['Genomic_Consensus_3p'] = self.ins[self.end3 + '_joined_cons']
             self.out['3p_Cons_Len'] = len(self.ins[self.end3 + '_joined_cons'])
 
-        if self.end5 + '_te_cons_seq' in self.ins: self.out['Insert_Consensus_5p'] = self.ins[self.end5 + '_te_cons_seq']
-        if self.end3 + '_te_cons_seq' in self.ins: self.out['Insert_Consensus_3p'] = self.ins[self.end3 + '_te_cons_seq']
+        if self.end5 + '_te_cons_seq' in self.ins:
+            self.out['Insert_Consensus_5p'] = self.ins[self.end5 + '_te_cons_seq']
+
+        if self.end3 + '_te_cons_seq' in self.ins:
+            self.out['Insert_Consensus_3p'] = self.ins[self.end3 + '_te_cons_seq']
 
 
     def end_align_flush(self, tolerance=2):
@@ -1853,15 +1859,19 @@ def minia(fq, tmpdir='/tmp', rescue_asm=False):
 
     ctg_fa_list = []
 
-    for param in ('1', '3'):
+    for param in ('1', '2'):
         ctgbase = tmpdir + '/tebreak.minia.%s' % str(uuid4())
 
-        cmd = ['minia', '-in', fq, '-abundance-min', param, '-no-length-cutoff', '-nb-cores', '1', '-out', ctgbase]
+        cmd = ['minia', '-in', fq, '-abundance-min', param, '-keep-isolated', '-nb-cores', '1', '-out', ctgbase]
 
         FNULL = open(os.devnull, 'w')
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=FNULL)
         for line in p.stdout:
             line = line.decode()
+
+            if line.strip().startswith('ERROR'):
+                logger.warning('minia failed with error: %s' % line.strip())
+
             if line.strip().startswith('max_length'):
                 max_len = int(line.strip()[-1]) 
 
@@ -3930,7 +3940,7 @@ if __name__ == '__main__':
     parser.add_argument('--min_disc_reads', default=4, help='if using -d/--disco_target, minimum number of discordant reads to trigger a call (default = 4)')
     parser.add_argument('--sr_density', default=2.0, help='maximum split read density in chunk (default = 2.0)')
 
-    parser.add_argument('--min_ins_match', default=0.95, help="(output) minumum match to insertion library (default 0.90)")
+    parser.add_argument('--min_ins_match', default=0.90, help="(output) minumum match to insertion library (default 0.90)")
     parser.add_argument('--min_ref_match', default=0.98, help="(output) minimum match to reference genome (default 0.98)")
     parser.add_argument('--min_cons_len', default=250, help='(output) min total consensus length (default=250)')
     parser.add_argument('--ignore_prefilters', action='store_true', default=False, help='skip application of prefilters (most new results will be garbage)')

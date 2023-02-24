@@ -40,9 +40,7 @@ make -C bcftools && sudo make install -C bcftools
 
 ## Minia (sequence assembler)
 ```
-wget http://gatb-tools.gforge.inria.fr/versions/bin/minia-2.0.3-Linux.tar.gz
-tar -xvf minia-2.0.3-Linux.tar.gz
-sudo mv minia-2.0.3-Linux/bin/{dbgh5,dbginfo,h5dump,minia} /somewhere/in/your/$PATH
+https://github.com/GATB/minia
 ```
 
 ## Exonerate (aligner)

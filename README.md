@@ -110,6 +110,8 @@ There's more than one way to do this, one option is to use [picard](https://broa
 java -jar picard.jar MarkDuplicates I=$RAWBAM O=$BAM M=metrics.out
 ```
 
+Another good option is to use [samblaster](https://github.com/GregoryFaust/samblaster).
+
 ## Build the relevant reference file(s)
 This example assumes hg19/GRCh37 without the 'chr' prefix). The following builds a reference containing the locations of relevant human repeatmasker annotations for discordant read pair discovery:
 ```

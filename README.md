@@ -109,7 +109,7 @@ Note that the BAM file (`$BAM`) passed to -b can be a comma delimited list of BA
 tebreak -b $BAM -r $REF -p $THREADS -d $TB/lib/hg19.te.disctgt.txt -m $TB/lib/hg19.centromere_telomere.bed --max_ins_reads 500 -i $TB/lib/teref.human.fa 
 ```
 
-## Filter the output (optional)
+## Filter the output (optional and depreciated - see "Filter" column)
 The results table (`$TABLE`) will contain false positives. If desired, it is possible reduce this with an included script at some cost in terms of sensitivity.
 
 ```

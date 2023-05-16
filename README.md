@@ -20,7 +20,7 @@ cd test && ./test.sh
 ```
 If you use the above method, make sure to activate the Conda environment first with `conda activate tebreak` whenever using tebreak.
 
-## Python libraries (if the conda solution an option):
+## Python libraries (if the conda solution is not an option):
 This assumes a working installation of `pip`. Many of these prerequisites can be satisfied through installing [anaconda](https://conda.io/docs/user-guide/install/download.html).
 
 ```

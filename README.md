@@ -8,7 +8,19 @@ Contact: adam.ewing@mater.uq.edu.au
 
 # Installation
 
-## Python libraries:
+## via conda (or [mamba](https://anaconda.org/conda-forge/mamba)):
+
+```
+git clone https://github.com/adamewing/tebreak.git
+cd tebreak
+conda env create -f tebreak.yml
+conda activate tebreak
+python setup.py install
+cd test && ./test.sh
+```
+If you use the above method, make sure to activate the Conda environment first with `conda activate tebreak` whenever using tebreak.
+
+## Python libraries (if the conda solution an option):
 This assumes a working installation of `pip`. Many of these prerequisites can be satisfied through installing [anaconda](https://conda.io/docs/user-guide/install/download.html).
 
 ```
@@ -61,6 +73,11 @@ Assuming `$TB` is the tebreak directory created by `git clone` or unzipping/unta
 
 ```
 tebreak -b $TB/test/data/example.ins.bam -r $TB/test/data/Homo_sapiens_chr4_50000000-60000000_assembly19.fasta -i $TB/lib/teref.human.fa
+
+```
+or
+```
+cd test && ./test.sh
 ```
 
 This will generate some output to the terminal and the following files should exist in your working directory:
@@ -115,6 +132,29 @@ The results table (`$TABLE`) will contain false positives. If desired, it is pos
 ```
 $TB/scripts/general_filter.py -t $TABLE -i $TB/lib/teref.human.fa -r $REF --numsplit 4 --numdiscord 4 > $FILTEREDTABLE
 ```
+
+## Values in the Filter column
+
+|Filter         | Description                                                                                                       |
+|---------------|-------------------------------------------------------------------------------------------------------------------|
+|UnknownInsType | Combination of Superfamily and Subfamily does not appear in insertion library                                     |
+|NoConsMapRef   | No insertion consensus sequences match the insertion reference                                                    |
+|TotalConsLen   | Total consensus length is less than minimum set by `--min_cons_len`                                               |
+|MinEltMatch    | Best match to reference element is less than `--min_ins_match`                                                    |
+|MinRefMatch    | Best match to reference genome is less than `--min_ref_match`                                                     |
+|MinDiscord     | Number of discordant reads is less than `--min_disc_reads`                                                        |
+|MinSplit       | Number of split reads is less than `--min_split_reads`                                                            |
+|MismatchTSD    | 5-prime and 3-prime TSD sequences do not match                                                                    |
+|LongHomopolTSD | TSD is a long homopolymer (greater than 10 bases)                                                                 |
+|MinTELength    | Insertion is shorter than `--minlength`                                                                           |
+|MissingVAF     | Genotyping not possible (no TSD), only occurs with `--minvaf` set                                                 |
+|MinVAF         | Maximum VAF less than `--minvaf` (only occurs if set)                                                             |
+|FracEnd        | 3-prime end of TE alignment not not occur within `--fracend` percent of ref TE end (only occurs with `--fracend`) |
+|MaxVars        | More than `--maxvars` variants versus TE reference (only occurs if set)                                           |
+|LowMap         | Mappability low (less than 0.5), only occurs if `--map_tabix` is set                                              |
+|HomopolSite    | Insertion site contains a homopolymer greater than 20bp                                                           |
+|SelfAlign      | Reference genome has a better than 95% match to reference TE via exonerate                                        |
+|PASS           | Good to go!                                                                                                       |
 
 ## Annotate the output (optional)
 Finally, a script is included to annotate the TEBreak table. A useful included annotation source is the list of known non-reference insertions detected in human (hg19/GRCh37 coordinates).

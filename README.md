@@ -15,7 +15,7 @@ git clone https://github.com/adamewing/tebreak.git
 cd tebreak
 conda env create -f tebreak.yml
 conda activate tebreak
-python setup.py install
+pip install -e $PWD
 cd test && ./test.sh
 ```
 If you use the above method, make sure to activate the Conda environment first with `conda activate tebreak` whenever using tebreak.
